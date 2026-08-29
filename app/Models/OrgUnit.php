@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace App\Models;
 
-use App\Engines\Audit\Concerns\Auditable;
-use App\Engines\Access\Concerns\Scopeable;
-use App\Engines\Audit\Concerns\HasActivity;
 use App\Engines\Access\Concerns\BelongsToOrganization;
+use App\Engines\Access\Concerns\Scopeable;
+use App\Engines\Audit\Concerns\Auditable;
+use App\Engines\Audit\Concerns\HasActivity;
 use App\Support\Enums\OrgUnitType;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;

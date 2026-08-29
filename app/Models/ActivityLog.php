@@ -68,14 +68,10 @@ class ActivityLog extends Model
     public function dotClasses(): string
     {
         return match (true) {
-            in_array($this->verb, ['approved', 'signed', 'completed', 'closed', 'verified'], true)
-                => 'bg-emerald-500',
-            in_array($this->verb, ['rejected', 'cancelled', 'deleted', 'overdue'], true)
-                => 'bg-rose-500',
-            in_array($this->verb, ['submitted', 'requested_revision', 'escalated'], true)
-                => 'bg-amber-500',
-            in_array($this->verb, ['assigned', 'reassigned', 'shared'], true)
-                => 'bg-sky-500',
+            in_array($this->verb, ['approved', 'signed', 'completed', 'closed', 'verified'], true) => 'bg-emerald-500',
+            in_array($this->verb, ['rejected', 'cancelled', 'deleted', 'overdue'], true) => 'bg-rose-500',
+            in_array($this->verb, ['submitted', 'requested_revision', 'escalated'], true) => 'bg-amber-500',
+            in_array($this->verb, ['assigned', 'reassigned', 'shared'], true) => 'bg-sky-500',
             default => 'bg-slate-400',
         };
     }

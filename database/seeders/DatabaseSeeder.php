@@ -23,7 +23,7 @@ class DatabaseSeeder extends Seeder
     {
         $this->call(PermissionSeeder::class);
 
-        if (app()->isProduction() && ! $this->command?->option('force') ) {
+        if (app()->isProduction() && ! $this->command?->option('force')) {
             $this->command?->warn('Production environment: demo data skipped. Use --force to override.');
 
             return;

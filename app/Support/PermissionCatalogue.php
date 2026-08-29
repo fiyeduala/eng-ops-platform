@@ -177,7 +177,7 @@ final class PermissionCatalogue
      * Marked so the role editor can warn before granting them, and so the daily executive report
      * can surface who was given one. This is a UI affordance, not an enforcement point.
      */
-    private static function isSensitive(string $module, string $action): bool
+    public static function isSensitive(string $module, string $action): bool
     {
         if (str_starts_with($action, 'view_confidential')) {
             return true;
@@ -195,7 +195,11 @@ final class PermissionCatalogue
         };
     }
 
-    private static function describe(string $label, string $action): string
+    /**
+     * The human sentence for one permission, e.g. "Approve documents". Public because the role
+     * editor renders the same wording the seeder stored, rather than inventing a second vocabulary.
+     */
+    public static function describe(string $label, string $action): string
     {
         $verb = match ($action) {
             'view' => 'View',

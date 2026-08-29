@@ -6,6 +6,11 @@
         "build": "vite build",
         "dev": "vite"
     },
+    "dependencies": {
+        "@alpinejs/collapse": "^3.14.9",
+        "@alpinejs/focus": "^3.14.9",
+        "alpinejs": "^3.14.9"
+    },
     "devDependencies": {
         "@tailwindcss/vite": "^4.0.0",
         "axios": "^1.11.0",

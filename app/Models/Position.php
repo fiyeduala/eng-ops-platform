@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Models;
 
-use App\Engines\Audit\Concerns\Auditable;
-use App\Engines\Access\Concerns\Scopeable;
 use App\Engines\Access\Concerns\BelongsToOrganization;
+use App\Engines\Access\Concerns\Scopeable;
+use App\Engines\Audit\Concerns\Auditable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;

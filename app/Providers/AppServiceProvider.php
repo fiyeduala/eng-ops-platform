@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Auth\TenantAwareUserProvider;
 use App\Engines\Access\AccessResolver;
 use App\Engines\Access\ActorProfile;
 use App\Engines\Access\OrganizationContext;
@@ -15,16 +16,26 @@ use App\Models\ActivityLog;
 use App\Models\AuditLog;
 use App\Models\Employee;
 use App\Models\Location;
-use App\Models\OrgUnit;
 use App\Models\Organization;
+use App\Models\OrgUnit;
 use App\Models\Position;
 use App\Models\RecordPermission;
 use App\Models\Role;
 use App\Models\Setting;
 use App\Models\User;
+use App\Policies\AuditLogPolicy;
+use App\Policies\EmployeePolicy;
+use App\Policies\LocationPolicy;
+use App\Policies\OrganizationPolicy;
+use App\Policies\OrgUnitPolicy;
+use App\Policies\PositionPolicy;
+use App\Policies\RolePolicy;
+use App\Policies\SettingPolicy;
+use App\Policies\UserPolicy;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\URL;
@@ -48,6 +59,7 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        $this->configureAuthentication();
         $this->configureModels();
         $this->configureMorphMap();
         $this->configurePolicies();
@@ -57,6 +69,19 @@ class AppServiceProvider extends ServiceProvider
         if ($this->app->environment('production')) {
             URL::forceScheme('https');
         }
+    }
+
+    /**
+     * The user provider that resolves the session's user without the tenant scope.
+     *
+     * config/auth.php names this driver rather than 'eloquent'. See App\Auth\TenantAwareUserProvider
+     * for why authentication is the one query that cannot be tenant-scoped, and why that is narrow.
+     */
+    private function configureAuthentication(): void
+    {
+        Auth::provider('tenant_eloquent', function ($app, array $config) {
+            return new TenantAwareUserProvider($app['hash'], $config['model']);
+        });
     }
 
     private function configureModels(): void
@@ -108,15 +133,15 @@ class AppServiceProvider extends ServiceProvider
     private function configurePolicies(): void
     {
         $policies = [
-            Organization::class => \App\Policies\OrganizationPolicy::class,
-            OrgUnit::class => \App\Policies\OrgUnitPolicy::class,
-            Employee::class => \App\Policies\EmployeePolicy::class,
-            User::class => \App\Policies\UserPolicy::class,
-            Position::class => \App\Policies\PositionPolicy::class,
-            Location::class => \App\Policies\LocationPolicy::class,
-            Role::class => \App\Policies\RolePolicy::class,
-            Setting::class => \App\Policies\SettingPolicy::class,
-            AuditLog::class => \App\Policies\AuditLogPolicy::class,
+            Organization::class => OrganizationPolicy::class,
+            OrgUnit::class => OrgUnitPolicy::class,
+            Employee::class => EmployeePolicy::class,
+            User::class => UserPolicy::class,
+            Position::class => PositionPolicy::class,
+            Location::class => LocationPolicy::class,
+            Role::class => RolePolicy::class,
+            Setting::class => SettingPolicy::class,
+            AuditLog::class => AuditLogPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {

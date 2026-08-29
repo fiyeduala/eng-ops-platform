@@ -62,15 +62,14 @@ return [
     */
 
     'providers' => [
+        // Not the stock 'eloquent' driver. Users are tenant-scoped by a global scope whose value
+        // comes from the authenticated user, so the query that resolves the authenticated user
+        // must not itself be scoped, or nobody could ever sign in. See
+        // App\Auth\TenantAwareUserProvider for why that exemption is narrow and safe.
         'users' => [
-            'driver' => 'eloquent',
+            'driver' => 'tenant_eloquent',
             'model' => env('AUTH_MODEL', User::class),
         ],
-
-        // 'users' => [
-        //     'driver' => 'database',
-        //     'table' => 'users',
-        // ],
     ],
 
     /*

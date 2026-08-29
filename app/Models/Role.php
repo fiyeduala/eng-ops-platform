@@ -4,17 +4,17 @@ declare(strict_types=1);
 
 namespace App\Models;
 
-use App\Engines\Audit\Concerns\Auditable;
-use App\Engines\Access\Concerns\Scopeable;
 use App\Engines\Access\Concerns\BelongsToOrganization;
+use App\Engines\Access\Concerns\Scopeable;
+use App\Engines\Audit\Concerns\Auditable;
 use App\Support\Enums\AccessScope;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\DB;
 
 /**
  * A named bundle of (permission, scope) grants. Fully configurable per organization (section 5).
@@ -113,7 +113,7 @@ class Role extends Model
      * (role, permission, scope) precisely to allow that pair; sync() could not express it.
      *
      * @param  array<string,string|AccessScope|array<int,string|AccessScope>>  $grants
-     *                                                                                 permission key => one scope, or a list of scopes
+     *                                                                                  permission key => one scope, or a list of scopes
      */
     public function syncGrants(array $grants): void
     {

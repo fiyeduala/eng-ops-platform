@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace App\Models;
 
-use App\Engines\Audit\Concerns\Auditable;
-use App\Engines\Access\Concerns\Scopeable;
 use App\Engines\Access\AccessResolver;
 use App\Engines\Access\ActorProfile;
 use App\Engines\Access\Concerns\BelongsToOrganization;
+use App\Engines\Access\Concerns\Scopeable;
 use App\Engines\Access\ScopeSet;
+use App\Engines\Audit\Concerns\Auditable;
 use App\Support\Enums\AccessScope;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Builder;
