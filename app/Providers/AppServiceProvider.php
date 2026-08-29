@@ -20,6 +20,7 @@ use App\Models\Organization;
 use App\Models\Position;
 use App\Models\RecordPermission;
 use App\Models\Role;
+use App\Models\Setting;
 use App\Models\User;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Database\Eloquent\Model;
@@ -49,6 +50,7 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->configureModels();
         $this->configureMorphMap();
+        $this->configurePolicies();
         $this->configureBlade();
         $this->configureGates();
 
@@ -84,10 +86,58 @@ class AppServiceProvider extends ServiceProvider
             'position' => Position::class,
             'location' => Location::class,
             'role' => Role::class,
+            'setting' => Setting::class,
             'record_permission' => RecordPermission::class,
             'audit_log' => AuditLog::class,
             'activity_log' => ActivityLog::class,
         ]);
+    }
+
+    /**
+     * Bind every model to its policy explicitly, and refuse to guess.
+     *
+     * Laravel's convention-based discovery would silently fall back to "no policy" for a model
+     * whose policy is missing or misnamed — and "no policy" means Gate::allows() returns false
+     * for a guest but a controller that forgot to authorize simply proceeds. Listing the pairs
+     * here makes an unprotected model a visible omission in one file rather than an absence
+     * nobody notices.
+     *
+     * Gate::guessPolicyNamesUsing below turns a missing entry into an explicit failure in
+     * development, so adding a model without a policy cannot reach production quietly.
+     */
+    private function configurePolicies(): void
+    {
+        $policies = [
+            Organization::class => \App\Policies\OrganizationPolicy::class,
+            OrgUnit::class => \App\Policies\OrgUnitPolicy::class,
+            Employee::class => \App\Policies\EmployeePolicy::class,
+            User::class => \App\Policies\UserPolicy::class,
+            Position::class => \App\Policies\PositionPolicy::class,
+            Location::class => \App\Policies\LocationPolicy::class,
+            Role::class => \App\Policies\RolePolicy::class,
+            Setting::class => \App\Policies\SettingPolicy::class,
+            AuditLog::class => \App\Policies\AuditLogPolicy::class,
+        ];
+
+        foreach ($policies as $model => $policy) {
+            Gate::policy($model, $policy);
+        }
+
+        if (! $this->app->isProduction()) {
+            Gate::guessPolicyNamesUsing(function (string $model): array {
+                // Scoped to our own models on purpose. Laravel asks the guesser about all sorts
+                // of classes; only an App\Models class reaching here is a genuine omission.
+                if (str_starts_with($model, 'App\\Models\\')) {
+                    throw new \RuntimeException(
+                        "No policy registered for {$model}. Add it to "
+                        .'AppServiceProvider::configurePolicies() — every model reachable from a '
+                        .'controller needs one, because an unpoliced model is an unauthorized one.'
+                    );
+                }
+
+                return [];
+            });
+        }
     }
 
     private function configureBlade(): void

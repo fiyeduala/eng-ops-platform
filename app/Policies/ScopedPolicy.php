@@ -43,15 +43,28 @@ abstract class ScopedPolicy
      * Laravel ability name => permission suffix. Anything not listed is snake_cased as-is,
      * so a custom ability `requestRevision` becomes `<module>.request_revision`.
      *
+     * The names on the two sides differ on purpose. Laravel's convention is `update`; the
+     * permission catalogue says `edit`, because that is the word on the button and in the role
+     * editor an administrator actually reads. Mapping them here keeps both audiences honest —
+     * and mapping `update` to a non-existent `<module>.update` would silently deny every edit in
+     * the system, since the resolver fails closed.
+     *
+     * `forceDelete` maps to `<module>.delete_permanently`, which NO module declares. Permanent
+     * destruction of a record is therefore denied to everyone, including the organization owner,
+     * until someone deliberately adds that permission to the catalogue. For a system whose audit
+     * trail is a compliance artefact (§59), that is the right default.
+     *
      * @var array<string,string>
      */
     protected array $abilityMap = [
         'viewAny' => 'view',
         'view' => 'view',
         'create' => 'create',
-        'update' => 'update',
+        'update' => 'edit',
         'delete' => 'delete',
-        'restore' => 'restore',
+        // Restoring is the same custodial authority as deleting: whoever may remove a record may
+        // put it back. Modules with a distinct `restore` permission (documents) override this.
+        'restore' => 'delete',
         'forceDelete' => 'delete_permanently',
     ];
 
@@ -150,11 +163,23 @@ abstract class ScopedPolicy
     }
 
     /**
-     * Gate 1. Records without an organization_id are platform-level and fall through to the
-     * remaining gates; every tenant table has the column, so this is a genuine check in practice.
+     * Gate 1.
+     *
+     * Three cases, and the middle one is the easy thing to get wrong:
+     *
+     *   1. The record carries organization_id — compare it to the actor's. The normal path.
+     *   2. The record IS an Organization — it has no organization_id, its own key plays that
+     *      role. Without this branch an Organization would fall through to case 3 and every
+     *      tenant's profile would be reachable from every other tenant.
+     *   3. Neither — genuinely platform-level reference data (the permission catalogue). Falls
+     *      through to the remaining gates, which still require the permission.
      */
     protected function sameOrganization(User $user, Model $record): bool
     {
+        if ($record instanceof \App\Models\Organization) {
+            return (int) $record->getKey() === (int) $user->organization_id;
+        }
+
         $recordOrganization = $record->getAttribute('organization_id');
 
         if ($recordOrganization === null) {
