@@ -1,0 +1,129 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Engines\Access\Concerns;
+
+use App\Engines\Access\ScopeCompiler;
+use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
+
+/**
+ * Gives a model `visibleTo()`.
+ *
+ * THE CONTRACT (docs/04-access-model.md section 11): every index query, export and search on a
+ * scopeable model must be written as
+ *
+ *     Document::visibleTo($user, 'document.view')->paginate();
+ *
+ * A model overrides the small `access*` hooks below when its columns differ from the defaults,
+ * or when "assigned to me" means something richer than a single column.
+ *
+ * Note the hooks are named `access*` rather than `scope*`: Laravel treats any method named
+ * scopeFoo() as a local query scope, and these are plain configuration methods.
+ */
+trait Scopeable
+{
+    /**
+     * Restrict a query to records the user may reach under a permission.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeVisibleTo(Builder $query, ?User $user, ?string $permission = null): Builder
+    {
+        if ($user === null) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return app(ScopeCompiler::class)->apply(
+            $query,
+            $user,
+            $permission ?? static::defaultViewPermission()
+        );
+    }
+
+    /**
+     * The permission checked when a caller does not name one.
+     * Derived from the model name: Document -> document.view, HseIncident -> hse_incident.view.
+     */
+    public static function defaultViewPermission(): string
+    {
+        return static::permissionModule().'.view';
+    }
+
+    public static function permissionModule(): string
+    {
+        return str(class_basename(static::class))->snake()->toString();
+    }
+
+    /**
+     * Columns that mean "this record is mine".
+     *
+     * @return array<int,string>
+     */
+    public function accessOwnerColumns(): array
+    {
+        return ['created_by', 'owner_id'];
+    }
+
+    /**
+     * Columns that mean "this record is assigned to me".
+     *
+     * @return array<int,string>
+     */
+    public function accessAssigneeColumns(): array
+    {
+        return ['assignee_id'];
+    }
+
+    /** Column carrying the owning organization unit, or null if the model has none. */
+    public function accessOrgUnitColumn(): ?string
+    {
+        return 'org_unit_id';
+    }
+
+    /**
+     * Abilities for which a narrower scope is MEANINGLESS on this model, not merely narrower.
+     *
+     * A few models are organization-level reference data: a site, a role definition, a currency.
+     * They belong to no unit, no project and no person, so "department scope" cannot select a
+     * subset — it selects nothing, and a Department Head granted `*.view` would find the site
+     * list empty. Naming an ability here says: holding it AT ALL reaches every row of this model
+     * inside the tenant.
+     *
+     * This is deliberately opt-in and per-ability, never per-model. LIST an ability here only
+     * when reaching every row is harmless; never list a write ability, because "edit roles in my
+     * department" quietly becoming "edit every role" is a privilege-escalation path — a role's
+     * grants apply everywhere it is assigned.
+     *
+     * Gates 1, 2, 4 and 5 all still apply: the tenant scope, the permission check, an explicit
+     * DENY row, and confidentiality are untouched by this.
+     *
+     * @return array<int,string> full permission keys
+     */
+    public function accessOrganizationWideAbilities(): array
+    {
+        return [];
+    }
+
+    /** Column carrying the project, or null if the model is not project-attached. */
+    public function accessProjectColumn(): ?string
+    {
+        return 'project_id';
+    }
+
+    /**
+     * Extend "assigned to me" beyond simple columns — participants, followers, reviewers.
+     *
+     * Called inside an OR group, so implementations must use orWhere / orWhereExists.
+     *
+     * @param  Builder<static>  $query
+     */
+    public function applyAssignedScope(Builder $query, User $user): void
+    {
+        foreach ($this->accessAssigneeColumns() as $column) {
+            $query->orWhere($this->qualifyColumn($column), $user->id);
+        }
+    }
+}
