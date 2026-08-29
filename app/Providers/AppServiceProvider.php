@@ -16,21 +16,39 @@ use App\Models\ActivityLog;
 use App\Models\AuditLog;
 use App\Models\Employee;
 use App\Models\Location;
+use App\Models\NumberingScheme;
+use App\Models\NumberSequence;
 use App\Models\Organization;
 use App\Models\OrgUnit;
 use App\Models\Position;
+use App\Models\Project;
+use App\Models\ProjectDepartment;
+use App\Models\ProjectMember;
+use App\Models\ProjectRole;
+use App\Models\ProjectType;
 use App\Models\RecordPermission;
 use App\Models\Role;
 use App\Models\Setting;
+use App\Models\Status;
+use App\Models\StatusTransition;
 use App\Models\User;
 use App\Policies\AuditLogPolicy;
 use App\Policies\EmployeePolicy;
 use App\Policies\LocationPolicy;
+use App\Policies\NumberingSchemePolicy;
+use App\Policies\NumberSequencePolicy;
 use App\Policies\OrganizationPolicy;
 use App\Policies\OrgUnitPolicy;
 use App\Policies\PositionPolicy;
+use App\Policies\ProjectDepartmentPolicy;
+use App\Policies\ProjectMemberPolicy;
+use App\Policies\ProjectPolicy;
+use App\Policies\ProjectRolePolicy;
+use App\Policies\ProjectTypePolicy;
 use App\Policies\RolePolicy;
 use App\Policies\SettingPolicy;
+use App\Policies\StatusPolicy;
+use App\Policies\StatusTransitionPolicy;
 use App\Policies\UserPolicy;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Database\Eloquent\Model;
@@ -115,6 +133,17 @@ class AppServiceProvider extends ServiceProvider
             'record_permission' => RecordPermission::class,
             'audit_log' => AuditLog::class,
             'activity_log' => ActivityLog::class,
+
+            'status' => Status::class,
+            'status_transition' => StatusTransition::class,
+            'numbering_scheme' => NumberingScheme::class,
+            'number_sequence' => NumberSequence::class,
+
+            'project' => Project::class,
+            'project_type' => ProjectType::class,
+            'project_role' => ProjectRole::class,
+            'project_department' => ProjectDepartment::class,
+            'project_member' => ProjectMember::class,
         ]);
     }
 
@@ -142,6 +171,19 @@ class AppServiceProvider extends ServiceProvider
             Role::class => RolePolicy::class,
             Setting::class => SettingPolicy::class,
             AuditLog::class => AuditLogPolicy::class,
+
+            // --- Engine 5: configuration ---------------------------------------------
+            Status::class => StatusPolicy::class,
+            StatusTransition::class => StatusTransitionPolicy::class,
+            NumberingScheme::class => NumberingSchemePolicy::class,
+            NumberSequence::class => NumberSequencePolicy::class,
+
+            // --- Phase 2: projects ---------------------------------------------------
+            Project::class => ProjectPolicy::class,
+            ProjectType::class => ProjectTypePolicy::class,
+            ProjectRole::class => ProjectRolePolicy::class,
+            ProjectDepartment::class => ProjectDepartmentPolicy::class,
+            ProjectMember::class => ProjectMemberPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {

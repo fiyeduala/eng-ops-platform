@@ -5,9 +5,16 @@ declare(strict_types=1);
 namespace App\Engines\Organization;
 
 use App\Engines\Access\OrganizationContext;
+use App\Engines\Configuration\NumberGenerator;
+use App\Models\NumberingScheme;
 use App\Models\Organization;
+use App\Models\ProjectRole;
+use App\Models\ProjectType;
 use App\Models\Role;
+use App\Models\Status;
+use App\Models\StatusTransition;
 use App\Support\RoleTemplates;
+use App\Support\StatusCatalogue;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -51,6 +58,9 @@ class OrganizationProvisioner
             $this->context->within($organization, function () use ($organization) {
                 $this->seedRoles($organization);
                 $this->seedSettings($organization);
+                $this->seedStatuses($organization);
+                $this->seedNumberingSchemes($organization);
+                $this->seedProjectCatalogue($organization);
             });
 
             return $organization->refresh();
@@ -108,6 +118,11 @@ class OrganizationProvisioner
         $now = now();
 
         $defaults = [
+            // Short code used by numbering patterns that lead with the company, e.g. MER/ENG/26/007.
+            // Blank by default: an empty token collapses cleanly, whereas a guess derived from the
+            // legal name would end up printed on a drawing.
+            'org.short_code' => '',
+
             // --- structure labels: a company may call a Division a "Directorate" -----------
             'org.label.division' => 'Division',
             'org.label.department' => 'Department',
@@ -175,5 +190,169 @@ class OrganizationProvisioner
         }
 
         DB::table('settings')->upsert($rows, ['organization_id', 'key'], ['updated_at']);
+    }
+
+    /**
+     * Starting status vocabularies and the moves between them (§63).
+     *
+     * Idempotent, and non-destructive in both directions: a status the company has renamed keeps
+     * its label, and a transition the company deleted stays deleted. Re-running this must never
+     * quietly restore a move an administrator deliberately removed.
+     */
+    public function seedStatuses(Organization $organization): void
+    {
+        foreach (StatusCatalogue::all() as $entityType => $definition) {
+            $ids = [];
+            $sort = 0;
+
+            foreach ($definition['statuses'] as $key => $status) {
+                $existing = Status::query()
+                    ->where('entity_type', $entityType)
+                    ->where('key', $key)
+                    ->first();
+
+                if ($existing !== null) {
+                    $ids[$key] = $existing->id;
+                    $sort += 10;
+
+                    continue;
+                }
+
+                $ids[$key] = Status::create([
+                    'organization_id' => $organization->id,
+                    'entity_type' => $entityType,
+                    'key' => $key,
+                    'label' => $status['label'],
+                    'color' => $status['color'],
+                    'sort' => $sort += 10,
+                    'is_initial' => $status['initial'] ?? false,
+                    'is_terminal' => $status['terminal'] ?? false,
+                    'is_active' => true,
+                ])->id;
+            }
+
+            $order = 0;
+
+            foreach ($definition['transitions'] as $transition) {
+                [$from, $to, $label, $permission] = $transition;
+                $order += 10;
+
+                // A transition naming a status this tenant has since deleted is skipped rather
+                // than created against a dangling id.
+                if (! isset($ids[$to]) || ($from !== null && ! isset($ids[$from]))) {
+                    continue;
+                }
+
+                $fromId = $from === null ? null : $ids[$from];
+
+                $exists = StatusTransition::query()
+                    ->where('entity_type', $entityType)
+                    ->where('to_status_id', $ids[$to])
+                    ->where(fn ($q) => $fromId === null
+                        ? $q->whereNull('from_status_id')
+                        : $q->where('from_status_id', $fromId))
+                    ->exists();
+
+                if ($exists) {
+                    continue;
+                }
+
+                StatusTransition::create([
+                    'organization_id' => $organization->id,
+                    'entity_type' => $entityType,
+                    'from_status_id' => $fromId,
+                    'to_status_id' => $ids[$to],
+                    'label' => $label,
+                    'permission_key' => $permission,
+                    'requires_comment' => $transition[4] ?? false,
+                    'sort' => $order,
+                ]);
+            }
+        }
+    }
+
+    /**
+     * A numbering scheme per module (§64).
+     *
+     * NumberGenerator provisions one on demand if it finds none, so this is a convenience rather
+     * than a requirement — but it means the Phase 7 numbering screen shows the company its own
+     * patterns on the first visit, instead of an empty page and numbers appearing from nowhere.
+     */
+    public function seedNumberingSchemes(Organization $organization): void
+    {
+        foreach (NumberGenerator::defaults() as $entityType => $default) {
+            $exists = NumberingScheme::query()->where('entity_type', $entityType)->exists();
+
+            if ($exists) {
+                continue;
+            }
+
+            NumberingScheme::create([
+                'organization_id' => $organization->id,
+                'entity_type' => $entityType,
+                'label' => Str::headline($entityType).' numbering',
+                'prefix' => $default['prefix'],
+                'pattern' => $default['pattern'],
+                'reset_period' => $default['reset_period'],
+                'padding' => $default['padding'],
+                'start_at' => 1,
+                'is_active' => true,
+            ]);
+        }
+    }
+
+    /**
+     * Project types and project roles (§13, §14).
+     *
+     * `project_roles` is what makes a person a Technical Lead on one project and an ordinary
+     * engineer on another without touching their personnel record — so a starter catalogue is
+     * seeded, and every entry in it is editable.
+     */
+    public function seedProjectCatalogue(Organization $organization): void
+    {
+        $types = [
+            'EPC' => 'Engineering, procurement and construction',
+            'Design' => 'Design and engineering services only',
+            'Construction' => 'Construction and installation',
+            'Maintenance' => 'Maintenance, shutdown and turnaround',
+            'Consultancy' => 'Advisory and studies',
+            'Internal' => 'Internal initiative, not client-facing',
+        ];
+
+        foreach ($types as $name => $description) {
+            ProjectType::query()->firstOrCreate(
+                ['organization_id' => $organization->id, 'slug' => Str::slug($name)],
+                ['name' => $name, 'description' => $description, 'is_active' => true],
+            );
+        }
+
+        // `is_lead` marks the roles a workflow rule of type `project_role` may resolve to when it
+        // says "the lead of this project" — configuration, not a hard-coded title check.
+        $roles = [
+            ['Project Manager', true],
+            ['Project Director', true],
+            ['Technical Lead', true],
+            ['Discipline Lead', true],
+            ['Engineer', false],
+            ['Designer', false],
+            ['Site Supervisor', false],
+            ['HSE Officer', false],
+            ['QA/QC Officer', false],
+            ['Procurement Officer', false],
+            ['Cost Controller', false],
+            ['Planner', false],
+            ['Document Controller', false],
+            ['Client Representative', false],
+            ['Team Member', false],
+        ];
+
+        $sort = 0;
+
+        foreach ($roles as [$name, $isLead]) {
+            ProjectRole::query()->firstOrCreate(
+                ['organization_id' => $organization->id, 'slug' => Str::slug($name)],
+                ['name' => $name, 'is_lead' => $isLead, 'sort' => $sort += 10, 'is_active' => true],
+            );
+        }
     }
 }

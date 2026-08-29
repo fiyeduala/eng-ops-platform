@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Exists;
 use Illuminate\Validation\Rules\Unique;
@@ -25,6 +26,14 @@ use Illuminate\Validation\Rules\Unique;
  */
 abstract class TenantRequest extends FormRequest
 {
+    /**
+     * Table => "has a deleted_at column", memoized per process. The answer cannot change while
+     * the application is running, and existsInTenant() asks several times per request.
+     *
+     * @var array<string,bool>
+     */
+    private static array $softDeleteCache = [];
+
     /**
      * Authorization lives in the controller, against the bound record, because that is the only
      * place the record exists. A FormRequest can answer "may this kind of user do this"; only a
@@ -111,10 +120,16 @@ abstract class TenantRequest extends FormRequest
         }
     }
 
+    /**
+     * Does this table keep a recycle bin?
+     *
+     * Asked of the schema rather than of a list in this file. A hard-coded list is wrong the
+     * moment a module ships without editing it, and the failure is silent in the dangerous
+     * direction: a soft-deleted row would keep validating as a legal foreign key, letting a form
+     * re-point a record at a department the company believes it deleted.
+     */
     private function hasSoftDeletes(string $table): bool
     {
-        return in_array($table, [
-            'org_units', 'employees', 'positions', 'locations', 'users', 'roles',
-        ], true);
+        return self::$softDeleteCache[$table] ??= Schema::hasColumn($table, 'deleted_at');
     }
 }

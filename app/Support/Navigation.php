@@ -109,6 +109,13 @@ class Navigation
                 ],
             ],
             [
+                'label' => 'Delivery',
+                'items' => [
+                    ['label' => 'Projects', 'route' => 'projects.index', 'icon' => 'briefcase',
+                        'permission' => 'project.view', 'active' => 'projects.*'],
+                ],
+            ],
+            [
                 'label' => 'Administration',
                 'items' => [
                     ['label' => 'User accounts', 'route' => 'users.index', 'icon' => 'key',

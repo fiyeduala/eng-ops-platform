@@ -85,6 +85,17 @@ final class Phase1SmokeTest extends TestCase
             ]),
             'audit_log' => AuditLog::query()->latest('id')->firstOrFail(),
         ]);
+
+        // A project, so the delivery pages join all three passes with a real record rather than
+        // being skipped for want of a bound parameter. Created through the service, which seats
+        // the administrator on the team — the project page's team panel is therefore exercised
+        // with a row in it.
+        $project = $this->makeProject($this->org, $this->administrator, 'Marina Bridge Rehabilitation', [
+            'org_unit_id' => $department->id,
+            'manager_id' => $this->administrator->id,
+        ]);
+
+        $this->records['project'] = $project;
     }
 
     #[Test]

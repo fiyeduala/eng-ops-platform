@@ -13,6 +13,9 @@ use App\Http\Controllers\OrganizationController;
 use App\Http\Controllers\OrgUnitController;
 use App\Http\Controllers\PositionController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\ProjectController;
+use App\Http\Controllers\ProjectDepartmentController;
+use App\Http\Controllers\ProjectMemberController;
 use App\Http\Controllers\RoleController;
 use App\Http\Controllers\SettingController;
 use App\Http\Controllers\UserController;
@@ -145,6 +148,65 @@ Route::middleware(['auth', 'password.current'])->group(function () {
         ->middleware('permission:location.edit')->name('locations.update');
     Route::delete('locations/{location}', [LocationController::class, 'destroy'])
         ->middleware('permission:location.delete')->name('locations.destroy');
+
+    // --- projects ------------------------------------------------------------------------------
+    //
+    // Everything below /projects/{project}/… uses scoped bindings, so a nested id must belong to
+    // the project in the path. /projects/7/team/93 where member 93 is on project 8 is a 404, not
+    // an authorization near-miss — the IDOR case §94 asks to be tested, closed at the router.
+
+    Route::middleware('permission:project.view')->group(function () {
+        Route::get('projects', [ProjectController::class, 'index'])->name('projects.index');
+        Route::get('projects/{project}', [ProjectController::class, 'show'])
+            ->whereNumber('project')->name('projects.show');
+    });
+
+    Route::get('projects/create', [ProjectController::class, 'create'])
+        ->middleware('permission:project.create')->name('projects.create');
+    Route::post('projects', [ProjectController::class, 'store'])
+        ->middleware('permission:project.create')->name('projects.store');
+    Route::get('projects/{project}/edit', [ProjectController::class, 'edit'])
+        ->middleware('permission:project.edit')->name('projects.edit');
+    Route::put('projects/{project}', [ProjectController::class, 'update'])
+        ->middleware('permission:project.edit')->name('projects.update');
+    Route::delete('projects/{project}', [ProjectController::class, 'destroy'])
+        ->middleware('permission:project.delete')->name('projects.destroy');
+
+    // Status is not a form field. It moves through the configured whitelist, and the endpoint
+    // re-asks StatusMachine with the same actor that drew the buttons (§63, §84).
+    Route::post('projects/{project}/status', [ProjectController::class, 'transition'])
+        ->middleware('permission:project.edit')->name('projects.status');
+
+    // Its own permission: "we are finished with this" is a different decision from "correct this
+    // description", and §14 wants a finished project archived rather than deleted.
+    Route::post('projects/{project}/archive', [ProjectController::class, 'archive'])
+        ->middleware('permission:project.archive')->name('projects.archive');
+    Route::post('projects/{project}/unarchive', [ProjectController::class, 'unarchive'])
+        ->middleware('permission:project.archive')->name('projects.unarchive');
+
+    // The team. Every row here is a visibility grant, which is why assigning has its own
+    // permission and its own two-question policy rather than folding into project.edit (§14).
+    Route::scopeBindings()->group(function () {
+        Route::get('projects/{project}/team', [ProjectMemberController::class, 'index'])
+            ->middleware('permission:project_member.view')->name('projects.team');
+        Route::post('projects/{project}/team', [ProjectMemberController::class, 'store'])
+            ->middleware('permission:project_member.assign')->name('projects.team.store');
+        Route::put('projects/{project}/team/{member}', [ProjectMemberController::class, 'update'])
+            ->middleware('permission:project_member.manage')->name('projects.team.update');
+        Route::delete('projects/{project}/team/{member}', [ProjectMemberController::class, 'destroy'])
+            ->middleware('permission:project_member.remove')->name('projects.team.destroy');
+
+        // Step 1 of the §13 cascade. Guarded by project.manage: reshaping which departments are
+        // committed to a job changes who can staff it.
+        Route::get('projects/{project}/departments', [ProjectDepartmentController::class, 'index'])
+            ->middleware('permission:project.view')->name('projects.departments');
+        Route::post('projects/{project}/departments', [ProjectDepartmentController::class, 'store'])
+            ->middleware('permission:project.manage')->name('projects.departments.store');
+        Route::put('projects/{project}/departments/{department}', [ProjectDepartmentController::class, 'update'])
+            ->middleware('permission:project.manage')->name('projects.departments.update');
+        Route::delete('projects/{project}/departments/{department}', [ProjectDepartmentController::class, 'destroy'])
+            ->middleware('permission:project.manage')->name('projects.departments.destroy');
+    });
 
     // --- administration ------------------------------------------------------------------------
 

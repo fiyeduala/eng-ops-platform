@@ -5,12 +5,17 @@ declare(strict_types=1);
 namespace Tests\Support;
 
 use App\Engines\Access\OrganizationContext;
+use App\Engines\Configuration\StatusMachine;
+use App\Engines\Organization\OrganizationProvisioner;
 use App\Engines\Organization\OrgUnitService;
 use App\Models\Employee;
 use App\Models\Organization;
 use App\Models\OrgUnit;
+use App\Models\Project;
 use App\Models\Role;
 use App\Models\User;
+use App\Services\ProjectService;
+use App\Support\Enums\Confidentiality;
 use App\Support\Enums\OrgUnitType;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -159,5 +164,52 @@ trait BuildsTenants
             // here keeps a stale null from a fixture step masquerading as "no reach".
             return $user->fresh(['roles', 'employee']);
         });
+    }
+
+    /**
+     * The configuration a project needs to exist: statuses, the moves between them, numbering
+     * schemes, and the project type/role catalogues.
+     *
+     * Called through OrganizationProvisioner rather than reproduced here, because a fixture that
+     * invented its own status vocabulary would let StatusMachine's whitelist drift from the one
+     * every real tenant gets. Idempotent, so a test may call it more than once.
+     */
+    protected function provisionConfiguration(Organization $organization): void
+    {
+        $this->withinOrganization($organization, function () use ($organization) {
+            $provisioner = app(OrganizationProvisioner::class);
+
+            $provisioner->seedStatuses($organization);
+            $provisioner->seedNumberingSchemes($organization);
+            $provisioner->seedProjectCatalogue($organization);
+        });
+
+        app(StatusMachine::class)->flush();
+    }
+
+    /**
+     * A project, created through ProjectService so the number, the opening status and the manager's
+     * own membership row come from the same code path the controller uses. A project assembled with
+     * Project::create() in a fixture would have no number, no status and — crucially for the access
+     * tests — no team, which is the axis half of them are about.
+     *
+     * @param  array<string,mixed>  $attributes
+     */
+    protected function makeProject(
+        Organization $organization,
+        User $actor,
+        string $name,
+        array $attributes = [],
+    ): Project {
+        $this->provisionConfiguration($organization);
+
+        return $this->withinOrganization($organization, fn () => app(ProjectService::class)->create([
+            'name' => $name,
+            'confidentiality' => Confidentiality::Internal,
+            'priority' => 'normal',
+            'health' => 'on_track',
+            'is_active' => true,
+            ...$attributes,
+        ], $actor));
     }
 }

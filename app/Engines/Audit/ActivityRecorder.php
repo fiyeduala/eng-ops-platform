@@ -52,7 +52,7 @@ class ActivityRecorder
             'causer_name' => $actor?->name,
             'subject_type' => $subject->getMorphClass(),
             'subject_id' => $subject->getKey(),
-            'project_id' => $projectId ?? $subject->getAttribute('project_id'),
+            'project_id' => $projectId ?? $this->projectIdOf($subject),
             'org_unit_id' => $orgUnitId ?? $subject->getAttribute('org_unit_id'),
             'verb' => $verb,
             'description' => mb_substr($description ?? $this->describe($subject, $verb, $actor), 0, 500),
@@ -79,6 +79,28 @@ class ActivityRecorder
     public function timelineForProject(int $projectId)
     {
         return ActivityLog::forProject($projectId)->with('causer')->latest('created_at');
+    }
+
+    /**
+     * Which project this row belongs on, when the caller did not say.
+     *
+     * Asked through `accessProjectColumn()` — the same question the access engine asks — rather
+     * than by reading `project_id` directly. Most records carry that column and answer with it; a
+     * project answers with its own primary key, because the record IS the project.
+     *
+     * Reading the column literally would have left a project's own history off the one timeline the
+     * project page renders: its status moves and its edits would be written, be visible on the
+     * record's own timeline, and be silently missing from the project view (§88).
+     */
+    private function projectIdOf(Model $subject): ?int
+    {
+        $column = method_exists($subject, 'accessProjectColumn')
+            ? $subject->accessProjectColumn()
+            : 'project_id';
+
+        $value = $column === null ? null : $subject->getAttribute($column);
+
+        return $value === null ? null : (int) $value;
     }
 
     private function describe(Model $subject, string $verb, ?User $actor): string

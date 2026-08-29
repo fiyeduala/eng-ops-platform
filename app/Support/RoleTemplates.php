@@ -71,6 +71,7 @@ final class RoleTemplates
         'location.view' => 'organization',
         'position.view' => 'organization',
         'role.view' => 'organization',
+        'status.view' => 'organization',   // the words "In progress" and "Blocked"
     ];
 
     /**
@@ -114,6 +115,7 @@ final class RoleTemplates
                     'custom_field.*' => 'organization',
                     'template.*' => 'organization',
                     'numbering.*' => 'organization',
+                    'status.*' => 'organization',
                     'escalation.*' => 'organization',
                     'workflow.*' => 'organization',
                     'form.*' => 'organization',

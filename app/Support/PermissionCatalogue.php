@@ -43,6 +43,7 @@ final class PermissionCatalogue
             'custom_field' => ['Administration', 'Custom Fields', ['view', 'manage']],
             'template' => ['Administration', 'Document Templates', ['view', 'manage']],
             'numbering' => ['Administration', 'Numbering Schemes', ['view', 'manage']],
+            'status' => ['Administration', 'Statuses & Transitions', ['view', 'manage']],
             'escalation' => ['Administration', 'Escalation Rules', ['view', 'manage']],
             'audit_log' => ['Administration', 'Audit Trail', ['view', 'export']],
 

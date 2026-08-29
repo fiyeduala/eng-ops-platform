@@ -28,13 +28,33 @@ that the policy and the compiled list agree on every record; `TenantScopeCoverag
 schema so a later phase cannot add an unscoped table without failing the build; `Phase1SmokeTest`
 requests every authenticated route three ways — permitted, unpermitted (403), anonymous.
 
-## PHASE 2 — Core operations ⬜
+## PHASE 2 — Core operations 🟨
 
-Projects · project types · project departments · project members · project roles · tasks (+
-checklists, dependencies, followers) · activity timeline UI · notification engine · memos ·
-announcements · meetings · meeting minutes/decisions/actions · calendar.
+Projects ✅ · project types ✅ · project departments ✅ · project members ✅ · project roles ✅ ·
+activity timeline UI ✅ (project page) · tasks (+ checklists, dependencies, followers) ⬜ ·
+notification engine ⬜ · memos ⬜ · announcements ⬜ · meetings ⬜ ·
+meeting minutes/decisions/actions ⬜ · calendar ⬜.
 
 **Exit criteria:** the §8 Project Alpha scenario passes as a feature test for all five users.
+
+**Half met.** `ProjectAlphaTest` (15 tests) runs the scenario's project layer for John, Mary, David,
+Sarah and Michael: five people from five departments reaching one project through the project axis
+alone, with Alpha owned by a unit none of their departments contains so the org axis cannot rescue
+them. It also covers each edge docs/05 §9 asks for — the non-member's 403, Sarah refused a
+`restricted` Finance project she is a member of, membership expiring by `ends_on` with nobody
+revoking anything, a department head bounded to their own subtree while a project manager is not,
+the `/projects/{a}/team/{member-of-b}` IDOR, and the cross-tenant 404 — plus the split between
+`project.view` and `project.view_financials`, and status moves as a whitelist rather than a field.
+
+Two defects it caught, both now fixed: activity rows about a project itself carried no `project_id`,
+so a project's own status history was missing from the only timeline the project page renders
+(`ActivityRecorder` now derives it through `accessProjectColumn()`); and the add forms have no
+Active checkbox, so `normaliseBooleans` was writing `is_active = false` on every create — a member
+row that listed on the roster and granted nothing.
+
+**Not yet covered:** the document, task, HSE and procurement halves of §8. Those grants
+(`document.view`, `task.view`, `hse.*`, `procurement.*`, `finance.view`) belong to Phases 3–5, and
+the assertions attach to the same test file as each module lands.
 
 ## PHASE 3 — Documents & workflow ⬜
 
