@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace App\Policies;
 
 use App\Engines\Access\AccessResolver;
+use App\Engines\Access\ActorProfile;
 use App\Engines\Access\ScopeCompiler;
+use App\Engines\Access\Scopes\OrganizationScope;
+use App\Models\Organization;
 use App\Models\User;
 use App\Support\Enums\AclEffect;
 use Illuminate\Database\Eloquent\Model;
@@ -20,6 +23,7 @@ use Illuminate\Support\Str;
  * parent:: for the rest. No module can accidentally skip a gate, because no module implements
  * the gates.
  *
+ *   Gate 0  Account        — the account is usable and its tenant is not suspended
  *   Gate 1  Organization   — the record belongs to the actor's tenant
  *   Gate 2  Permission     — the actor holds module.ability at some scope
  *   Gate 3  Scope          — that reach actually contains THIS record
@@ -117,8 +121,15 @@ abstract class ScopedPolicy
      */
     public function check(User $user, string $ability, ?Model $record = null): bool
     {
-        // A disabled, locked or suspended-tenant account authorizes nothing, regardless of roles.
-        if (! $user->canLogIn()) {
+        // --- Gate 0: the account and the tenant ----------------------------------------
+        // A disabled or locked account authorizes nothing, and neither does any account inside a
+        // suspended organization — regardless of roles, and including the organization owner.
+        //
+        // The tenant half is checked here as well as in EnsureOrganizationContext because the
+        // middleware only stands in front of HTTP. Queued jobs, scheduled reports and console
+        // commands reach these policies directly, and suspension has to mean the same thing on
+        // every path or it means nothing on the ones nobody was looking at.
+        if (! $user->canLogIn() || ! $this->resolver->tenantIsActive($user)) {
             return false;
         }
 
@@ -176,7 +187,7 @@ abstract class ScopedPolicy
      */
     protected function sameOrganization(User $user, Model $record): bool
     {
-        if ($record instanceof \App\Models\Organization) {
+        if ($record instanceof Organization) {
             return (int) $record->getKey() === (int) $user->organization_id;
         }
 
@@ -195,7 +206,7 @@ abstract class ScopedPolicy
     protected function withinReach(User $user, Model $record, string $permission): bool
     {
         $query = $record->newQuery()
-            ->withoutGlobalScopes([\App\Engines\Access\Scopes\OrganizationScope::class])
+            ->withoutGlobalScopes([OrganizationScope::class])
             ->whereKey($record->getKey());
 
         // A soft-deleted record must still be authorizable, or `restore` could never pass.
@@ -219,7 +230,7 @@ abstract class ScopedPolicy
     protected function hasAclRow(User $user, Model $record, string $permission, AclEffect $effect): bool
     {
         $roleIds = $user->roleIds();
-        $orgUnitId = app(\App\Engines\Access\ActorProfile::class)->orgUnitId($user);
+        $orgUnitId = app(ActorProfile::class)->orgUnitId($user);
 
         return DB::table('record_permissions')
             ->where('record_type', $record->getMorphClass())

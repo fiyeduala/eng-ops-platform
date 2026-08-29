@@ -77,13 +77,28 @@ enum AccessScope: string
     }
 
     /**
-     * Broadest of two scopes on the organizational axis.
-     * Project never absorbs, and is never absorbed by, an organizational scope.
+     * Broadest of two scopes on the SAME axis.
+     *
+     * Comparing across axes is refused rather than answered, because there is no honest answer.
+     * `project` and `department` are not two points on one line: neither contains the other, and
+     * whichever this returned would be wrong — the narrower silently deletes reach the user was
+     * granted, the broader silently invents reach they were not. The correct handling of two
+     * axes is to keep both, which is what ScopeSet does and what RoleTemplates::expand() does by
+     * partitioning on isOrganizational() before it ever gets here.
+     *
+     * So both callers already satisfy this precondition. It throws anyway: the next caller is
+     * the one this protects, and a loud failure in a role template is a bug report, while a
+     * quiet collapse is a permissions incident nobody notices for a year.
+     *
+     * @throws \InvalidArgumentException when one scope is `project` and the other is not
      */
     public static function broadest(self $a, self $b): self
     {
-        if ($a === self::Project || $b === self::Project) {
-            return $a === $b ? $a : ($a->rank() >= $b->rank() ? $a : $b);
+        if ($a->isOrganizational() !== $b->isOrganizational()) {
+            throw new \InvalidArgumentException(
+                "Cannot take the broadest of {$a->value} and {$b->value}: they are on different axes, "
+                .'and neither contains the other. Keep both — see docs/04-access-model.md section 5.'
+            );
         }
 
         return $a->rank() >= $b->rank() ? $a : $b;

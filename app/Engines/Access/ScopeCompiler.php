@@ -46,6 +46,14 @@ class ScopeCompiler
         // record page would refuse, which leaks existence. See docs/04-access-model.md section 6.
         $this->restrictToActorOrganization($query, $user);
 
+        // Gate 0, in SQL. ScopedPolicy asks the same question before anything else, but index
+        // pages call visibleTo() directly and never touch a policy — so a suspended tenant would
+        // still get a fully populated list on every listing screen if this were only in the
+        // policy. Same answer on both paths, or the list and the record page disagree.
+        if (! $user->canLogIn() || ! $this->resolver->tenantIsActive($user)) {
+            return $query->whereRaw('1 = 0');
+        }
+
         $set = $this->resolver->scopesFor($user, $permission);
 
         // Gate 2 failed: the permission is not held at any scope. Fail closed.

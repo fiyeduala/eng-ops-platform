@@ -8,6 +8,7 @@ use App\Engines\Access\OrganizationContext;
 use App\Models\AuditLog;
 use App\Models\Organization;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -166,7 +167,7 @@ class AuditLogger
     }
 
     /**
-     * @return \Illuminate\Database\Eloquent\Builder<AuditLog>
+     * @return Builder<AuditLog>
      */
     public function trailFor(Model $record)
     {

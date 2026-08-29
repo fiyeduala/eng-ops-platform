@@ -7,6 +7,7 @@ namespace App\Engines\Organization;
 use App\Engines\Access\AccessResolver;
 use App\Models\OrgUnit;
 use App\Support\Enums\OrgUnitType;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -220,7 +221,7 @@ class OrgUnitService
     /**
      * The whole tree as a nested array, for the org chart and for tree selects.
      *
-     * @return \Illuminate\Support\Collection<int,OrgUnit>
+     * @return Collection<int,OrgUnit>
      */
     public function tree(?int $organizationId = null)
     {

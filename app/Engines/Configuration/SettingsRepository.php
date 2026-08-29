@@ -78,11 +78,45 @@ class SettingsRepository
     /**
      * Write a setting for the current tenant. Platform defaults are never overwritten by a
      * tenant write — the tenant gets its own row.
+     *
+     * A null organization is refused rather than accepted, because the two ways of arriving at one
+     * are indistinguishable here and mean opposite things. "Write the platform default" and "there
+     * is no tenant bound on this execution path" both present as null, and the second is the
+     * dangerous one: a queued job, a console command or a scheduled task that calls this without a
+     * context would silently write a row every organization on the installation then inherits. That
+     * is a configuration change to somebody else's company, made by a request that was only ever
+     * about one. Platform defaults are written through setPlatformDefault(), where the intent is in
+     * the method name and cannot be arrived at by omission.
+     *
+     * @throws \RuntimeException when no organization is given and none is bound
      */
     public function set(string $key, mixed $value, ?int $organizationId = null, ?string $group = null): void
     {
         $organizationId ??= $this->context->id();
 
+        if ($organizationId === null) {
+            throw new \RuntimeException(
+                "Cannot write setting [{$key}]: no organization was given and none is bound to this "
+                .'request. Pass one explicitly, or call setPlatformDefault() if a platform-wide '
+                .'default is genuinely what was meant.'
+            );
+        }
+
+        $this->write($key, $value, $organizationId, $group);
+    }
+
+    /**
+     * Write the installation-wide fallback for a key — the row every tenant inherits until it
+     * overrides it. Deployment-time work: migrations, install commands, the platform console.
+     * Never reachable from a tenant's own settings screen.
+     */
+    public function setPlatformDefault(string $key, mixed $value, ?string $group = null): void
+    {
+        $this->write($key, $value, null, $group);
+    }
+
+    private function write(string $key, mixed $value, ?int $organizationId, ?string $group): void
+    {
         $existing = Setting::query()
             ->where('key', $key)
             ->where(fn ($q) => $organizationId === null
@@ -107,7 +141,11 @@ class SettingsRepository
             ],
         );
 
-        $this->flush($organizationId);
+        // forget(), not flush(): flush() resolves a null argument against the bound context, which
+        // is right for a caller saying "mine" and wrong here, where null means the platform row.
+        // Writing a platform default from inside a tenant request would otherwise clear that
+        // tenant's cache and leave the stale platform row cached.
+        $this->forget($organizationId);
 
         // Configuration changes alter how the whole company behaves; they are audited like any
         // other privileged action (section 71).
@@ -171,12 +209,19 @@ class SettingsRepository
         });
     }
 
+    /** Drop the cached resolution for one tenant — the bound one, unless told otherwise. */
     public function flush(?int $organizationId = null): void
     {
-        $organizationId ??= $this->context->id();
+        $this->forget($organizationId ?? $this->context->id());
+    }
 
-        Cache::forget('settings:'.($organizationId ?? 'platform'));
-        unset($this->memo['settings:'.($organizationId ?? 'platform')]);
+    /** Drop exactly the named bucket. Null means the platform row, never "whoever is bound". */
+    private function forget(?int $organizationId): void
+    {
+        $key = 'settings:'.($organizationId ?? 'platform');
+
+        Cache::forget($key);
+        unset($this->memo[$key]);
     }
 
     private function typeOf(mixed $value): string

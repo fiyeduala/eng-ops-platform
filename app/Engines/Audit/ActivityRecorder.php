@@ -7,6 +7,7 @@ namespace App\Engines\Audit;
 use App\Engines\Access\OrganizationContext;
 use App\Models\ActivityLog;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -26,6 +27,10 @@ class ActivityRecorder
 
     /**
      * @param  array<string,mixed>  $properties
+     * @param  \DateTimeInterface|null  $at  when the thing happened, if not now. For imports and
+     *                                       demonstration data only — application code must leave
+     *                                       this null, because an activity row whose timestamp a
+     *                                       caller chose is a timeline anyone can rewrite.
      */
     public function record(
         Model $subject,
@@ -35,6 +40,7 @@ class ActivityRecorder
         ?User $actor = null,
         ?int $projectId = null,
         ?int $orgUnitId = null,
+        ?\DateTimeInterface $at = null,
     ): void {
         $actor ??= Auth::user();
 
@@ -51,14 +57,14 @@ class ActivityRecorder
             'verb' => $verb,
             'description' => mb_substr($description ?? $this->describe($subject, $verb, $actor), 0, 500),
             'properties' => $properties !== [] ? json_encode($properties) : null,
-            'created_at' => now(),
+            'created_at' => $at ?? now(),
         ]);
     }
 
     /**
      * Timeline for one record, newest first.
      *
-     * @return \Illuminate\Database\Eloquent\Builder<ActivityLog>
+     * @return Builder<ActivityLog>
      */
     public function timelineFor(Model $record)
     {
@@ -68,7 +74,7 @@ class ActivityRecorder
     /**
      * Timeline for a whole project — every module's activity, one query (section 88).
      *
-     * @return \Illuminate\Database\Eloquent\Builder<ActivityLog>
+     * @return Builder<ActivityLog>
      */
     public function timelineForProject(int $projectId)
     {

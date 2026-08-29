@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Database\Seeders;
 
 use App\Engines\Access\OrganizationContext;
+use App\Engines\Audit\ActivityRecorder;
 use App\Engines\Organization\OrganizationProvisioner;
 use App\Engines\Organization\OrgUnitService;
 use App\Models\Employee;
@@ -15,6 +16,7 @@ use App\Models\Position;
 use App\Models\Role;
 use App\Models\User;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
 /**
@@ -53,6 +55,13 @@ class DemoSeeder extends Seeder
 
         $meridian = $this->seedMeridian();
         $kestrel = $this->seedKestrel();
+
+        // The rows above were written straight to the database, so nothing observed them happening.
+        // A demo whose record timelines are all blank teaches the wrong lesson about Engine 4 — the
+        // timeline is meant to be the first thing you see on a record, and an empty one looks like
+        // a missing feature rather than a missing history.
+        $this->seedHistory($meridian);
+        $this->seedHistory($kestrel);
 
         $this->command?->newLine();
         $this->command?->info('Demo organizations created:');
@@ -352,6 +361,139 @@ class DemoSeeder extends Seeder
 
             return $organization;
         });
+    }
+
+    // ================================================================= narrative history
+
+    /**
+     * A plausible past for a company that was set up months ago (section 60).
+     *
+     * Written through ActivityRecorder rather than inserted, so the demo exercises the same engine
+     * every controller calls — a bug in the recorder shows up here rather than on the first real
+     * record somebody creates.
+     *
+     * Two things are deliberate. Rows are ATTRIBUTED: the org chart was built by whoever runs the
+     * system, people were added by HR, accounts by IT. A timeline where one name did everything is
+     * worse than no timeline, because it is confidently wrong. And rows are BACK-DATED in setup
+     * order — structure first, then places and posts, then roles, then people — so the timeline
+     * reads as a company being stood up rather than as one frantic afternoon.
+     *
+     * Nothing here needs to survive a re-seed: DatabaseSeeder refuses to run against production
+     * and the whole demo is disposable.
+     */
+    private function seedHistory(Organization $organization): void
+    {
+        $this->context->within($organization, function () {
+            $recorder = app(ActivityRecorder::class);
+
+            $people = Employee::with(['user', 'orgUnit', 'position'])->orderBy('id')->get();
+
+            // The first employee seeded is the managing director, and their account is the one the
+            // console prints as the way in. Making them the causer of the setup work is what puts
+            // something on the dashboard of the person most likely to sign in first.
+            $founder = $people->first()?->user;
+
+            if ($founder === null) {
+                return;
+            }
+
+            $hr = $this->whoever($people, ['hr', 'human resources']) ?? $founder;
+            $it = $this->whoever($people, ['it ', 'administrator', 'systems']) ?? $founder;
+
+            // --- structure, oldest ------------------------------------------------------
+            $day = 96;
+
+            foreach (OrgUnit::orderBy('id')->get() as $unit) {
+                $recorder->record($unit, 'created',
+                    $founder->name.' created the '.$unit->type->value.' “'.$unit->name.'”',
+                    actor: $founder, at: $this->momentOn($day));
+
+                $day = max(88, $day - 1);
+            }
+
+            // --- places and posts -------------------------------------------------------
+            foreach (Location::orderBy('id')->get() as $location) {
+                $recorder->record($location, 'created', $founder->name.' added the '.$location->name,
+                    actor: $founder, at: $this->momentOn(86));
+            }
+
+            foreach (Position::orderBy('id')->get() as $position) {
+                $recorder->record($position, 'created', $hr->name.' defined the post of '.$position->title,
+                    actor: $hr, at: $this->momentOn(84));
+            }
+
+            // --- who may do what --------------------------------------------------------
+            foreach (Role::orderBy('id')->get() as $role) {
+                $recorder->record($role, 'created', $it->name.' created the role “'.$role->name.'”',
+                    actor: $it, at: $this->momentOn(80));
+            }
+
+            // --- people, spread across the months since ---------------------------------
+            // Newest hire last, so "recent activity" on the dashboard is genuinely the recent end
+            // of a real sequence rather than a random sample of one.
+            $day = 74;
+            $step = max(1, intdiv(70, max(1, $people->count())));
+
+            foreach ($people as $employee) {
+                $recorder->record($employee, 'created',
+                    $hr->name.' added '.$employee->fullName().' to '.($employee->orgUnit?->name ?? 'the company'),
+                    actor: $hr, at: $this->momentOn($day));
+
+                if ($employee->user !== null) {
+                    $recorder->record($employee->user, 'created',
+                        $it->name.' issued a system account to '.$employee->fullName(),
+                        actor: $it, at: $this->momentOn(max(4, $day - 1)));
+
+                    $recorder->record($employee->user, 'assigned',
+                        $it->name.' set the roles held by '.$employee->fullName(),
+                        actor: $it, at: $this->momentOn(max(3, $day - 1)));
+                }
+
+                $day = max(5, $day - $step);
+            }
+
+            // --- the last fortnight -----------------------------------------------------
+            // A handful of ordinary edits by the managing director, so the dashboard timeline of
+            // the demonstration account is populated the moment it signs in.
+            foreach ($people->take(6) as $offset => $employee) {
+                $recorder->record($employee, 'updated',
+                    $founder->name.' revised the record for '.$employee->fullName(),
+                    actor: $founder, at: $this->momentOn(12 - $offset * 2));
+            }
+        });
+    }
+
+    /**
+     * The account of the first person whose job title mentions any of these words.
+     *
+     * Matched on the title rather than on a role slug because role slugs are configurable per
+     * company (section 73) — the whole point of the two demo tenants is that they do not share a
+     * vocabulary, and a helper that assumed they did would work for one and silently fall back for
+     * the other.
+     *
+     * @param  Collection<int,Employee>  $people
+     * @param  array<int,string>  $words
+     */
+    private function whoever($people, array $words): ?User
+    {
+        foreach ($people as $employee) {
+            $title = Str::lower((string) $employee->position?->title).' ';
+
+            foreach ($words as $word) {
+                if (str_contains($title, $word)) {
+                    return $employee->user;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /** A believable working-hours timestamp this many days ago. */
+    private function momentOn(int $daysAgo): \DateTimeInterface
+    {
+        return now()->subDays(max(0, $daysAgo))
+            ->setTime(random_int(8, 17), random_int(0, 59), random_int(0, 59));
     }
 
     // ================================================================= helpers

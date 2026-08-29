@@ -30,6 +30,9 @@ class AccessResolver
     /** @var array<string,array<string,ScopeSet>> in-request memo, keyed by cache key */
     private array $memo = [];
 
+    /** @var array<int,bool> in-request memo of tenant liveness, keyed by organization id */
+    private array $tenantActive = [];
+
     private const CACHE_TTL = 3600;
 
     /**
@@ -179,10 +182,42 @@ class AccessResolver
         return sprintf('perm:%d:%d:v%d', $user->organization_id ?? 0, $user->id, $version);
     }
 
+    /**
+     * Is the user's own tenant still live?
+     *
+     * A suspended organization authorizes nothing. EnsureOrganizationContext already refuses the
+     * request at the door and destroys the session, so on the web this is a second answer to a
+     * question already asked — but the middleware only guards HTTP. A queued job, a console
+     * command, a scheduled report and any future console-driven export all reach the policies
+     * without ever passing through it, and "the tenant stopped paying" has to mean the same thing
+     * on every one of those paths.
+     *
+     * Read straight from the table rather than through `$user->organization`: policies run inside
+     * loops over collections, where Eloquent's lazy-loading guard is armed and a relation access
+     * would throw. Memoized on this request-scoped singleton, so it costs one query per tenant per
+     * request and nothing thereafter.
+     */
+    public function tenantIsActive(User $user): bool
+    {
+        // No tenant is not a permissive state. It is a broken account, and the answer is no.
+        $id = (int) ($user->organization_id ?? 0);
+
+        if ($id === 0) {
+            return false;
+        }
+
+        return $this->tenantActive[$id] ??= DB::table('organizations')
+            ->where('id', $id)
+            ->where('is_active', true)
+            ->whereNull('deleted_at')
+            ->exists();
+    }
+
     /** Drop the in-request memo. Cross-request invalidation happens via permissions_version. */
     public function flushMemo(): void
     {
         $this->memo = [];
+        $this->tenantActive = [];
     }
 
     public function forget(User $user): void
