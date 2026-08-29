@@ -12,7 +12,7 @@ pass. No phase starts before the phase it depends on is verified end-to-end.
 
 ---
 
-## PHASE 1 — Foundation ⬜
+## PHASE 1 — Foundation ✅
 
 Laravel skeleton · authentication · organizations · users · employees · org units (configurable
 tree) · positions · locations · roles · permissions · access scopes · `ScopedPolicy` ·
@@ -21,6 +21,12 @@ tree) · positions · locations · roles · permissions · access scopes · `Sco
 
 **Exit criteria:** a user in Org A cannot see any record of Org B; permission + scope resolution is
 unit-tested; every write is audited.
+
+**Met.** 80 tests, 418 assertions. `TenantIsolationTest` covers the boundary including search
+(§61); `ScopeAlgebraTest`, `ScopeResolutionTest` and `RecordAclTest` cover resolution, and assert
+that the policy and the compiled list agree on every record; `TenantScopeCoverageTest` reads the
+schema so a later phase cannot add an unscoped table without failing the build; `Phase1SmokeTest`
+requests every authenticated route three ways — permitted, unpermitted (403), anonymous.
 
 ## PHASE 2 — Core operations ⬜
 
