@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Tests\Feature\Seeders;
 
 use App\Engines\Access\OrganizationContext;
+use App\Models\Announcement;
+use App\Models\Meeting;
+use App\Models\Memo;
 use App\Models\Organization;
 use App\Models\Project;
 use App\Models\ProjectMember;
@@ -14,6 +17,7 @@ use App\Models\User;
 use App\Services\TaskService;
 use Database\Seeders\DemoSeeder;
 use Database\Seeders\PermissionSeeder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\Test;
@@ -219,6 +223,228 @@ final class DemoSeederTest extends TestCase
         );
     }
 
+    #[Test]
+    public function each_company_says_something_as_well_as_doing_something(): void
+    {
+        foreach ([$this->meridian, $this->kestrel] as $organization) {
+            [$memos, $notices, $meetings] = $this->within($organization, fn () => [
+                Memo::query()->get(),
+                Announcement::query()->get(),
+                Meeting::query()->get(),
+            ]);
+
+            $this->assertGreaterThan(0, $memos->count(), $organization->name.' has no memos.');
+            $this->assertGreaterThan(0, $notices->count(), $organization->name.' has no announcements.');
+            $this->assertGreaterThan(0, $meetings->count(), $organization->name.' has no meetings.');
+
+            foreach ($memos->concat($notices)->concat($meetings) as $record) {
+                $this->assertSame(
+                    (int) $organization->id,
+                    (int) $record->organization_id,
+                    $record->number.' was seeded outside '.$organization->name.'.',
+                );
+            }
+        }
+    }
+
+    #[Test]
+    public function a_drafted_memo_is_invisible_to_the_people_it_names(): void
+    {
+        // The publication curtain, asked of the demo rather than of a fixture. Being on the
+        // distribution of a DRAFT grants nothing: the recipient rows exist, and they will become a
+        // reach grant the moment it is issued, but until then the memo belongs to its author alone.
+        //
+        // This is the failure an evaluator would never notice by clicking around — a draft that
+        // leaked would simply look like a memo — so it is worth a test on the seeded data itself.
+        $closure = $this->meridianMemo('Year-end office closure and skeleton cover arrangements');
+        $hrManager = $this->account($this->meridian, 'a.tijani@meridian-eng.example');
+        $author = $this->account($this->meridian, 'c.nwachukwu@meridian-eng.example');
+
+        $this->assertNull($closure->issued_at, 'the demo no longer contains an unissued memo.');
+        $this->assertGreaterThan(
+            0,
+            $this->within($this->meridian, fn () => $closure->recipients()->count()),
+            'the draft memo names nobody, so it cannot show that naming somebody grants nothing yet.',
+        );
+
+        $this->assertContains(
+            (int) $hrManager->id,
+            $this->within($this->meridian, fn () => $closure->recipients()->pluck('user_id')
+                ->map(fn ($id) => (int) $id)->all()),
+            'the HR manager is no longer on the draft’s distribution.',
+        );
+
+        $this->assertNotContains(
+            (int) $closure->id,
+            $this->visibleIds(Memo::class, $hrManager, 'memo.view'),
+            'a named recipient can read a memo that was never issued.',
+        );
+
+        $this->assertContains(
+            (int) $closure->id,
+            $this->visibleIds(Memo::class, $author, 'memo.view'),
+            'the author cannot see their own draft.',
+        );
+    }
+
+    #[Test]
+    public function the_confidential_memo_is_reachable_only_through_the_distribution_it_was_issued_to(): void
+    {
+        // Gate 5, and the one path through it. No role in the catalogue holds `memo.view_confidential`
+        // at all, so the ONLY way to open this memo is the explicit allow row that issuing wrote for
+        // each recipient.
+        //
+        // The contrast is what makes it a test. Daniel Mbeki holds `memo.view` at `assigned` — the
+        // narrowest grant there is — and reads it. Chioma Nwachukwu holds `memo.view` across the
+        // whole company, the widest ordinary grant, and cannot, because breadth of scope has nothing
+        // to do with clearance.
+        $variation = $this->meridianMemo('Commercial position on RPDC variation VO-04');
+        $onTheList = $this->account($this->meridian, 'd.mbeki@meridian-eng.example');
+        $notOnTheList = $this->account($this->meridian, 'c.nwachukwu@meridian-eng.example');
+
+        $this->assertSame('confidential', $variation->confidentiality->value);
+        $this->assertNotNull($variation->issued_at, 'the confidential memo was never issued, so no ACL row exists.');
+
+        $this->assertContains(
+            (int) $variation->id,
+            $this->visibleIds(Memo::class, $onTheList, 'memo.view'),
+            'somebody on the distribution of an issued confidential memo cannot open it.',
+        );
+
+        $this->assertNotContains(
+            (int) $variation->id,
+            $this->visibleIds(Memo::class, $notOnTheList, 'memo.view'),
+            'company-wide memo.view is reading a confidential memo it was never sent.',
+        );
+    }
+
+    #[Test]
+    public function a_withdrawn_memo_keeps_the_record_of_what_people_were_told(): void
+    {
+        // §59. Withdrawing is not deleting: four people approved overtime against this for a
+        // fortnight, and two of them have a read receipt proving they saw it. The instruction is
+        // cancelled; the evidence that it was given is not.
+        $overtime = $this->meridianMemo('Interim overtime authorisation limits');
+        $hrManager = $this->account($this->meridian, 'a.tijani@meridian-eng.example');
+
+        $this->assertNotNull($overtime->issued_at);
+        $this->assertNotEmpty($overtime->withdrawn_reason, 'the memo was withdrawn without saying why.');
+
+        $receipt = $this->within($this->meridian, fn () => $overtime->recipients()
+            ->where('user_id', $hrManager->id)->first());
+
+        $this->assertNotNull($receipt, 'the withdrawal removed a name from the distribution.');
+        $this->assertNotNull($receipt->read_at, 'the read receipt was lost when the memo was withdrawn.');
+
+        $this->assertContains(
+            (int) $overtime->id,
+            $this->visibleIds(Memo::class, $hrManager, 'memo.view'),
+            'a recipient can no longer see a memo they acted on.',
+        );
+    }
+
+    #[Test]
+    public function uncirculated_minutes_are_readable_by_the_person_who_wrote_them_and_by_nobody_in_the_room(): void
+    {
+        // Recording is not publishing. Everybody invited to the design review can see that it
+        // happened; what they cannot see is a half-written record of what was said, until whoever
+        // holds `meeting.circulate` releases it.
+        //
+        // Note that this is a FIELD rule, not a record rule — which is why the assertion below
+        // checks that the piping engineer reaches the MEETING and is still refused the MINUTES.
+        $review = $this->meridianMeeting('Engineering design review — tank farm piping squad check');
+        $secretary = $this->account($this->meridian, 'l.fashola@meridian-eng.example');
+        $attendee = $this->account($this->meridian, 's.afolabi@meridian-eng.example');
+
+        $this->assertTrue($review->hasMinutes(), 'the design review has no minutes to withhold.');
+        $this->assertNull($review->minutes_circulated_at, 'the demo no longer contains uncirculated minutes.');
+
+        $this->assertContains(
+            (int) $review->id,
+            $this->visibleIds(Meeting::class, $attendee, 'meeting.view'),
+            'an invited engineer cannot even see that the meeting happened.',
+        );
+
+        $this->within($this->meridian, function () use ($review, $secretary, $attendee) {
+            $this->assertTrue(
+                $review->minutesVisibleTo($secretary),
+                'the person who wrote the minutes cannot read them back.',
+            );
+
+            $this->assertFalse(
+                $review->minutesVisibleTo($attendee),
+                'uncirculated minutes are readable by the room.',
+            );
+        });
+
+        // And the other half of the claim: once released, they are simply part of the meeting.
+        $progress = $this->meridianMeeting('Delta Terminal — weekly project progress meeting');
+        $siteManager = $this->account($this->meridian, 'k.nwosu@meridian-eng.example');
+
+        $this->assertNotNull($progress->minutes_circulated_at, 'the demo contains no circulated minutes.');
+
+        $this->assertNotSame(
+            (int) $progress->minutes_recorded_by,
+            (int) $progress->organizer_id,
+            'the demo no longer shows minutes written by one person and released by another.',
+        );
+
+        $this->within($this->meridian, fn () => $this->assertTrue(
+            $progress->minutesVisibleTo($siteManager),
+            'circulated minutes are still hidden from somebody who was in the room.',
+        ));
+    }
+
+    #[Test]
+    public function the_meeting_that_produced_work_produced_an_ordinary_task(): void
+    {
+        // §90. The action arising is not a row in a private meeting_actions table that only the
+        // meeting page knows how to read: it is a Task, so it appears on the assignee's list, on the
+        // calendar, in the overdue report and in her notifications, none of which were told about
+        // meetings.
+        $progress = $this->meridianMeeting('Delta Terminal — weekly project progress meeting');
+        $action = $this->meridianTask(
+            'Reissue the tank 4 ring beam pour card against the revised settlement predictions',
+        );
+        $assignee = $this->account($this->meridian, 'n.eze@meridian-eng.example');
+
+        $this->assertSame($progress->getMorphClass(), $action->linked_type);
+        $this->assertSame((int) $progress->id, (int) $action->linked_id);
+        $this->assertSame((int) $assignee->id, (int) $action->assignee_id);
+
+        $this->assertContains(
+            (int) $action->id,
+            $this->visibleTaskIds($assignee),
+            'work raised at a meeting never reached the person it was given to.',
+        );
+
+        $this->assertSame(
+            (int) $progress->project_id,
+            (int) $action->project_id,
+            'the action arising landed on a different project from the meeting that raised it.',
+        );
+    }
+
+    #[Test]
+    public function the_communication_history_is_spread_like_the_delivery_history_is(): void
+    {
+        // Communications are back-dated one record at a time rather than swept, because each one has
+        // a date its own text refers to. The property to hold is the same either way: a timeline in
+        // which everything happened in one second teaches nothing about Engine 4.
+        $stamps = DB::table('activity_logs')
+            ->where('organization_id', $this->meridian->id)
+            ->whereIn('subject_type', ['memo', 'announcement', 'meeting'])
+            ->pluck('created_at');
+
+        $this->assertGreaterThan(0, $stamps->count(), 'the communications left no trail at all.');
+        $this->assertGreaterThan(1, $stamps->unique()->count(), 'every memo, notice and meeting happened at once.');
+        $this->assertLessThanOrEqual(
+            now()->toDateTimeString(),
+            (string) $stamps->max(),
+            'the demo contains communications from the future.',
+        );
+    }
+
     // ------------------------------------------------------------------ helpers
 
     /**
@@ -248,12 +474,36 @@ final class DemoSeederTest extends TestCase
         return $this->within($this->meridian, fn () => Task::query()->where('title', $title)->firstOrFail());
     }
 
+    private function meridianMemo(string $subject): Memo
+    {
+        return $this->within($this->meridian, fn () => Memo::query()->where('subject', $subject)->firstOrFail());
+    }
+
+    private function meridianMeeting(string $title): Meeting
+    {
+        return $this->within($this->meridian, fn () => Meeting::query()->where('title', $title)->firstOrFail());
+    }
+
     /** @return array<int,int> the ids the register would show this person */
     private function visibleTaskIds(User $person): array
     {
         return $this->within(
             $this->meridian,
             fn () => Task::visibleTo($person, 'task.view')->pluck('id')->map(fn ($id) => (int) $id)->all(),
+        );
+    }
+
+    /**
+     * The same question the index screen asks, for whichever record type is under test.
+     *
+     * @param  class-string<Model>  $model
+     * @return array<int,int>
+     */
+    private function visibleIds(string $model, User $person, string $permission, ?Organization $organization = null): array
+    {
+        return $this->within(
+            $organization ?? $this->meridian,
+            fn () => $model::visibleTo($person, $permission)->pluck('id')->map(fn ($id) => (int) $id)->all(),
         );
     }
 }

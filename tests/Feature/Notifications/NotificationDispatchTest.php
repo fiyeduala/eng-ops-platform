@@ -583,11 +583,4 @@ final class NotificationDispatchTest extends TestCase
 
         app(ActorProfile::class)->flush();
     }
-
-    private function actingFresh(User $user): static
-    {
-        $this->flushSession();
-
-        return $this->actingAs($user);
-    }
 }

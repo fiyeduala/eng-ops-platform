@@ -33,6 +33,21 @@ class ActorProfile
     }
 
     /**
+     * The user's own unit and every unit ABOVE it, root first.
+     *
+     * The mirror image of subtreeOf(): that answers "who is under me", this answers "who am I
+     * under". Used for broadcast routing — an announcement addressed to Engineering has to appear
+     * for somebody sitting three levels down inside it — and never for authorization, where reach
+     * always runs downward.
+     *
+     * @return array<int,int>
+     */
+    public function ancestorOrgUnitIds(User $user): array
+    {
+        return $this->profile($user)['ancestor_ids'];
+    }
+
+    /**
      * Ids of every org unit inside the subtree the given scope reaches.
      *
      * `department` walks UP from the user's own unit to the nearest ancestor of type
@@ -143,7 +158,7 @@ class ActorProfile
     }
 
     /**
-     * @return array{employee_id:?int,org_unit_id:?int,ancestors_by_type:array<string,int>,project_ids:array<int,int>}
+     * @return array{employee_id:?int,org_unit_id:?int,ancestors_by_type:array<string,int>,ancestor_ids:array<int,int>,project_ids:array<int,int>}
      */
     private function profile(User $user): array
     {
@@ -157,6 +172,7 @@ class ActorProfile
             ->first(['id', 'org_unit_id']);
 
         $ancestorsByType = [];
+        $ancestorIds = [];
         $orgUnitId = $employee?->org_unit_id ? (int) $employee->org_unit_id : null;
 
         if ($orgUnitId !== null) {
@@ -179,12 +195,20 @@ class ActorProfile
                     $ancestorsByType[$unit->type] = (int) $unit->id;
                 }
             }
+
+            // A unit whose materialized path was never written still has itself. Only broadcast
+            // routing reads this list, and losing your own unit there means missing notices
+            // addressed to the team you sit in.
+            if ($ancestorIds === []) {
+                $ancestorIds = [$orgUnitId];
+            }
         }
 
         return $this->cache[$user->id] = [
             'employee_id' => $employee?->id ? (int) $employee->id : null,
             'org_unit_id' => $orgUnitId,
             'ancestors_by_type' => $ancestorsByType,
+            'ancestor_ids' => $ancestorIds,
             'project_ids' => $this->loadProjectIds($user),
         ];
     }

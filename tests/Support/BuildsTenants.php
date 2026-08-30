@@ -8,13 +8,20 @@ use App\Engines\Access\OrganizationContext;
 use App\Engines\Configuration\StatusMachine;
 use App\Engines\Organization\OrganizationProvisioner;
 use App\Engines\Organization\OrgUnitService;
+use App\Models\Announcement;
 use App\Models\Employee;
+use App\Models\Meeting;
+use App\Models\Memo;
 use App\Models\Organization;
 use App\Models\OrgUnit;
 use App\Models\Project;
 use App\Models\Role;
+use App\Models\Status;
 use App\Models\Task;
 use App\Models\User;
+use App\Services\AnnouncementService;
+use App\Services\MeetingService;
+use App\Services\MemoService;
 use App\Services\ProjectService;
 use App\Services\TaskService;
 use App\Support\Enums\Confidentiality;
@@ -51,6 +58,23 @@ trait BuildsTenants
     protected function withinOrganization(Organization $organization, callable $callback): mixed
     {
         return $this->context()->within($organization, $callback);
+    }
+
+    /**
+     * Sign in, discarding whatever session the previous actor left behind.
+     *
+     * An access test walks three or four people through the same page in one method, and the session
+     * carries a hash of the signed-in account's password (AuthenticateSession, bootstrap/app.php).
+     * Reusing it across actors logs the second one straight back out — a 302 to /login, which is
+     * indistinguishable at a glance from the 403 these tests exist to tell apart from success, and
+     * which quietly turns an `assertRedirect()` on a write into a passing assertion about a request
+     * that never ran.
+     */
+    protected function actingFresh(User $user): static
+    {
+        $this->flushSession();
+
+        return $this->actingAs($user);
     }
 
     protected function makeOrganization(string $name): Organization
@@ -237,5 +261,158 @@ trait BuildsTenants
             'priority' => 'normal',
             ...$attributes,
         ], $actor));
+    }
+
+    /**
+     * A memo, still a draft, optionally addressed to people.
+     *
+     * Left as a draft on purpose. Issuing is the act that makes a memo visible to anybody but its
+     * author, so a fixture that issued silently would hide the draft curtain from every test that
+     * used it. A test that wants an issued memo says so, through issueMemo().
+     *
+     * @param  array<string,mixed>  $attributes
+     * @param  array<int,User|int>  $recipients
+     */
+    protected function makeMemo(
+        Organization $organization,
+        User $actor,
+        string $subject,
+        array $attributes = [],
+        array $recipients = [],
+    ): Memo {
+        $this->provisionConfiguration($organization);
+
+        return $this->withinOrganization($organization, function () use ($actor, $subject, $attributes, $recipients) {
+            $memo = app(MemoService::class)->create([
+                'subject' => $subject,
+                'body' => 'For the attention of the distribution list.',
+                'confidentiality' => Confidentiality::Internal,
+                ...$attributes,
+            ], $actor);
+
+            if ($recipients !== []) {
+                app(MemoService::class)->address(
+                    $memo,
+                    array_map(fn ($r) => (int) ($r instanceof User ? $r->getKey() : $r), $recipients),
+                    $actor,
+                );
+            }
+
+            return $memo->refresh();
+        });
+    }
+
+    /**
+     * Issue a draft memo — the publication act, through the state machine rather than by writing
+     * `issued_at` directly, because the column and the status have to agree and only one code path
+     * makes sure they do.
+     */
+    protected function issueMemo(Organization $organization, Memo $memo, User $actor): Memo
+    {
+        return $this->moveTo($organization, 'memo', $memo, 'issued', $actor);
+    }
+
+    /**
+     * An announcement, still a draft. Same reasoning as makeMemo().
+     *
+     * @param  array<string,mixed>  $attributes
+     */
+    protected function makeAnnouncement(
+        Organization $organization,
+        User $actor,
+        string $title,
+        array $attributes = [],
+    ): Announcement {
+        $this->provisionConfiguration($organization);
+
+        return $this->withinOrganization($organization, fn () => app(AnnouncementService::class)->create([
+            'title' => $title,
+            'body' => 'Please note the following.',
+            'urgency' => 'normal',
+            ...$attributes,
+        ], $actor));
+    }
+
+    protected function publishAnnouncement(Organization $organization, Announcement $announcement, User $actor): Announcement
+    {
+        return $this->moveTo($organization, 'announcement', $announcement, 'published', $actor);
+    }
+
+    /**
+     * A meeting, with an invitation list.
+     *
+     * Defaults to next week so it is upcoming, which is the register's default view — a fixture
+     * dated in the past would be missing from the list the test is most likely to assert on.
+     *
+     * @param  array<string,mixed>  $attributes
+     * @param  array<int,User|int>  $participants
+     */
+    protected function makeMeeting(
+        Organization $organization,
+        User $actor,
+        string $title,
+        array $attributes = [],
+        array $participants = [],
+    ): Meeting {
+        $this->provisionConfiguration($organization);
+
+        return $this->withinOrganization($organization, function () use ($actor, $title, $attributes, $participants) {
+            $meeting = app(MeetingService::class)->create([
+                'title' => $title,
+                'agenda' => 'Matters arising, progress, and the look-ahead.',
+                'starts_at' => now()->addWeek()->setTime(10, 0),
+                'ends_at' => now()->addWeek()->setTime(11, 30),
+                'location' => 'Meeting Room 2',
+                'confidentiality' => Confidentiality::Internal,
+                ...$attributes,
+            ], $actor);
+
+            if ($participants !== []) {
+                app(MeetingService::class)->invite(
+                    $meeting,
+                    array_map(fn ($p) => (int) ($p instanceof User ? $p->getKey() : $p), $participants),
+                    $actor,
+                );
+            }
+
+            return $meeting->refresh();
+        });
+    }
+
+    /**
+     * Move any record with a status onto a named status, through the machine.
+     *
+     * Fixtures reach for this rather than updating `status_id` themselves: the transition is where
+     * the publication stamp, the event and the timeline entry are written, and a test whose setup
+     * skipped it would be asserting against a state the application cannot actually produce.
+     *
+     * @template TModel of \Illuminate\Database\Eloquent\Model
+     *
+     * @param  TModel  $record
+     * @return TModel
+     */
+    protected function moveTo(
+        Organization $organization,
+        string $entityType,
+        $record,
+        string $statusKey,
+        User $actor,
+        ?string $comment = null,
+    ) {
+        return $this->withinOrganization($organization, function () use ($entityType, $record, $statusKey, $actor, $comment) {
+            $to = Status::query()
+                ->forEntity($entityType)
+                ->where('key', $statusKey)
+                ->firstOrFail();
+
+            $service = match ($entityType) {
+                'memo' => app(MemoService::class),
+                'announcement' => app(AnnouncementService::class),
+                'meeting' => app(MeetingService::class),
+                default => throw new \InvalidArgumentException($entityType.' has no fixture transition.'),
+            };
+
+            return $service->transition($record, $to, $actor, $comment)->refresh();
+        });
     }
 }

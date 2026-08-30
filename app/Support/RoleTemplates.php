@@ -59,6 +59,20 @@ final class RoleTemplates
         'task.view' => 'assigned',       // tasks given to me
         'task.complete' => 'assigned',
         'announcement.view' => 'organization',
+
+        // Communication addressed to me personally (§18, §19). At `assigned` scope, which for these
+        // two modules means the distribution list and the participant list — so this grants sight of
+        // memos somebody sent me and meetings somebody invited me to, and nothing else.
+        //
+        // Without these the modules are unusable for most of the company in a way that looks like a
+        // bug rather than a policy: several templates below grant memo.create or meeting.manage but
+        // no matching `.view`, which would let a site administrator write a memo and then be unable
+        // to open it. A person who is sent a memo can plainly be shown it; a person who is expected
+        // in a room can plainly be shown the appointment. The permissions that decide who ELSE sees
+        // them — memo.issue, meeting.circulate — are deliberately absent.
+        'memo.view' => 'assigned',
+        'meeting.view' => 'assigned',
+
         'dashboard.view' => 'own',
 
         // Company reference data. These are labels the interface cannot render without: the org
@@ -144,7 +158,24 @@ final class RoleTemplates
                     'kpi.view' => 'organization',
                     'report.create' => 'organization',
                     'approval.act' => 'organization',
+                    // `create` and `edit` travel together, here and in every template below that
+                    // grants either. A memo's distribution list is part of the document, so
+                    // MemoPolicy::address() asks `memo.edit` — and a memo cannot be issued with
+                    // nobody on it. A role holding `memo.create` and `memo.issue` but not
+                    // `memo.edit` can therefore draft a memo, fail to address it, and then fail to
+                    // send it: the module is unusable in a way that reads as a broken screen rather
+                    // than as a deliberate limit. The same pairing holds for meetings, where
+                    // MeetingPolicy::invite() asks `meeting.edit`.
+                    //
+                    // `delete` is here for the narrow case it exists for: a draft written by
+                    // mistake. Both policies refuse to delete anything that has gone out.
                     'memo.create' => 'organization',
+                    'memo.edit' => 'organization',
+                    'memo.delete' => 'organization',
+                    'memo.issue' => 'organization',
+                    'announcement.create' => 'organization',
+                    'announcement.edit' => 'organization',
+                    'announcement.delete' => 'organization',
                     'announcement.publish' => 'organization',
                 ],
             ],
@@ -207,6 +238,7 @@ final class RoleTemplates
                     'project.view_financials' => 'project',
                     'project_member.manage' => 'project',
                     'task.view' => 'project',
+                    'task.create' => 'project',
                     'task.manage' => 'project',
                     'document.approve' => 'project',
                     'document.view' => 'project',
@@ -214,7 +246,13 @@ final class RoleTemplates
                     'drawing.approve' => 'project',
                     'change_request.approve' => 'project',
                     'purchase_request.approve' => 'project',
+                    // `edit` is what invites people (MeetingPolicy::invite) — see managing-director.
+                    'meeting.create' => 'project',
+                    'meeting.edit' => 'project',
                     'meeting.manage' => 'project',
+                    'meeting.view' => 'project',
+                    'meeting.record_minutes' => 'project',
+                    'meeting.circulate' => 'project',
                     'daily_report.view' => 'project',
                     'report.view' => 'project',
                     'approval.act' => 'project',
@@ -239,6 +277,12 @@ final class RoleTemplates
                     // line a project manager could reassign and close the work on their own job
                     // while the task register showed them nothing but their own two tasks.
                     'task.view' => 'project',
+
+                    // `manage` and `assign` do not imply `create` — see the note above on
+                    // memo.create/memo.edit. Without this the person who runs the job can reassign
+                    // and close its work but never raise any, including the actions arising from
+                    // their own meetings (MeetingController::raiseAction asks `task.create`).
+                    'task.create' => 'project',
                     'task.manage' => 'project',
                     'task.assign' => 'project',
                     'document.view' => 'project',
@@ -250,7 +294,13 @@ final class RoleTemplates
                     'rfi.*' => 'project',
                     'submittal.review' => 'project',
                     'change_request.submit' => 'project',
+                    'meeting.create' => 'project',
+                    'meeting.edit' => 'project',
+                    'meeting.delete' => 'project',
                     'meeting.manage' => 'project',
+                    'meeting.view' => 'project',
+                    'meeting.record_minutes' => 'project',
+                    'meeting.circulate' => 'project',
                     'daily_report.approve' => 'project',
                     'daily_report.view' => 'project',
                     'purchase_request.submit' => 'project',
@@ -271,6 +321,7 @@ final class RoleTemplates
                 'pin' => null,
                 'grants' => [
                     '*.view' => 'department',
+                    'task.create' => 'department',
                     'task.manage' => 'department',
                     'task.assign' => 'department',
                     'project_member.assign' => 'department',
@@ -306,12 +357,18 @@ final class RoleTemplates
                     'document.view' => 'department',
                     'document.review' => 'department',
                     'task.view' => 'department',
+                    'task.create' => 'department',
                     'task.manage' => 'department',
                     'task.assign' => 'department',
                     'project.view' => 'project',
                     'employee.view' => 'department',
                     'leave.approve' => 'department',
+                    'meeting.create' => 'department',
+                    'meeting.edit' => 'department',
                     'meeting.manage' => 'department',
+                    'meeting.view' => 'department',
+                    'meeting.record_minutes' => 'department',
+                    'meeting.circulate' => 'department',
                     'report.view' => 'department',
                     'dashboard.view_department' => 'department',
                     'approval.act' => 'department',
@@ -336,10 +393,14 @@ final class RoleTemplates
                     'rfi.respond' => 'department',
                     'rfi.view' => 'department',
                     'task.view' => 'team',
+                    'task.create' => 'team',
                     'task.assign' => 'team',
                     'task.manage' => 'team',
                     'project.view' => 'project',
                     'meeting.create' => 'team',
+                    'meeting.edit' => 'team',
+                    'meeting.view' => 'team',
+                    'meeting.record_minutes' => 'team',
                     'daily_report.view' => 'team',
                     'approval.act' => 'department',
                 ],
@@ -729,11 +790,27 @@ final class RoleTemplates
                 'pin' => null,
                 'grants' => [
                     'visitor.*' => 'organization',
+                    'meeting.create' => 'organization',
+                    'meeting.edit' => 'organization',
+                    'meeting.delete' => 'organization',
                     'meeting.manage' => 'organization',
                     'meeting.view' => 'organization',
+                    'meeting.record_minutes' => 'organization',
+                    'meeting.circulate' => 'organization',
                     'memo.create' => 'organization',
+                    'memo.edit' => 'organization',
+                    'memo.delete' => 'organization',
                     'memo.view' => 'organization',
+                    'memo.issue' => 'organization',
                     'announcement.create' => 'organization',
+                    'announcement.edit' => 'organization',
+                    'announcement.delete' => 'organization',
+
+                    // Drafting a notice and putting it in front of the whole company are two
+                    // decisions, and this role holds both — an office administrator who has to ask
+                    // a director to press Publish on every canteen notice is a role nobody uses.
+                    // Contrast site-administrator below, who drafts and hands up.
+                    'announcement.publish' => 'organization',
                     'employee.view' => 'organization',
                     'employee.view_contact' => 'organization',
                     'document.view' => 'organization',
@@ -756,7 +833,17 @@ final class RoleTemplates
                     'daily_report.view' => 'project',
                     'daily_report.create' => 'project',
                     'memo.create' => 'project',
+                    'memo.edit' => 'project',
+                    'memo.view' => 'project',
+
+                    // Deliberately no memo.issue and no announcement.publish. A site administrator
+                    // drafts and hands up: putting a memo out over the site is the project manager's
+                    // signature, not the office's. Compare office-administrator above, who holds
+                    // both because there is nobody above them to hand a canteen notice to.
                     'meeting.create' => 'project',
+                    'meeting.edit' => 'project',
+                    'meeting.view' => 'project',
+                    'meeting.record_minutes' => 'project',
                     'employee.view' => 'project',
                     'project.view' => 'project',
                     'document.view' => 'project',
@@ -773,8 +860,14 @@ final class RoleTemplates
                     'project.edit' => 'project',
                     'project_member.manage' => 'project',
                     'task.view' => 'project',
+                    'task.create' => 'project',
                     'task.manage' => 'project',
+                    'meeting.create' => 'project',
+                    'meeting.edit' => 'project',
                     'meeting.manage' => 'project',
+                    'meeting.view' => 'project',
+                    'meeting.record_minutes' => 'project',
+                    'meeting.circulate' => 'project',
                     'document.view' => 'project',
                     'document.create' => 'project',
                     'daily_report.view' => 'project',
@@ -792,12 +885,18 @@ final class RoleTemplates
                     'employee.view' => 'department',
                     'employee.edit' => 'department',
                     'task.view' => 'department',
+                    'task.create' => 'department',
                     'task.manage' => 'department',
                     'leave.view' => 'department',
                     'attendance.view' => 'department',
                     'timesheet.view' => 'department',
                     'document.view' => 'department',
+                    'meeting.create' => 'department',
+                    'meeting.edit' => 'department',
                     'meeting.manage' => 'department',
+                    'meeting.view' => 'department',
+                    'meeting.record_minutes' => 'department',
+                    'meeting.circulate' => 'department',
                     'org_unit.view' => 'department',
                     'report.view' => 'department',
                 ],

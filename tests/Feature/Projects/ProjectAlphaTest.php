@@ -505,21 +505,6 @@ final class ProjectAlphaTest extends TestCase
             ->exists());
     }
 
-    /**
-     * Sign in, discarding whatever session the previous actor left behind.
-     *
-     * Several of these tests walk five people through the same page in one method, and the session
-     * carries a hash of the signed-in account's password. Reusing it across actors logs the second
-     * one straight back out — a redirect to /login, which is indistinguishable at a glance from the
-     * refusal these tests exist to tell apart from success.
-     */
-    private function actingFresh(User $user): static
-    {
-        $this->flushSession();
-
-        return $this->actingAs($user);
-    }
-
     private function statusNamed(string $entityType, string $key): Status
     {
         return $this->withinOrganization($this->org, fn () => Status::query()

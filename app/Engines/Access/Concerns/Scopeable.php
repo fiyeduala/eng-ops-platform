@@ -114,6 +114,44 @@ trait Scopeable
     }
 
     /**
+     * Timestamp column that decides whether this record has been PUBLISHED yet, or null for
+     * models where every row is real the moment it is saved.
+     *
+     * A memo and an announcement are the two records in the system that exist in a state before
+     * they are meant to be read. Ordinary scope cannot express that: a memo drafted for the whole
+     * of Engineering has `org_unit_id = Engineering` from the first keystroke, so every scope rule
+     * that will reach it once issued already reaches it while it is half-written. That is not a
+     * cosmetic problem — an unissued memo is a document somebody is still deciding whether to
+     * send, and the recipients reading it before that decision is made is the worst possible
+     * outcome for the module.
+     *
+     * When this returns a column, ScopeCompiler adds one more predicate: the column is not null,
+     * OR the record is the actor's own, OR the actor has been shared it explicitly, OR the actor
+     * holds the publication ability below. Drafts are otherwise invisible to everyone, including
+     * a director with organization-wide reach — the whole point is that reach does not apply yet.
+     */
+    public function accessPublicationColumn(): ?string
+    {
+        return null;
+    }
+
+    /**
+     * The permission whose holders may see this model's DRAFTS.
+     *
+     * Not `edit` and not `manage`: the question is who decides that a draft becomes a
+     * communication, which is exactly the ability behind the publish transition (`memo.issue`,
+     * `announcement.publish`). Their ordinary scope still applies on top — this lifts the draft
+     * curtain, it does not widen reach — so a department-scoped issuer sees their own
+     * department's drafts and nobody else's.
+     *
+     * Deliberately mirrors how `<module>.view_confidential` works in applyConfidentiality().
+     */
+    public function accessPublicationAbility(): ?string
+    {
+        return null;
+    }
+
+    /**
      * Extend "assigned to me" beyond simple columns — participants, followers, reviewers.
      *
      * Called inside an OR group, so implementations must use orWhere / orWhereExists.

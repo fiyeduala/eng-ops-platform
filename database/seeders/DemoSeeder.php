@@ -9,8 +9,11 @@ use App\Engines\Audit\ActivityRecorder;
 use App\Engines\Configuration\StatusMachine;
 use App\Engines\Organization\OrganizationProvisioner;
 use App\Engines\Organization\OrgUnitService;
+use App\Models\Announcement;
 use App\Models\Employee;
 use App\Models\Location;
+use App\Models\Meeting;
+use App\Models\Memo;
 use App\Models\Organization;
 use App\Models\OrgUnit;
 use App\Models\Position;
@@ -21,12 +24,17 @@ use App\Models\Role;
 use App\Models\Status;
 use App\Models\Task;
 use App\Models\User;
+use App\Services\AnnouncementService;
+use App\Services\MeetingService;
+use App\Services\MemoService;
 use App\Services\ProjectService;
 use App\Services\ProjectTeamService;
 use App\Services\TaskChecklistService;
 use App\Services\TaskDependencyService;
 use App\Services\TaskService;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -69,6 +77,12 @@ class DemoSeeder extends Seeder
 
     private TaskDependencyService $dependencies;
 
+    private MemoService $memos;
+
+    private AnnouncementService $notices;
+
+    private MeetingService $meetings;
+
     private StatusMachine $statuses;
 
     /** @var array<string,ProjectType> slug => type, for the tenant currently being seeded */
@@ -96,6 +110,13 @@ class DemoSeeder extends Seeder
         $this->seedMeridianDelivery($meridian);
         $this->seedKestrelDelivery($kestrel);
 
+        // What each company is SAYING to itself (§17, §18, §19). Seeded after delivery because
+        // memos, notices and meetings are about the work: they name the projects, the departments
+        // and the people the pass above created, and a meeting whose action item points at nothing
+        // demonstrates the opposite of §90.
+        $this->seedMeridianCommunications($meridian);
+        $this->seedKestrelCommunications($kestrel);
+
         // The rows above were written straight to the database, so nothing observed them happening.
         // A demo whose record timelines are all blank teaches the wrong lesson about Engine 4 — the
         // timeline is meant to be the first thing you see on a record, and an empty one looks like
@@ -106,7 +127,7 @@ class DemoSeeder extends Seeder
         $this->command?->newLine();
         $this->command?->info('Demo organizations created:');
         $this->command?->table(
-            ['Organization', 'Structure', 'Units', 'People', 'Projects', 'Tasks', 'Sign in with'],
+            ['Organization', 'Structure', 'Units', 'People', 'Projects', 'Tasks', 'Memos/notices/meetings', 'Sign in with'],
             [
                 ['Meridian Engineering & Infrastructure', '4-level (division→team)',
                     ...$this->tally($meridian), 'a.okonkwo@meridian-eng.example'],
@@ -130,7 +151,7 @@ class DemoSeeder extends Seeder
      * behaving correctly; a seeder summary that reported real numbers from nowhere would mean
      * the isolation guarantee had a hole in it.
      *
-     * @return array{0:int,1:int,2:int,3:int}
+     * @return array{0:int,1:int,2:int,3:int,4:string}
      */
     private function tally(Organization $organization): array
     {
@@ -139,6 +160,12 @@ class DemoSeeder extends Seeder
             $organization->employees()->count(),
             Project::query()->count(),
             Task::query()->count(),
+            sprintf(
+                '%d / %d / %d',
+                Memo::query()->count(),
+                Announcement::query()->count(),
+                Meeting::query()->count(),
+            ),
         ]);
     }
 
@@ -961,6 +988,814 @@ class DemoSeeder extends Seeder
         });
     }
 
+    // ================================================================= what the companies say
+
+    /**
+     * Meridian's memos, notices and meetings (§17, §18, §19).
+     *
+     * Written through the services for the same reason the delivery pass is: every number here comes
+     * out of the tenant's own scheme, every state move goes through the configured whitelist, and
+     * every recipient row is written by the code that also grants the access it implies. Seed data
+     * produced any other way would show states the application will not let anybody reach.
+     *
+     * Four things are here to be demonstrated rather than merely populated:
+     *
+     *   - THE DRAFT CURTAIN. One memo and one notice are addressed and never issued. Their named
+     *     recipients cannot see them, which is the publication predicate doing its job and the single
+     *     easiest thing for a communications module to get wrong.
+     *   - THE ACL PATH. One memo is confidential and one is restricted. Neither is reachable by
+     *     ordinary scope — the recipients open them because issuing wrote them an explicit allow row,
+     *     which is exactly what §67 and Gate 5 describe.
+     *   - RECORDING IS NOT PUBLISHING. The progress meeting's minutes are written by the secretary
+     *     and released by the chair, and the design review's minutes are written and deliberately
+     *     NOT released, so the demo contains a meeting whose minutes only the author and the
+     *     circulator can read.
+     *   - A MEETING THAT PRODUCED WORK. The action arising is an ordinary Task pointed back at the
+     *     meeting, so it turns up on its assignee's list, in their notifications and on the calendar
+     *     — none of which would ever look inside a private actions table (§90).
+     */
+    private function seedMeridianCommunications(Organization $organization): void
+    {
+        $this->context->within($organization, function () {
+            $this->bootDelivery();
+
+            $staff = $this->staff();
+            $unit = $this->unitsByCode();
+            $job = Project::query()->get()->keyBy('code');
+
+            $md = $this->accountOf($staff, 'MEI-0001');                  // Adaeze Okonkwo
+            $ops = $this->accountOf($staff, 'MEI-0003');                 // Chinedu Balogun
+            $engineeringManager = $this->accountOf($staff, 'MEI-0004');  // Farida Yusuf
+            $leadEngineer = $this->accountOf($staff, 'MEI-0005');        // Marcus Adeyemi
+            $structuralEngineer = $this->accountOf($staff, 'MEI-0006');  // Ngozi Eze
+            $pipingEngineer = $this->accountOf($staff, 'MEI-0007');      // Segun Afolabi
+            $electricalEngineer = $this->accountOf($staff, 'MEI-0008');  // Priya Raghunathan
+            $documentController = $this->accountOf($staff, 'MEI-0010');  // Helen Obi
+            $projectManager = $this->accountOf($staff, 'MEI-0011');      // Daniel Mbeki
+            $siteManager = $this->accountOf($staff, 'MEI-0012');         // Kelechi Nwosu
+            $hseManager = $this->accountOf($staff, 'MEI-0013');          // Grace Ibrahim
+            $hseOfficer = $this->accountOf($staff, 'MEI-0014');          // Emeka Duru
+            $qaManager = $this->accountOf($staff, 'MEI-0015');           // Yemi Bakare
+            $qaInspector = $this->accountOf($staff, 'MEI-0016');         // Ruth Okafor
+            $hrManager = $this->accountOf($staff, 'MEI-0017');           // Amina Tijani
+            $financeManager = $this->accountOf($staff, 'MEI-0018');      // Victor Anyanwu
+            $procurementManager = $this->accountOf($staff, 'MEI-0019');  // Bisi Adeleke
+            $fleetManager = $this->accountOf($staff, 'MEI-0022');        // Tunde Ogunleye
+            $officeAdmin = $this->accountOf($staff, 'MEI-0024');         // Chioma Nwachukwu
+            $boundedAdmin = $this->accountOf($staff, 'MEI-0025');        // Lara Fashola
+
+            // ------------------------------------------------- memos
+            // Issued by the office administrator, who holds `memo.issue` across the company. The
+            // site team is on the `to` line because they have to act on it; QA and the operations
+            // director are copied because they need to know it happened.
+            $access = $this->memo($officeAdmin, [
+                'subject' => 'Revised site access and induction procedure — Delta Terminal',
+                'body' => "The client has tightened terminal access with effect from Monday.\n\n"
+                    .'1. Every person entering the terminal must now hold a valid RPDC induction card '
+                    .'in addition to the Meridian site induction. Cards are issued at the main gate '
+                    ."office between 07:00 and 09:00 only.\n"
+                    .'2. Vehicle passes are no longer transferable between subcontractors. Requests '
+                    ."for additional passes must reach the site office two working days in advance.\n"
+                    ."3. Visitors without a confirmed escort will be turned away at the gate.\n\n"
+                    .'Please brief your teams at tomorrow morning\'s toolbox talk.',
+                'project_id' => $job['DTE']->id,
+                'org_unit_id' => $unit['ADM']->id,
+            ], [$projectManager, $siteManager, $hseOfficer, $hseManager], [$qaInspector, $ops]);
+
+            $this->issue($access, $officeAdmin);
+
+            // Two of six have opened it. The gap is the point: "who has seen this" is the question a
+            // memo answers and an email does not, and a demo where everybody has read everything
+            // shows an empty answer.
+            $this->readBy($access, [$siteManager, $hseOfficer]);
+            $this->happened($access, $this->workingDay(26, 8), ['issued_at' => 55], 120);
+
+            // CONFIDENTIAL, and therefore unreachable by ordinary scope however senior the reader.
+            // Daniel Mbeki holds no `memo.view_confidential`; he can open this one because issuing it
+            // wrote him an explicit ACL allow row, and for no other reason. Take him off the
+            // distribution and the memo disappears for him — which is the whole design.
+            //
+            // No org unit: a memo from the managing director's office belongs to the company rather
+            // than to a department, and the column is nullable for exactly that.
+            $variation = $this->memo($md, [
+                'subject' => 'Commercial position on RPDC variation VO-04',
+                'body' => 'This memo is confidential and is not to be forwarded outside the '
+                    ."distribution below.\n\n"
+                    .'VO-04 (additional firewater ring main tie-ins) has been priced at '
+                    ."₦412m against the client's indicative ₦280m. Our position for Thursday's "
+                    ."commercial meeting is:\n\n"
+                    ."• We will not accept the indicative figure. The scope grew after the client's "
+                    ."own hazard review, and the correspondence trail supports us.\n"
+                    .'• We have room to settle at ₦370m provided the shutdown window is confirmed in '
+                    ."writing for 14–18 October.\n"
+                    ."• Any settlement below ₦340m must come back to me before it is offered.\n\n"
+                    .'Finance is to hold the provision at the full claim value until this closes.',
+                'project_id' => $job['DTE']->id,
+                'confidentiality' => 'confidential',
+            ], [$ops, $financeManager, $projectManager]);
+
+            $this->issue($variation, $md);
+            $this->readBy($variation, [$ops]);
+            $this->happened($variation, $this->workingDay(13, 17), ['issued_at' => 35], 90);
+
+            // Addressed to four people and never issued. None of them can see it — the publication
+            // predicate refuses it before any scope question is asked — and the author can.
+            $closure = $this->memo($officeAdmin, [
+                'subject' => 'Year-end office closure and skeleton cover arrangements',
+                'body' => "DRAFT for approval — not yet circulated.\n\n"
+                    .'Proposed closure of the head office from 24 December to 2 January inclusive, '
+                    ."with skeleton cover as follows:\n\n"
+                    ."• Site operations at the Delta Terminal continue uninterrupted on the client's "
+                    ."own shutdown calendar.\n"
+                    ."• One HSE officer and one security officer on call throughout.\n"
+                    ."• Payroll cut-off brought forward to 18 December.\n\n"
+                    .'Please confirm the payroll date with Finance before this goes out.',
+                'org_unit_id' => $unit['ADM']->id,
+            ], [$md, $ops, $hrManager, $financeManager]);
+
+            $this->happened($closure, $this->workingDay(4, 11), [], 40);
+
+            // Issued, acted on, and then withdrawn. Not deleted: people approved overtime against
+            // this for a fortnight, and the record of what they were told has to survive the
+            // instruction being cancelled (§59).
+            $overtime = $this->memo($md, [
+                'subject' => 'Interim overtime authorisation limits',
+                'body' => 'With immediate effect and until the year-end review, overtime '
+                    ."authorisation limits are:\n\n"
+                    ."• Section leads — up to 8 hours per person per week.\n"
+                    ."• Department heads — up to 20 hours per person per week.\n"
+                    ."• Anything beyond that requires my written approval.\n\n"
+                    .'Timesheets submitted without the approving name will be returned unpaid.',
+                'org_unit_id' => $unit['HR']->id,
+            ], [$hrManager, $financeManager, $ops, $procurementManager]);
+
+            $this->issue($overtime, $md);
+            $this->readBy($overtime, [$hrManager, $financeManager]);
+            $this->withdraw($overtime, $md,
+                'Superseded by the revised delegation of authority agreed at the September board meeting.');
+
+            // The spread is deliberately wide: the withdrawal happened about a fortnight after the
+            // issue, and a timeline that puts both inside the same hour would read as a mistake.
+            $this->happened($overtime, $this->workingDay(34, 9), ['issued_at' => 45], 18_000);
+
+            // ------------------------------------------------- announcements
+            // No confidentiality column anywhere below, by design: a noticeboard whose contents are
+            // secret from some of the people standing in front of it is a memo wearing the wrong
+            // name. Narrowing one to a department is ROUTING — whose board it appears on — and never
+            // an access boundary.
+            $shutdown = $this->notice($md, [
+                'title' => 'Delta Terminal shutdown window confirmed for 14–18 October',
+                'body' => "The client has confirmed the October shutdown window in writing.\n\n"
+                    .'All tie-in work, the firewater ring main crossover and the tank 4 hydrotest are '
+                    .'inside this window. Departments with scope in the shutdown should have their '
+                    ."resource plans with the project manager by the end of next week.\n\n"
+                    .'There will be no second window this year.',
+                'urgency' => 'urgent',
+                'is_pinned' => true,
+                'expires_on' => now()->addDays(30)->toDateString(),
+            ]);
+
+            $this->publish($shutdown, $md);
+            $this->happened($shutdown, $this->workingDay(9, 8), ['published_at' => 20], 60);
+
+            // Aimed at Engineering. Everybody under Engineering sees it on their board, including the
+            // teams three levels down — announcements route DOWN the tree, which is why a section
+            // engineer gets a departmental notice without anybody listing them.
+            $standard = $this->notice($officeAdmin, [
+                'title' => 'Drawing numbering standard MEI-STD-04 replaces the 2023 revision',
+                'body' => 'MEI-STD-04 is now the controlling standard for all drawing and document '
+                    ."numbering.\n\n"
+                    .'The changes that affect day-to-day work are the discipline code moving to three '
+                    .'characters and the revision suffix separating from the sheet number. Drawings '
+                    .'already in issue keep their existing numbers; anything issued from Monday uses '
+                    ."the new scheme.\n\n"
+                    .'Document Control will reject transmittals numbered under the old standard.',
+                'org_unit_id' => $unit['ENG']->id,
+                'urgency' => 'normal',
+            ]);
+
+            $this->publish($standard, $officeAdmin);
+            $this->happened($standard, $this->workingDay(17, 10), ['published_at' => 15], 45);
+
+            $medical = $this->notice($officeAdmin, [
+                'title' => 'Staff medical scheme renewal — provider briefing sessions',
+                'body' => "DRAFT — dates to be confirmed with the provider before this is published.\n\n"
+                    .'The scheme renews on 1 January and the provider has offered on-site briefing '
+                    ."sessions at the head office and at the Delta Terminal site office.\n\n"
+                    .'Please do not circulate until HR confirms the dates.',
+                'org_unit_id' => $unit['HR']->id,
+                'urgency' => 'normal',
+            ]);
+
+            $this->happened($medical, $this->workingDay(6, 15), [], 30);
+
+            // Published, and off the board on its own. Nothing archived it and nobody remembered to:
+            // `expires_on` is what stops a noticeboard filling with notices about last July.
+            $power = $this->notice($officeAdmin, [
+                'title' => 'Head office power maintenance — Saturday 12 July, 07:00 to 16:00',
+                'body' => "The building's main switchboard is being serviced this Saturday.\n\n"
+                    .'There will be no power to floors 3 to 6 for the duration. The server room stays '
+                    ."up on the UPS and generator, so remote access is unaffected.\n\n"
+                    .'Please shut down desktop equipment before leaving on Friday.',
+                'urgency' => 'high',
+                'expires_on' => now()->subDays(44)->toDateString(),
+            ]);
+
+            $this->publish($power, $officeAdmin);
+            $this->happened($power, $this->workingDay(50, 9), ['published_at' => 10], 30);
+
+            $safety = $this->notice($md, [
+                'title' => 'Q2 safety performance and the revised journey management plan',
+                'body' => 'We closed the second quarter with no lost-time injuries across either site '
+                    ."and a 40% fall in near-miss reports going unclosed beyond seven days.\n\n"
+                    .'The revised journey management plan is now in force for all travel to the Delta '
+                    ."Terminal. Night driving between Warri and Lagos remains prohibited.\n\n"
+                    .'My thanks to the HSE team and to every supervisor who kept the reporting honest.',
+                'org_unit_id' => $unit['HSE']->id,
+                'urgency' => 'normal',
+            ]);
+
+            $this->publish($safety, $md);
+            $this->archive($safety, $md);
+            $this->happened($safety, $this->workingDay(70, 11), ['published_at' => 25], 57_000);
+
+            // ------------------------------------------------- meetings
+            // The one that did everything: held, register taken, minuted by the secretary, released
+            // by the chair, two decisions recorded and one action raised as real work.
+            $progress = $this->meeting($ops, [
+                'title' => 'Delta Terminal — weekly project progress meeting',
+                'agenda' => "1. Safety moment and open HSE actions\n"
+                    ."2. Progress against the September lookahead\n"
+                    ."3. Tank 4 ring beam — settlement predictions and pour authorisation\n"
+                    ."4. Firewater ring main tie-in — shutdown window\n"
+                    ."5. Client transmittals outstanding\n"
+                    .'6. Any other business',
+                'project_id' => $job['DTE']->id,
+                'org_unit_id' => $unit['PMO']->id,
+                'location' => 'Site office, Delta Terminal (and Teams)',
+                'starts_at' => $this->workingDay(11, 9),
+                'ends_at' => $this->workingDay(11, 10)->addMinutes(30),
+            ], [
+                'chair' => [$ops],
+                'secretary' => [$officeAdmin],
+                'participant' => [
+                    $projectManager, $siteManager, $leadEngineer,
+                    $hseOfficer, $qaInspector, $documentController,
+                ],
+            ]);
+
+            // Sent before the meeting, by the person themselves. The register below leaves it alone.
+            $this->apologise($progress, $leadEngineer,
+                'At the client\'s design office in Port Harcourt for the loading arm review.');
+
+            $progress = $this->meetings->transition($progress, $this->statusFor('meeting', 'held'), $ops);
+
+            $this->register($progress, $ops, absent: [$documentController]);
+
+            // Recorded by the secretary. Note the actor: writing minutes is `meeting.record_minutes`
+            // and it is not the same act as releasing them.
+            $progress = $this->meetings->recordMinutes($progress,
+                'Present: C. Balogun (chair), C. Nwachukwu (secretary), D. Mbeki, K. Nwosu, '
+                ."E. Duru, R. Okafor. Apologies: M. Adeyemi. Absent: H. Obi.\n\n"
+                .'1. SAFETY MOMENT. E. Duru reported two near misses in the week, both scaffold '
+                ."related and both closed out. The revised journey management plan is being observed.\n\n"
+                .'2. PROGRESS. The job stands at 42% against a planned 47%. The slippage is entirely '
+                .'in the tank 4 foundation and traces back to the geotechnical interpretation, which '
+                ."is now closed out.\n\n"
+                ."3. TANK 4 RING BEAM. N. Eze's revised settlement predictions have been checked by "
+                .'the lead engineer. The pour can proceed on the revised figures; the pour card needs '
+                ."reissuing to match. See decision 1 and the action arising.\n\n"
+                .'4. FIREWATER RING MAIN. The client has confirmed the 14–18 October shutdown window '
+                ."in writing. The tie-in moves into that window. See decision 2.\n\n"
+                .'5. TRANSMITTALS. Two transmittals remain outstanding with the client, both awaiting '
+                ."the stress analysis currently in review. H. Obi to chase on her return.\n\n"
+                .'6. AOB. None.',
+                $officeAdmin);
+
+            $this->meetings->addDecision($progress, [
+                'decision' => 'The tank 4 ring beam concrete pour is authorised to proceed on the '
+                    .'revised settlement predictions.',
+                'rationale' => 'The revised predictions have been independently checked by the lead '
+                    .'structural engineer and are within the tolerance assumed by the foundation '
+                    .'design. Waiting for the full monitoring period would put the pour into the '
+                    .'rainy season.',
+                'owner_id' => $leadEngineer->id,
+            ], $officeAdmin);
+
+            $this->meetings->addDecision($progress, [
+                'decision' => 'The firewater ring main tie-in moves into the 14–18 October client '
+                    .'shutdown window.',
+                'rationale' => 'The client has confirmed the window in writing. Attempting the tie-in '
+                    .'outside a shutdown would require a live-line procedure the client has already '
+                    .'declined once.',
+                'owner_id' => $projectManager->id,
+            ], $officeAdmin);
+
+            // Work arising is WORK: an ordinary task on the assignee's list, on the calendar and in
+            // her notifications, carrying a link back to the meeting that raised it.
+            $action = $this->meetings->raiseAction($progress, [
+                'title' => 'Reissue the tank 4 ring beam pour card against the revised settlement '
+                    .'predictions',
+                'description' => 'Action arising from the weekly progress meeting. The pour card '
+                    .'still quotes the superseded settlement figures.',
+                'assignee_id' => $structuralEngineer->id,
+                'org_unit_id' => $unit['ENG-CS-SD']->id,
+                'priority' => 'high',
+                'due_on' => now()->addDays(4)->toDateString(),
+                'estimated_hours' => 6,
+            ], $ops);
+
+            // Released by the chair, not by the secretary who wrote them. This is the move that
+            // stamps `minutes_circulated_at` and makes the minutes readable by everybody who was in
+            // the room.
+            $progress = $this->meetings->transition(
+                $progress, $this->statusFor('meeting', 'minuted'), $ops,
+            );
+
+            $this->happened($progress, $this->workingDay(18, 15), [
+                'minutes_recorded_at' => 9_800,     // the afternoon of the meeting itself
+                'minutes_circulated_at' => 11_400,  // the following morning
+            ], 12_000);
+
+            $this->happened($action, $this->workingDay(10, 9), [], 30);
+
+            // Minutes written and deliberately NOT released. Everybody who was in the room can see
+            // that the meeting happened; only Lara Fashola, who wrote them, and the holders of
+            // `meeting.circulate` can read a draft record of what was said.
+            $review = $this->meeting($engineeringManager, [
+                'title' => 'Engineering design review — tank farm piping squad check',
+                'agenda' => "1. Squad check of the tie-in piping general arrangement\n"
+                    ."2. Pipe rack loading against the revised structural model\n"
+                    ."3. Electrical and instrumentation clashes\n"
+                    .'4. Hold points for the next issue',
+                'project_id' => $job['DTE']->id,
+                'org_unit_id' => $unit['ENG']->id,
+                'location' => 'Engineering meeting room, head office',
+                'starts_at' => $this->workingDay(5, 14),
+                'ends_at' => $this->workingDay(5, 15)->addMinutes(30),
+            ], [
+                'chair' => [$engineeringManager],
+                'secretary' => [$boundedAdmin],
+                'participant' => [
+                    $leadEngineer, $structuralEngineer, $pipingEngineer,
+                    $electricalEngineer, $documentController,
+                ],
+            ]);
+
+            $review = $this->meetings->transition($review, $this->statusFor('meeting', 'held'), $engineeringManager);
+
+            $this->register($review, $engineeringManager, absent: [$electricalEngineer]);
+
+            $this->meetings->recordMinutes($review,
+                "DRAFT — not yet circulated. Chair to review before release.\n\n"
+                .'1. SQUAD CHECK. The tie-in general arrangement was walked line by line. Eleven '
+                .'comments were raised, of which nine are drafting corrections and two are design '
+                ."changes affecting the pipe rack.\n\n"
+                .'2. PIPE RACK LOADING. The revised structural model shows the rack at 94% '
+                .'utilisation at the north end. M. Adeyemi to confirm whether the two design changes '
+                ."above push it over.\n\n"
+                .'3. CLASHES. Deferred — P. Raghunathan was not available and the electrical model is '
+                ."not current. To be taken at the next review.\n\n"
+                .'4. HOLD POINTS. No issue for construction until item 2 is closed.',
+                $boundedAdmin);
+
+            $this->happened($review, $this->workingDay(12, 11), [
+                'minutes_recorded_at' => 10_200,
+            ], 10_400);
+
+            // Ahead of us, and the one meeting on the demo calendar that has not happened yet.
+            // Scheduled by the office administrator on the HSE manager's behalf: `organizer_id` and
+            // `created_by` are different columns for exactly this reason, and both reach the record.
+            $committee = $this->meeting($officeAdmin, [
+                'title' => 'Monthly HSE committee',
+                'agenda' => "1. Incident and near-miss statistics for the month\n"
+                    ."2. Open corrective actions past their due date\n"
+                    ."3. Journey management plan — first month in force\n"
+                    ."4. Shutdown readiness: permits, isolations and standby cover\n"
+                    .'5. Any other business',
+                'org_unit_id' => $unit['HSE']->id,
+                'organizer_id' => $hseManager->id,
+                'location' => 'Boardroom, head office (and Teams)',
+                'starts_at' => now()->addDays(6)->setTime(10, 0),
+                'ends_at' => now()->addDays(6)->setTime(11, 30),
+            ], [
+                'chair' => [$hseManager],
+                'secretary' => [$officeAdmin],
+                'participant' => [$hseOfficer, $siteManager, $qaManager, $projectManager, $ops],
+            ]);
+
+            $this->apologise($committee, $projectManager,
+                'On site at the Delta Terminal for the shutdown readiness walkdown.');
+
+            $this->happened($committee, $this->workingDay(3, 9), [], 45);
+
+            // Called off, with a reason. "Cancelled" on its own is the single most-asked question
+            // about a cancelled meeting, so the reason is kept on the record rather than in an email.
+            $workshop = $this->meeting($ops, [
+                'title' => 'Ikeja yard — crane foundation constructability workshop',
+                'agenda' => "1. Crane supplier's foundation loads\n"
+                    ."2. Existing yard drainage and its interaction with the new pad\n"
+                    .'3. Sequencing against continued yard operations',
+                'project_id' => $job['IYU']->id,
+                'org_unit_id' => $unit['ENG-CS']->id,
+                'location' => 'Ikeja fabrication yard, site cabin',
+                'starts_at' => now()->addDays(2)->setTime(9, 0),
+                'ends_at' => now()->addDays(2)->setTime(12, 0),
+            ], [
+                'chair' => [$ops],
+                'participant' => [$leadEngineer, $structuralEngineer, $siteManager, $fleetManager],
+            ]);
+
+            $workshop = $this->meetings->transition(
+                $workshop, $this->statusFor('meeting', 'cancelled'), $ops,
+                'The crane supplier\'s foundation load package has slipped by three weeks. '
+                .'To be rescheduled once the loads are confirmed.',
+            );
+
+            $this->happened($workshop, $this->workingDay(8, 14), [], 2_000);
+        });
+    }
+
+    /**
+     * Kestrel's communications: the same three modules, a quarter of the size, run by one person.
+     *
+     * Marianne Ellis wears three role templates — HR officer, finance officer and office
+     * administrator — and it is the third that lets her issue memos and take minutes. That is the
+     * small-company case, and it is the reason roles are additive rather than a single "user type"
+     * column: nothing about this company needed a line of code, only a different set of grants.
+     */
+    private function seedKestrelCommunications(Organization $organization): void
+    {
+        $this->context->within($organization, function () {
+            $this->bootDelivery();
+
+            $staff = $this->staff();
+            $unit = $this->unitsByCode();
+            $job = Project::query()->get()->keyBy('code');
+
+            $md = $this->accountOf($staff, 'KFM-001');              // Rowan Calder
+            $opsManager = $this->accountOf($staff, 'KFM-002');      // Priti Shah
+            $maintenanceHead = $this->accountOf($staff, 'KFM-003'); // Duncan Reilly
+            $complianceHead = $this->accountOf($staff, 'KFM-004');  // Nadia Osei
+            $mechanical = $this->accountOf($staff, 'KFM-005');      // Callum Whitfield
+            $electrical = $this->accountOf($staff, 'KFM-006');      // Erin Doyle
+            $helpdesk = $this->accountOf($staff, 'KFM-007');        // Josh Aiken
+            $generalist = $this->accountOf($staff, 'KFM-008');      // Marianne Ellis
+
+            // ------------------------------------------------- memos
+            $rota = $this->memo($generalist, [
+                'subject' => 'Out-of-hours callout rota — September',
+                'body' => "The September callout rota is confirmed as follows.\n\n"
+                    ."• Weeks 1 and 3 — mechanical: C. Whitfield. Electrical: E. Doyle.\n"
+                    .'• Weeks 2 and 4 — mechanical: subcontract cover (Halden M&E). '
+                    ."Electrical: E. Doyle.\n"
+                    ."• Helpdesk triage remains with J. Aiken throughout, 18:00 to 08:00.\n\n"
+                    .'Callouts must be logged on the same day. An unlogged callout cannot be '
+                    .'recharged to the client and will not be paid.',
+                'org_unit_id' => $unit['MNT']->id,
+            ], [$maintenanceHead, $mechanical, $electrical, $helpdesk], [$opsManager]);
+
+            $this->issue($rota, $generalist);
+            $this->readBy($rota, [$electrical, $helpdesk]);
+            $this->happened($rota, $this->workingDay(11, 9), ['issued_at' => 30], 60);
+
+            // RESTRICTED rather than confidential — the other tier, and it behaves differently:
+            // restricted is reachable from inside the owning unit's subtree as well as by an explicit
+            // allow row, where confidential is reachable by the allow row alone.
+            $renewal = $this->memo($md, [
+                'subject' => 'Trafford Point contract renewal — negotiating position',
+                'body' => "Restricted. Not for onward circulation.\n\n"
+                    .'The Trafford Point framework is up for renewal in November and the client has '
+                    ."signalled they will test the market.\n\n"
+                    .'• Our current margin on the framework is 11.4%. We can go to 8% to retain it, '
+                    ."and no further.\n"
+                    .'• The AHU replacement has gone well and is our strongest reference on the '
+                    ."account. Lead with it.\n"
+                    .'• If they push past 8% we let it go. We have capacity for the Northern Estates '
+                    .'framework and better margin in it.',
+                'project_id' => $job['TPA']->id,
+                'org_unit_id' => $unit['BUS']->id,
+                'confidentiality' => 'restricted',
+            ], [$opsManager, $generalist]);
+
+            $this->issue($renewal, $md);
+            $this->readBy($renewal, [$opsManager]);
+            $this->happened($renewal, $this->workingDay(6, 16), ['issued_at' => 25], 50);
+
+            // ------------------------------------------------- announcements
+            $fgas = $this->notice($generalist, [
+                'title' => 'F-gas record keeping moves into the platform on the 1st',
+                'body' => 'From the 1st, all F-gas leak checks and refrigerant movements are recorded '
+                    ."here rather than on the paper log sheets.\n\n"
+                    .'The paper log stays in the plant room until the end of the month so nothing is '
+                    .'lost mid-cycle, then it is retired. Anyone handling refrigerant needs to have '
+                    ."completed the ten-minute walkthrough before the changeover.\n\n"
+                    .'Speak to Nadia if your certification is due for renewal this year.',
+                'urgency' => 'high',
+                'is_pinned' => true,
+                'expires_on' => now()->addDays(21)->toDateString(),
+            ]);
+
+            $this->publish($fgas, $generalist);
+            $this->happened($fgas, $this->workingDay(8, 8), ['published_at' => 15], 40);
+
+            $tags = $this->notice($generalist, [
+                'title' => 'Ladder inspection tags — quarterly changeover to yellow',
+                'body' => "The quarterly tag colour changes to yellow this week.\n\n"
+                    .'Every ladder, step ladder and podium in the depots and on client sites must '
+                    .'carry a current yellow tag by Friday. Anything still carrying a green tag on '
+                    ."Monday is to be quarantined, not used.\n\n"
+                    .'Spare tags and inspection sheets are with the depot supervisors.',
+                'org_unit_id' => $unit['MNT']->id,
+                'urgency' => 'normal',
+            ]);
+
+            $this->publish($tags, $generalist);
+            $this->happened($tags, $this->workingDay(20, 10), ['published_at' => 20], 40);
+
+            $tender = $this->notice($md, [
+                'title' => 'Kestrel is tendering for the Northern Estates framework',
+                'body' => "DRAFT — hold until the bid/no-bid decision is minuted.\n\n"
+                    .'Northern Estates have invited us to tender for their hard services framework '
+                    .'across eleven buildings in Leeds and Bradford. It would be our largest single '
+                    ."contract.\n\n"
+                    .'Nothing is to be said to clients or subcontractors until the decision is taken.',
+                'urgency' => 'normal',
+            ]);
+
+            $this->happened($tender, $this->workingDay(2, 12), [], 25);
+
+            // ------------------------------------------------- meetings
+            $site = $this->meeting($opsManager, [
+                'title' => 'Trafford Point AHU replacement — site progress meeting',
+                'agenda' => "1. Strip-out progress and the roof hatch lift\n"
+                    ."2. Electrical isolation and re-termination\n"
+                    ."3. F-gas paperwork and permits\n"
+                    .'4. Commissioning and handover pack',
+                'project_id' => $job['TPA']->id,
+                'org_unit_id' => $unit['MNT']->id,
+                'location' => 'Trafford Point, fourth floor plant room',
+                'starts_at' => $this->workingDay(7, 8)->addMinutes(30),
+                'ends_at' => $this->workingDay(7, 9)->addMinutes(30),
+            ], [
+                'chair' => [$opsManager],
+                'secretary' => [$generalist],
+                'participant' => [$maintenanceHead, $mechanical, $electrical, $complianceHead],
+            ]);
+
+            $this->apologise($site, $electrical, 'Covering an emergency lighting failure at the Leeds depot.');
+
+            $site = $this->meetings->transition($site, $this->statusFor('meeting', 'held'), $opsManager);
+
+            $this->register($site, $opsManager);
+
+            $site = $this->meetings->recordMinutes($site,
+                'Present: P. Shah (chair), M. Ellis (secretary), D. Reilly, C. Whitfield, N. Osei. '
+                ."Apologies: E. Doyle.\n\n"
+                .'1. STRIP-OUT. Refrigerant recovered and ductwork disconnected. The roof hatch lift '
+                .'is booked for next Tuesday subject to the crane permit, which is with the building '
+                ."manager.\n\n"
+                .'2. ELECTRICAL. Isolation is in place and locked off. Re-termination follows the '
+                ."new unit's arrival and is not on the critical path.\n\n"
+                .'3. F-GAS. All recovery paperwork is complete and filed. N. Osei confirmed the '
+                ."recovery cylinders are booked for collection.\n\n"
+                .'4. HANDOVER. D. Reilly has the pack template. The client has asked for the O&M '
+                .'manuals digitally as well as in hard copy. See the action arising.',
+                $generalist);
+
+            $this->meetings->addDecision($site, [
+                'decision' => 'The roof hatch lift proceeds next Tuesday, subject only to the crane '
+                    .'permit being returned by the building manager.',
+                'rationale' => 'The crane and the road closure are both booked and non-refundable '
+                    .'inside seven days. Slipping the lift would push commissioning past the '
+                    .'contractual handover date.',
+                'owner_id' => $maintenanceHead->id,
+            ], $generalist);
+
+            $handover = $this->meetings->raiseAction($site, [
+                'title' => 'Add digital O&M manuals to the AHU-3 handover pack',
+                'description' => 'Action arising from the site progress meeting. The client has asked '
+                    .'for searchable PDFs alongside the hard copy manuals.',
+                'assignee_id' => $maintenanceHead->id,
+                'priority' => 'normal',
+                'due_on' => now()->addDays(12)->toDateString(),
+                'estimated_hours' => 4,
+            ], $opsManager);
+
+            $site = $this->meetings->transition($site, $this->statusFor('meeting', 'minuted'), $opsManager);
+
+            $this->happened($site, $this->workingDay(13, 15), [
+                'minutes_recorded_at' => 8_400,
+                'minutes_circulated_at' => 9_900,
+            ], 10_200);
+
+            $this->happened($handover, $this->workingDay(6, 10), [], 30);
+
+            $ops = $this->meeting($opsManager, [
+                'title' => 'Kestrel monthly operations review',
+                'agenda' => "1. Reactive job volumes and first-time fix rate\n"
+                    ."2. PPM completion against the quarterly schedule\n"
+                    ."3. Compliance dashboard — fire, water and F-gas\n"
+                    ."4. Northern Estates framework: bid or no bid\n"
+                    .'5. Any other business',
+                'org_unit_id' => $unit['OPS']->id,
+                'location' => 'Manchester office, meeting room',
+                'starts_at' => now()->addDays(9)->setTime(9, 0),
+                'ends_at' => now()->addDays(9)->setTime(11, 0),
+            ], [
+                'chair' => [$md],
+                'secretary' => [$generalist],
+                'participant' => [$maintenanceHead, $complianceHead, $helpdesk],
+            ]);
+
+            $this->happened($ops, $this->workingDay(4, 16), [], 35);
+        });
+    }
+
+    // ------------------------------------------------------------ communication helpers
+
+    /**
+     * Draft a memo and address it. Issuing is a separate act, made by whoever holds `memo.issue`.
+     *
+     * The distribution is written through the service rather than inserted, because every recipient
+     * row is a VISIBILITY GRANT: on an issued memo the same call writes the ACL row that lets a
+     * confidential memo be opened by somebody with no clearance for it. Inserting the rows directly
+     * would produce a demo in which half the recipients cannot read what they were sent.
+     *
+     * @param  array<string,mixed>  $attributes
+     * @param  array<int,User>  $to
+     * @param  array<int,User>  $cc
+     */
+    private function memo(User $author, array $attributes, array $to, array $cc = []): Memo
+    {
+        $memo = $this->memos->create($attributes, $author);
+
+        $this->memos->address($memo, $this->idsOf($to), $author, 'to');
+
+        if ($cc !== []) {
+            $this->memos->address($memo, $this->idsOf($cc), $author, 'cc');
+        }
+
+        return $memo->refresh();
+    }
+
+    private function issue(Memo $memo, User $issuer): Memo
+    {
+        return $this->memos->transition($memo, $this->statusFor('memo', 'issued'), $issuer);
+    }
+
+    private function withdraw(Memo $memo, User $actor, string $reason): Memo
+    {
+        return $this->memos->transition($memo, $this->statusFor('memo', 'withdrawn'), $actor, $reason);
+    }
+
+    /**
+     * Stamp read receipts for the people who have opened it.
+     *
+     * @param  array<int,User>  $readers
+     */
+    private function readBy(Memo $memo, array $readers): void
+    {
+        foreach ($readers as $reader) {
+            $recipient = $memo->recipients()->where('user_id', $reader->id)->first();
+
+            if ($recipient !== null) {
+                $this->memos->markRead($recipient);
+            }
+        }
+    }
+
+    /** @param  array<string,mixed>  $attributes */
+    private function notice(User $author, array $attributes): Announcement
+    {
+        return $this->notices->create($attributes, $author);
+    }
+
+    private function publish(Announcement $announcement, User $actor): Announcement
+    {
+        return $this->notices->transition($announcement, $this->statusFor('announcement', 'published'), $actor);
+    }
+
+    private function archive(Announcement $announcement, User $actor): Announcement
+    {
+        return $this->notices->transition($announcement, $this->statusFor('announcement', 'archived'), $actor);
+    }
+
+    /**
+     * Call a meeting and fill the room.
+     *
+     * @param  array<string,mixed>  $attributes
+     * @param  array<string,array<int,User>>  $room  participant role => the people in it
+     */
+    private function meeting(User $convener, array $attributes, array $room): Meeting
+    {
+        $meeting = $this->meetings->create($attributes, $convener);
+
+        foreach ($room as $role => $people) {
+            $this->meetings->invite($meeting, $this->idsOf($people), $convener, $role);
+        }
+
+        return $meeting->refresh();
+    }
+
+    /** Send apologies, as the person themselves — which is the only way they are ever sent. */
+    private function apologise(Meeting $meeting, User $who, string $reason): void
+    {
+        $participant = $meeting->participants()->where('user_id', $who->id)->first();
+
+        if ($participant !== null) {
+            $this->meetings->respond($participant, $reason, $who);
+        }
+    }
+
+    /**
+     * Take the register.
+     *
+     * Anybody who sent apologies is skipped rather than marked absent by the chair. They already
+     * answered for themselves, and overwriting that would lose the distinction between "did not
+     * come" and "said in advance they could not come" — which is most of what a register is for.
+     *
+     * @param  array<int,User>  $absent
+     */
+    private function register(Meeting $meeting, User $actor, array $absent = []): void
+    {
+        $absentIds = $this->idsOf($absent);
+        $attendance = [];
+
+        foreach ($meeting->participants()->get() as $participant) {
+            if ($participant->apologies !== null) {
+                continue;
+            }
+
+            $attendance[(int) $participant->getKey()] = ! in_array((int) $participant->user_id, $absentIds, true);
+        }
+
+        $this->meetings->recordAttendance($meeting, $attendance, $actor);
+    }
+
+    /**
+     * Move a communication, and the trail it left, to the day it is meant to have happened.
+     *
+     * The delivery pass sweeps its whole timeline at once (see spreadDeliveryHistory) because the
+     * order of forty task events is the only thing that matters about them. Communications are the
+     * opposite: each one has a DATE that its own text refers to — a shutdown window, a rota month, a
+     * withdrawal that came a fortnight after the instruction — so they are placed individually and
+     * the activity rows are spread across the span that record actually occupied. A memo issued in
+     * the same second it was drafted, or withdrawn in the same minute it was issued, reads as test
+     * data however good the prose is.
+     *
+     * `activity_logs` only, as ever. The audit trail is left exactly as the engine wrote it (§59).
+     *
+     * @param  array<string,int>  $stamps  further timestamp columns, in minutes after $at
+     */
+    private function happened(Model $record, Carbon $at, array $stamps = [], int $overMinutes = 90): void
+    {
+        $values = ['created_at' => $at];
+
+        foreach ($stamps as $column => $minutesAfter) {
+            $values[$column] = $at->copy()->addMinutes($minutesAfter);
+        }
+
+        DB::table($record->getTable())->where('id', $record->getKey())->update($values);
+
+        $rows = DB::table('activity_logs')
+            ->where('subject_type', $record->getMorphClass())
+            ->where('subject_id', $record->getKey())
+            ->orderBy('id')
+            ->pluck('id');
+
+        $last = max(1, $rows->count() - 1);
+
+        foreach ($rows->values() as $index => $id) {
+            DB::table('activity_logs')->where('id', $id)->update([
+                'created_at' => $at->copy()->addMinutes((int) round($overMinutes * $index / $last)),
+            ]);
+        }
+
+        $record->refresh();
+    }
+
+    /**
+     * A working-hours moment this many days ago, on the hour.
+     *
+     * Deliberately NOT random, unlike momentOn(): these timestamps are quoted back in the seeded
+     * prose — a meeting that ran from 09:00 to 10:30 says so in its own minutes — and a fixture whose
+     * times drift on every re-seed makes the demo contradict itself.
+     */
+    private function workingDay(int $daysAgo, int $hour): Carbon
+    {
+        return now()->subDays(max(0, $daysAgo))->setTime($hour, 0, 0);
+    }
+
+    /**
+     * @param  array<int,User>  $users
+     * @return array<int,int>
+     */
+    private function idsOf(array $users): array
+    {
+        return array_values(array_map(fn (User $user) => (int) $user->id, $users));
+    }
+
     // ----------------------------------------------------------------- delivery helpers
 
     /**
@@ -975,6 +1810,9 @@ class DemoSeeder extends Seeder
         $this->tasks = app(TaskService::class);
         $this->checklists = app(TaskChecklistService::class);
         $this->dependencies = app(TaskDependencyService::class);
+        $this->memos = app(MemoService::class);
+        $this->notices = app(AnnouncementService::class);
+        $this->meetings = app(MeetingService::class);
         $this->statuses = app(StatusMachine::class);
 
         $this->projectTypes = ProjectType::query()->get()->keyBy('slug')->all();

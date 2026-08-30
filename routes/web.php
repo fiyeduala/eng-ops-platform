@@ -2,13 +2,17 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\PasswordController;
 use App\Http\Controllers\Auth\PasswordResetController;
+use App\Http\Controllers\CalendarController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\LocationController;
+use App\Http\Controllers\MeetingController;
+use App\Http\Controllers\MemoController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\OrganizationController;
 use App\Http\Controllers\OrgUnitController;
@@ -297,6 +301,134 @@ Route::middleware(['auth', 'password.current'])->group(function () {
         Route::delete('tasks/{task}/dependencies/{dependency}', [TaskDependencyController::class, 'destroy'])
             ->middleware('permission:task.edit')->name('tasks.dependencies.destroy');
     });
+
+    // --- communication ---------------------------------------------------------------------------
+    //
+    // Memos, announcements and meetings share a shape: a coarse `*.view` on the read routes, a
+    // separate permission for the act that makes the record visible to other people, and a policy
+    // call with the record in hand on everything that takes an id.
+    //
+    // The act of publication is the one to look at. `memo.issue`, `announcement.publish` and
+    // `meeting.circulate` are not edit permissions and are never folded into one: issuing a memo
+    // sends it to a distribution list, publishing a notice puts it in front of a department, and
+    // circulating minutes releases a document the room could not previously read. Somebody who may
+    // draft is not thereby somebody who may send (§14).
+
+    Route::middleware('permission:memo.view')->group(function () {
+        Route::get('memos', [MemoController::class, 'index'])->name('memos.index');
+        Route::get('memos/{memo}', [MemoController::class, 'show'])
+            ->whereNumber('memo')->name('memos.show');
+    });
+
+    Route::get('memos/create', [MemoController::class, 'create'])
+        ->middleware('permission:memo.create')->name('memos.create');
+    Route::post('memos', [MemoController::class, 'store'])
+        ->middleware('permission:memo.create')->name('memos.store');
+    Route::get('memos/{memo}/edit', [MemoController::class, 'edit'])
+        ->middleware('permission:memo.edit')->name('memos.edit');
+    Route::put('memos/{memo}', [MemoController::class, 'update'])
+        ->middleware('permission:memo.edit')->name('memos.update');
+    Route::delete('memos/{memo}', [MemoController::class, 'destroy'])
+        ->middleware('permission:memo.delete')->name('memos.destroy');
+
+    // Addressing is a GRANT. For a restricted memo MemoService writes a record_permissions row, so
+    // this endpoint hands somebody sight of the document — hence its own route and a policy that
+    // asks about each candidate as well as the memo (§84).
+    Route::post('memos/{memo}/recipients', [MemoController::class, 'address'])
+        ->middleware('permission:memo.edit')->name('memos.recipients.store');
+
+    Route::scopeBindings()->group(function () {
+        // `{recipient}` resolves through Memo::recipients(), so a recipient row belonging to
+        // another memo is a 404 at the router rather than a delete (§94).
+        Route::delete('memos/{memo}/recipients/{recipient}', [MemoController::class, 'unaddress'])
+            ->middleware('permission:memo.edit')->name('memos.recipients.destroy');
+    });
+
+    Route::post('memos/{memo}/status', [MemoController::class, 'transition'])
+        ->middleware('permission:memo.issue')->name('memos.status');
+
+    Route::middleware('permission:announcement.view')->group(function () {
+        Route::get('announcements', [AnnouncementController::class, 'index'])->name('announcements.index');
+        Route::get('announcements/{announcement}', [AnnouncementController::class, 'show'])
+            ->whereNumber('announcement')->name('announcements.show');
+    });
+
+    Route::get('announcements/create', [AnnouncementController::class, 'create'])
+        ->middleware('permission:announcement.create')->name('announcements.create');
+    Route::post('announcements', [AnnouncementController::class, 'store'])
+        ->middleware('permission:announcement.create')->name('announcements.store');
+    Route::get('announcements/{announcement}/edit', [AnnouncementController::class, 'edit'])
+        ->middleware('permission:announcement.edit')->name('announcements.edit');
+    Route::put('announcements/{announcement}', [AnnouncementController::class, 'update'])
+        ->middleware('permission:announcement.edit')->name('announcements.update');
+    Route::delete('announcements/{announcement}', [AnnouncementController::class, 'destroy'])
+        ->middleware('permission:announcement.delete')->name('announcements.destroy');
+
+    Route::post('announcements/{announcement}/status', [AnnouncementController::class, 'transition'])
+        ->middleware('permission:announcement.publish')->name('announcements.status');
+
+    Route::middleware('permission:meeting.view')->group(function () {
+        Route::get('meetings', [MeetingController::class, 'index'])->name('meetings.index');
+        Route::get('meetings/{meeting}', [MeetingController::class, 'show'])
+            ->whereNumber('meeting')->name('meetings.show');
+    });
+
+    Route::get('meetings/create', [MeetingController::class, 'create'])
+        ->middleware('permission:meeting.create')->name('meetings.create');
+    Route::post('meetings', [MeetingController::class, 'store'])
+        ->middleware('permission:meeting.create')->name('meetings.store');
+    Route::get('meetings/{meeting}/edit', [MeetingController::class, 'edit'])
+        ->middleware('permission:meeting.edit')->name('meetings.edit');
+    Route::put('meetings/{meeting}', [MeetingController::class, 'update'])
+        ->middleware('permission:meeting.edit')->name('meetings.update');
+    Route::delete('meetings/{meeting}', [MeetingController::class, 'destroy'])
+        ->middleware('permission:meeting.delete')->name('meetings.destroy');
+
+    // Inviting is a grant for the same reason addressing is: a participant row is an assignee
+    // column, and an assignee column is reach.
+    Route::post('meetings/{meeting}/participants', [MeetingController::class, 'invite'])
+        ->middleware('permission:meeting.edit,meeting.manage')->name('meetings.participants.store');
+
+    // Recording what happened is `meeting.record_minutes`, deliberately not `meeting.edit`: the
+    // secretary who writes the minutes is rarely the administrator who books the room, and letting
+    // one imply the other would let anybody who can move a meeting rewrite what was decided at it.
+    Route::get('meetings/{meeting}/minutes', [MeetingController::class, 'minutes'])
+        ->middleware('permission:meeting.record_minutes')->name('meetings.minutes');
+    Route::put('meetings/{meeting}/minutes', [MeetingController::class, 'storeMinutes'])
+        ->middleware('permission:meeting.record_minutes')->name('meetings.minutes.store');
+    Route::post('meetings/{meeting}/attendance', [MeetingController::class, 'attendance'])
+        ->middleware('permission:meeting.record_minutes')->name('meetings.attendance');
+    Route::post('meetings/{meeting}/decisions', [MeetingController::class, 'storeDecision'])
+        ->middleware('permission:meeting.record_minutes')->name('meetings.decisions.store');
+
+    // An action item is a Task, so this needs BOTH permissions — minuting the meeting and opening
+    // work. The controller asks for both, and the morph link is stamped server-side (§90).
+    Route::post('meetings/{meeting}/actions', [MeetingController::class, 'raiseAction'])
+        ->middleware('permission:meeting.record_minutes')->name('meetings.actions.store');
+
+    Route::scopeBindings()->group(function () {
+        // `{participant}` resolves through Meeting::participants().
+        Route::delete('meetings/{meeting}/participants/{participant}', [MeetingController::class, 'uninvite'])
+            ->middleware('permission:meeting.edit,meeting.manage')->name('meetings.participants.destroy');
+
+        // Sending your own apologies needs no management permission — only `meeting.view`, and the
+        // policy then refuses anybody else's row.
+        Route::post('meetings/{meeting}/participants/{participant}/respond', [MeetingController::class, 'respond'])
+            ->middleware('permission:meeting.view')->name('meetings.participants.respond');
+    });
+
+    // Holding, rescheduling, circulating and cancelling all arrive here. Which one a status id
+    // means is resolved from the configured whitelist, and the controller asks the matching policy
+    // question before the service acts (§63, §84).
+    Route::post('meetings/{meeting}/status', [MeetingController::class, 'transition'])
+        ->middleware('permission:meeting.edit,meeting.circulate,meeting.manage')->name('meetings.status');
+
+    // The calendar has no permission of its own, by design: it is a VIEW over meetings, tasks and
+    // project dates, each fetched through its own scope-compiled query with its own ability. A
+    // `calendar.view` permission would be a second, weaker door onto records that already have
+    // one (§90). The guard here is only "you deal in at least one of the two things it shows".
+    Route::get('calendar', [CalendarController::class, 'index'])
+        ->middleware('permission:meeting.view,task.view')->name('calendar.index');
 
     // --- administration ------------------------------------------------------------------------
 

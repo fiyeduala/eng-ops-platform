@@ -118,6 +118,22 @@ class Navigation
                 ],
             ],
             [
+                'label' => 'Communication',
+                'items' => [
+                    ['label' => 'Announcements', 'route' => 'announcements.index', 'icon' => 'megaphone',
+                        'permission' => 'announcement.view', 'active' => 'announcements.*'],
+                    ['label' => 'Memos', 'route' => 'memos.index', 'icon' => 'mail',
+                        'permission' => 'memo.view', 'active' => 'memos.*'],
+                    ['label' => 'Meetings', 'route' => 'meetings.index', 'icon' => 'users',
+                        'permission' => 'meeting.view', 'active' => 'meetings.*'],
+
+                    // The calendar has no permission of its own — it is a view over records that
+                    // have theirs — so it is listed for anybody who deals in either source.
+                    ['label' => 'Calendar', 'route' => 'calendar.index', 'icon' => 'calendar',
+                        'permission' => ['meeting.view', 'task.view'], 'active' => 'calendar.*'],
+                ],
+            ],
+            [
                 'label' => 'Administration',
                 'items' => [
                     ['label' => 'User accounts', 'route' => 'users.index', 'icon' => 'key',

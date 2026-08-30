@@ -127,6 +127,30 @@ final class Phase1SmokeTest extends TestCase
         });
 
         $this->records['task'] = $task;
+
+        // The communication group, each left in the state that renders the most of its own pages.
+        //
+        // The memo stays a DRAFT, and that is a statement about the module rather than a shortcut:
+        // an issued memo is deliberately not editable by anybody, however permissioned, so
+        // `memos.edit` answers 403 to the administrator here and would be right to. The issued
+        // state and its distribution list are exercised in MemoAccessTest, where the refusal can be
+        // asserted rather than tripped over.
+        $this->records['memo'] = $this->makeMemo($this->org, $this->administrator, 'Revised setting-out for the eastern abutment', [
+            'project_id' => $project->id,
+            'org_unit_id' => $department->id,
+        ], [$colleague]);
+
+        $announcement = $this->makeAnnouncement($this->org, $this->administrator, 'Site induction moves to Monday mornings', [
+            'org_unit_id' => $department->id,
+            'urgency' => 'high',
+        ]);
+
+        $this->records['announcement'] = $this->publishAnnouncement($this->org, $announcement, $this->administrator);
+
+        $this->records['meeting'] = $this->makeMeeting($this->org, $this->administrator, 'Weekly progress review', [
+            'project_id' => $project->id,
+            'org_unit_id' => $department->id,
+        ], [$colleague]);
     }
 
     #[Test]

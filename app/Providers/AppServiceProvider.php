@@ -12,13 +12,31 @@ use App\Engines\Access\ScopeCompiler;
 use App\Engines\Audit\AuditContext;
 use App\Engines\Audit\AuditLogger;
 use App\Engines\Configuration\SettingsRepository;
+use App\Events\AnnouncementPublished;
+use App\Events\MeetingCancelled;
+use App\Events\MeetingInvited;
+use App\Events\MeetingMinutesCirculated;
+use App\Events\MeetingRescheduled;
+use App\Events\MemoIssued;
 use App\Events\TaskAssigned;
+use App\Listeners\NotifyAnnouncementAudience;
+use App\Listeners\NotifyMeetingCancelled;
+use App\Listeners\NotifyMeetingMinutes;
+use App\Listeners\NotifyMeetingParticipants;
+use App\Listeners\NotifyMeetingRescheduled;
+use App\Listeners\NotifyMemoRecipients;
 use App\Listeners\NotifyTaskAssignee;
 use App\Models\ActivityLog;
+use App\Models\Announcement;
 use App\Models\AuditLog;
 use App\Models\Employee;
 use App\Models\Follower;
 use App\Models\Location;
+use App\Models\Meeting;
+use App\Models\MeetingDecision;
+use App\Models\MeetingParticipant;
+use App\Models\Memo;
+use App\Models\MemoRecipient;
 use App\Models\Notification;
 use App\Models\NotificationPreference;
 use App\Models\NumberingScheme;
@@ -40,10 +58,16 @@ use App\Models\Task;
 use App\Models\TaskChecklistItem;
 use App\Models\TaskDependency;
 use App\Models\User;
+use App\Policies\AnnouncementPolicy;
 use App\Policies\AuditLogPolicy;
 use App\Policies\EmployeePolicy;
 use App\Policies\FollowerPolicy;
 use App\Policies\LocationPolicy;
+use App\Policies\MeetingDecisionPolicy;
+use App\Policies\MeetingParticipantPolicy;
+use App\Policies\MeetingPolicy;
+use App\Policies\MemoPolicy;
+use App\Policies\MemoRecipientPolicy;
 use App\Policies\NotificationPolicy;
 use App\Policies\NumberingSchemePolicy;
 use App\Policies\NumberSequencePolicy;
@@ -167,6 +191,13 @@ class AppServiceProvider extends ServiceProvider
 
             'notification' => Notification::class,
             'notification_preference' => NotificationPreference::class,
+
+            'memo' => Memo::class,
+            'memo_recipient' => MemoRecipient::class,
+            'announcement' => Announcement::class,
+            'meeting' => Meeting::class,
+            'meeting_participant' => MeetingParticipant::class,
+            'meeting_decision' => MeetingDecision::class,
         ]);
     }
 
@@ -224,6 +255,18 @@ class AppServiceProvider extends ServiceProvider
             // NotificationPolicy.
             Notification::class => NotificationPolicy::class,
             NotificationPreference::class => NotificationPolicy::class,
+
+            // --- Phase 2: communication ----------------------------------------------
+            // The three child models have no permissions of their own — a recipient row, a
+            // participant row and a decision line all borrow their parent's, the same
+            // arrangement as a task's checklist. They are listed for the same reason the
+            // task children are: an unpoliced model is an unauthorized one.
+            Memo::class => MemoPolicy::class,
+            MemoRecipient::class => MemoRecipientPolicy::class,
+            Announcement::class => AnnouncementPolicy::class,
+            Meeting::class => MeetingPolicy::class,
+            MeetingParticipant::class => MeetingParticipantPolicy::class,
+            MeetingDecision::class => MeetingDecisionPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {
@@ -265,6 +308,32 @@ class AppServiceProvider extends ServiceProvider
         $listeners = [
             TaskAssigned::class => [
                 NotifyTaskAssignee::class,
+            ],
+
+            // --- communication -------------------------------------------------------
+            // One listener per event rather than one per audience. Each of these decides who
+            // the message is AIMED at; whether any given candidate is actually told is
+            // NotificationDispatcher's authorization filter, which none of them can skip.
+            MemoIssued::class => [
+                NotifyMemoRecipients::class,
+            ],
+            AnnouncementPublished::class => [
+                NotifyAnnouncementAudience::class,
+            ],
+            MeetingInvited::class => [
+                NotifyMeetingParticipants::class,
+            ],
+            MeetingRescheduled::class => [
+                NotifyMeetingRescheduled::class,
+            ],
+            MeetingCancelled::class => [
+                NotifyMeetingCancelled::class,
+            ],
+
+            // Minutes notify on CIRCULATION and never on recording — see the listener for
+            // why announcing a draft would be a disclosure of the thing being withheld.
+            MeetingMinutesCirculated::class => [
+                NotifyMeetingMinutes::class,
             ],
         ];
 

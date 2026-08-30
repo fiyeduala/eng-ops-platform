@@ -28,16 +28,17 @@ that the policy and the compiled list agree on every record; `TenantScopeCoverag
 schema so a later phase cannot add an unscoped table without failing the build; `Phase1SmokeTest`
 requests every authenticated route three ways — permitted, unpermitted (403), anonymous.
 
-## PHASE 2 — Core operations 🟨
+## PHASE 2 — Core operations ✅
 
 Projects ✅ · project types ✅ · project departments ✅ · project members ✅ · project roles ✅ ·
 activity timeline UI ✅ (project page) · tasks (+ checklists, dependencies, followers) ✅ ·
-notification engine ✅ · memos ⬜ · announcements ⬜ · meetings ⬜ ·
-meeting minutes/decisions/actions ⬜ · calendar ⬜.
+notification engine ✅ · memos ✅ · announcements ✅ · meetings ✅ ·
+meeting minutes/decisions/actions ✅ · calendar ✅.
 
 **Exit criteria:** the §8 Project Alpha scenario passes as a feature test for all five users.
 
-**Half met.** `ProjectAlphaTest` (15 tests) runs the scenario's project layer for John, Mary, David,
+**Met.** 206 tests, 1,110 assertions across the suite. `ProjectAlphaTest` (15 tests) runs the
+scenario's project layer for John, Mary, David,
 Sarah and Michael: five people from five departments reaching one project through the project axis
 alone, with Alpha owned by a unit none of their departments contains so the org axis cannot rescue
 them. It also covers each edge docs/05 §9 asks for — the non-member's 403, Sarah refused a
@@ -61,7 +62,7 @@ predecessors; the `/tasks/{a}/checklist/{item-of-b}` and `/tasks/{a}/dependencie
 attempts; a blocking task the actor cannot see refused rather than named; and following a task
 granting nothing.
 
-`DemoSeederTest` (7 tests) then runs `DemoSeeder` end to end and asserts the same properties against
+`DemoSeederTest` (14 tests) then runs `DemoSeeder` end to end and asserts the same properties against
 the data an evaluator actually opens: both companies separate, every task carrying its own tenant's
 status rows, a transmittal genuinely blocked by a report still in review, a `restricted` commercial
 task hidden from the engineers on its own project, and a membership that lapsed with the job it
@@ -91,6 +92,39 @@ when `bootstrap/app.php` never calls `withEvents()`, so `NotifyTaskAssignee` was
 every assignment sent two notifications. `withEvents(discover: false)` now makes the map in
 `AppServiceProvider` the only registration — a file rename must not be able to change who gets told
 what.
+
+**Communications.** 62 tests across `MemoAccessTest` (20), `MeetingAccessTest` (17),
+`AnnouncementAccessTest` (15) and `CalendarAccessTest` (10). The three modules share the five gates
+and the status machine rather than re-implementing distribution, so the tests concentrate on the
+places where "who was told" and "who may read" come apart. A memo's distribution list is a grant:
+addressing somebody writes a recipient row, but the record ACL row is written only when the memo is
+actually issued, so a draft addressed to fifteen people is readable by none of them. That is what
+lets a `confidential` memo work at all — no role holds `memo.view_confidential`, so the issued
+distribution is the only route in, and a director with organization-wide `memo.view` who is not on
+the list still gets nothing. Withdrawal keeps the record: the reason, the recipients and their
+`read_at` stamps all survive, because a memo people acted on is evidence.
+
+Meetings add a field-level rule the scope engine cannot express. Minutes are hidden inside a meeting
+the reader may otherwise see in full, until they are circulated — `Meeting::minutesVisibleTo()`
+answers for the minute-taker, the organiser, the creator and anyone holding `meeting.circulate`, so
+recording and releasing are separate acts by separate people. Actions raised from a meeting are
+ordinary tasks with `linked_type`/`linked_id` back to it, carrying the task engine's own
+authorization rather than a private copy, which is §90 in the one place it is easiest to violate.
+The calendar is a read projection over meetings, tasks and announcements: it re-asks each source's
+own `visibleTo` scope per band rather than trusting a date range, so nothing appears on a month grid
+that would 403 when clicked.
+
+`DemoSeeder` seeds all of this through the services rather than inserting rows, so the demo cannot
+hold a state the application would refuse to produce — including a memo drafted and never issued, a
+memo issued then withdrawn a fortnight later, minutes recorded but deliberately not circulated, and a
+progress meeting whose decision became a real assigned task. Seven further `DemoSeederTest` cases pin
+those claims, so the demonstration data cannot quietly stop demonstrating them.
+
+One defect that pass caught, now fixed: sixteen grants were missing across ten role templates —
+secretaries who could record minutes but not circulate them, administrators who could convene a
+meeting but not see the register it appeared in. The seeder found them because writing realistic data
+through the real services requires the seeded people to genuinely hold the permissions their jobs
+imply, which hand-built fixtures never force you to check.
 
 **Not yet covered:** the document, HSE and procurement halves of §8. Those grants
 (`document.view`, `hse.*`, `procurement.*`, `finance.view`) belong to Phases 3–5, and the assertions

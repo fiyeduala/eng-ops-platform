@@ -73,7 +73,7 @@ class ScopeCompiler
         // definitions — where the model declares that narrowing this particular ability selects
         // nothing rather than a subset. See Scopeable::accessOrganizationWideAbilities().
         if ($set->hasOrganizationWide() || $this->isOrganizationWideAbility($query->getModel(), $permission)) {
-            return $this->applyConfidentiality($query, $user, $permission);
+            return $this->finalise($query, $user, $permission);
         }
 
         $grants = $set->effective();
@@ -92,7 +92,84 @@ class ScopeCompiler
             });
         });
 
-        return $this->applyConfidentiality($query, $user, $permission);
+        return $this->finalise($query, $user, $permission);
+    }
+
+    /**
+     * The two filters that apply to EVERY path, including organization-wide reach.
+     *
+     * Extracted so the fast path and the normal path cannot drift apart. They ran as one line for
+     * as long as there was only confidentiality; the moment a second such filter existed, having
+     * two call sites became a place for one of them to be forgotten — and a filter that is missing
+     * on the organization-wide path is missing for exactly the people whose reach is widest.
+     *
+     * @param  Builder<Model>  $query
+     * @return Builder<Model>
+     */
+    private function finalise(Builder $query, User $user, string $permission): Builder
+    {
+        return $this->applyPublication(
+            $this->applyConfidentiality($query, $user, $permission),
+            $user,
+            $permission,
+        );
+    }
+
+    /**
+     * Draft gating, for the models that declare a publication column.
+     *
+     * Confidentiality answers "how sensitive is this"; publication answers "is this finished".
+     * They are independent — an ordinary internal memo can be a draft, and a confidential one can
+     * be issued — so this is a separate predicate rather than another branch of Gate 5.
+     *
+     * A row survives if ANY of four things is true:
+     *
+     *   1. it is published — the column is set;
+     *   2. it is the actor's own draft — an author must be able to find what they were writing;
+     *   3. it has been shared with the actor explicitly, which is the same ACL escape Gates 4b
+     *      and 5 honour, and the only reason a co-author can be given a draft at all in V1;
+     *   4. the actor holds the publication ability, i.e. they are one of the people who decides
+     *      that drafts become communications.
+     *
+     * Note what is NOT on that list: organizational scope, project membership, and breadth. The
+     * managing director does not read half-written memos, and that is the feature.
+     *
+     * @param  Builder<Model>  $query
+     * @return Builder<Model>
+     */
+    private function applyPublication(Builder $query, User $user, string $permission): Builder
+    {
+        $model = $query->getModel();
+
+        $column = method_exists($model, 'accessPublicationColumn')
+            ? $model->accessPublicationColumn()
+            : null;
+
+        if ($column === null || ! $this->hasColumn($model, $column)) {
+            return $query;
+        }
+
+        $ability = method_exists($model, 'accessPublicationAbility')
+            ? $model->accessPublicationAbility()
+            : null;
+
+        if ($ability !== null && $this->resolver->has($user, $ability)) {
+            return $query;
+        }
+
+        $ownerColumns = $this->ownerColumns($model);
+
+        return $query->where(function (Builder $group) use ($model, $column, $ownerColumns, $user, $permission) {
+            $group->whereNotNull($model->qualifyColumn($column));
+
+            foreach ($ownerColumns as $ownerColumn) {
+                $group->orWhere($model->qualifyColumn($ownerColumn), $user->id);
+            }
+
+            $group->orWhereExists(function ($sub) use ($model, $user, $permission) {
+                $this->aclSubquery($sub, $model, $user, $permission, 'allow');
+            });
+        });
     }
 
     /**
