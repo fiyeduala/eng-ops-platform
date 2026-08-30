@@ -15,6 +15,7 @@ use App\Engines\Configuration\SettingsRepository;
 use App\Models\ActivityLog;
 use App\Models\AuditLog;
 use App\Models\Employee;
+use App\Models\Follower;
 use App\Models\Location;
 use App\Models\NumberingScheme;
 use App\Models\NumberSequence;
@@ -31,9 +32,13 @@ use App\Models\Role;
 use App\Models\Setting;
 use App\Models\Status;
 use App\Models\StatusTransition;
+use App\Models\Task;
+use App\Models\TaskChecklistItem;
+use App\Models\TaskDependency;
 use App\Models\User;
 use App\Policies\AuditLogPolicy;
 use App\Policies\EmployeePolicy;
+use App\Policies\FollowerPolicy;
 use App\Policies\LocationPolicy;
 use App\Policies\NumberingSchemePolicy;
 use App\Policies\NumberSequencePolicy;
@@ -49,6 +54,9 @@ use App\Policies\RolePolicy;
 use App\Policies\SettingPolicy;
 use App\Policies\StatusPolicy;
 use App\Policies\StatusTransitionPolicy;
+use App\Policies\TaskChecklistItemPolicy;
+use App\Policies\TaskDependencyPolicy;
+use App\Policies\TaskPolicy;
 use App\Policies\UserPolicy;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Database\Eloquent\Model;
@@ -144,6 +152,11 @@ class AppServiceProvider extends ServiceProvider
             'project_role' => ProjectRole::class,
             'project_department' => ProjectDepartment::class,
             'project_member' => ProjectMember::class,
+
+            'task' => Task::class,
+            'task_checklist_item' => TaskChecklistItem::class,
+            'task_dependency' => TaskDependency::class,
+            'follower' => Follower::class,
         ]);
     }
 
@@ -184,6 +197,16 @@ class AppServiceProvider extends ServiceProvider
             ProjectRole::class => ProjectRolePolicy::class,
             ProjectDepartment::class => ProjectDepartmentPolicy::class,
             ProjectMember::class => ProjectMemberPolicy::class,
+
+            // --- Phase 2: tasks ------------------------------------------------------
+            // The last three have no permissions of their own; their policies delegate to
+            // TaskPolicy or to the followed record's policy. They are listed anyway, because a
+            // model without an entry here is a model Gate::guessPolicyNamesUsing throws on — and
+            // that is exactly the alarm we want if one is ever addressed directly.
+            Task::class => TaskPolicy::class,
+            TaskChecklistItem::class => TaskChecklistItemPolicy::class,
+            TaskDependency::class => TaskDependencyPolicy::class,
+            Follower::class => FollowerPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {

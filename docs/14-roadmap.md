@@ -31,7 +31,7 @@ requests every authenticated route three ways — permitted, unpermitted (403), 
 ## PHASE 2 — Core operations 🟨
 
 Projects ✅ · project types ✅ · project departments ✅ · project members ✅ · project roles ✅ ·
-activity timeline UI ✅ (project page) · tasks (+ checklists, dependencies, followers) ⬜ ·
+activity timeline UI ✅ (project page) · tasks (+ checklists, dependencies, followers) ✅ ·
 notification engine ⬜ · memos ⬜ · announcements ⬜ · meetings ⬜ ·
 meeting minutes/decisions/actions ⬜ · calendar ⬜.
 
@@ -52,9 +52,31 @@ so a project's own status history was missing from the only timeline the project
 Active checkbox, so `normaliseBooleans` was writing `is_active = false` on every create — a member
 row that listed on the roster and granted nothing.
 
-**Not yet covered:** the document, task, HSE and procurement halves of §8. Those grants
-(`document.view`, `task.view`, `hse.*`, `procurement.*`, `finance.view`) belong to Phases 3–5, and
-the assertions attach to the same test file as each module lands.
+**Tasks.** `TaskAccessTest` (18 tests) covers the task half of §8: three people reaching one task by
+three different routes (assignee, management chain, project team) and each axis reaching only what
+it should; assignment treated as a grant rather than an edit, on both the policy and the form
+(`assignment cannot ride in on the edit form`); `complete` and `verify` held apart, so the doer
+finishes the work and somebody else accepts it; dependency cycles and terminal moves blocked by open
+predecessors; the `/tasks/{a}/checklist/{item-of-b}` and `/tasks/{a}/dependencies/{edge-of-b}` IDOR
+attempts; a blocking task the actor cannot see refused rather than named; and following a task
+granting nothing.
+
+`DemoSeederTest` (7 tests) then runs `DemoSeeder` end to end and asserts the same properties against
+the data an evaluator actually opens: both companies separate, every task carrying its own tenant's
+status rows, a transmittal genuinely blocked by a report still in review, a `restricted` commercial
+task hidden from the engineers on its own project, and a membership that lapsed with the job it
+belonged to.
+
+One defect that pass caught, now fixed: six seeded role templates — project manager, project
+director, engineering manager, lead engineer, project administrator, department administrator —
+granted `task.manage` or `task.assign` with no `task.view`. There is no implication rule between
+abilities (deliberately), and the baseline grants only `task.view: assigned`, so a project manager
+could reassign and close the work on their own job while the task register showed them nothing but
+their own two tasks.
+
+**Not yet covered:** the document, HSE and procurement halves of §8. Those grants
+(`document.view`, `hse.*`, `procurement.*`, `finance.view`) belong to Phases 3–5, and the assertions
+attach to the same test file as each module lands.
 
 ## PHASE 3 — Documents & workflow ⬜
 

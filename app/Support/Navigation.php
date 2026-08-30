@@ -113,6 +113,8 @@ class Navigation
                 'items' => [
                     ['label' => 'Projects', 'route' => 'projects.index', 'icon' => 'briefcase',
                         'permission' => 'project.view', 'active' => 'projects.*'],
+                    ['label' => 'Tasks', 'route' => 'tasks.index', 'icon' => 'check-square',
+                        'permission' => 'task.view', 'active' => 'tasks.*'],
                 ],
             ],
             [

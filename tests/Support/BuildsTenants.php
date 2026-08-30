@@ -13,8 +13,10 @@ use App\Models\Organization;
 use App\Models\OrgUnit;
 use App\Models\Project;
 use App\Models\Role;
+use App\Models\Task;
 use App\Models\User;
 use App\Services\ProjectService;
+use App\Services\TaskService;
 use App\Support\Enums\Confidentiality;
 use App\Support\Enums\OrgUnitType;
 use Illuminate\Support\Facades\Hash;
@@ -209,6 +211,30 @@ trait BuildsTenants
             'priority' => 'normal',
             'health' => 'on_track',
             'is_active' => true,
+            ...$attributes,
+        ], $actor));
+    }
+
+    /**
+     * A task, created through TaskService for the same reason projects are: the number, the opening
+     * status, the assignment stamps and the creator's follower row all come from one code path. A
+     * task built with Task::create() would have no status at all, which would make every transition
+     * test pass for the wrong reason.
+     *
+     * @param  array<string,mixed>  $attributes
+     */
+    protected function makeTask(
+        Organization $organization,
+        User $actor,
+        string $title,
+        array $attributes = [],
+    ): Task {
+        $this->provisionConfiguration($organization);
+
+        return $this->withinOrganization($organization, fn () => app(TaskService::class)->create([
+            'title' => $title,
+            'confidentiality' => Confidentiality::Internal,
+            'priority' => 'normal',
             ...$attributes,
         ], $actor));
     }

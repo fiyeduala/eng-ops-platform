@@ -206,6 +206,7 @@ final class RoleTemplates
                     'project.manage' => 'project',
                     'project.view_financials' => 'project',
                     'project_member.manage' => 'project',
+                    'task.view' => 'project',
                     'task.manage' => 'project',
                     'document.approve' => 'project',
                     'document.view' => 'project',
@@ -231,6 +232,13 @@ final class RoleTemplates
                     'project.manage' => 'project',
                     'project_member.assign' => 'project',
                     'project_member.view' => 'project',
+                    // `view` alongside `manage`, here and in every role below that administers
+                    // tasks it does not personally hold. There is no implication rule — `manage`
+                    // does not confer `view`, deliberately, since the two answer different
+                    // questions — and the baseline only grants `task.view: assigned`. Without this
+                    // line a project manager could reassign and close the work on their own job
+                    // while the task register showed them nothing but their own two tasks.
+                    'task.view' => 'project',
                     'task.manage' => 'project',
                     'task.assign' => 'project',
                     'document.view' => 'project',
@@ -297,6 +305,7 @@ final class RoleTemplates
                     'document.approve' => 'department',
                     'document.view' => 'department',
                     'document.review' => 'department',
+                    'task.view' => 'department',
                     'task.manage' => 'department',
                     'task.assign' => 'department',
                     'project.view' => 'project',
@@ -326,6 +335,7 @@ final class RoleTemplates
                     'submittal.review' => 'department',
                     'rfi.respond' => 'department',
                     'rfi.view' => 'department',
+                    'task.view' => 'team',
                     'task.assign' => 'team',
                     'task.manage' => 'team',
                     'project.view' => 'project',
@@ -762,6 +772,7 @@ final class RoleTemplates
                     'project.view' => 'project',
                     'project.edit' => 'project',
                     'project_member.manage' => 'project',
+                    'task.view' => 'project',
                     'task.manage' => 'project',
                     'meeting.manage' => 'project',
                     'document.view' => 'project',
@@ -780,6 +791,7 @@ final class RoleTemplates
                 'grants' => [
                     'employee.view' => 'department',
                     'employee.edit' => 'department',
+                    'task.view' => 'department',
                     'task.manage' => 'department',
                     'leave.view' => 'department',
                     'attendance.view' => 'department',

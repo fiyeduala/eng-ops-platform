@@ -10,6 +10,9 @@ use App\Models\Location;
 use App\Models\Organization;
 use App\Models\Position;
 use App\Models\User;
+use App\Services\TaskChecklistService;
+use App\Services\TaskDependencyService;
+use App\Services\TaskService;
 use App\Support\Enums\OrgUnitType;
 use App\Support\PermissionCatalogue;
 use Database\Seeders\PermissionSeeder;
@@ -96,6 +99,34 @@ final class Phase1SmokeTest extends TestCase
         ]);
 
         $this->records['project'] = $project;
+
+        // A task on that project, with a checklist line and a blocker, so the task page joins all
+        // three passes with every panel populated — an empty-state render would prove far less.
+        $task = $this->makeTask($this->org, $this->administrator, 'Survey the eastern abutment', [
+            'project_id' => $project->id,
+            'org_unit_id' => $department->id,
+            'assignee_id' => $colleague->id,
+            'due_on' => now()->addWeek()->toDateString(),
+        ]);
+
+        $blocker = $this->makeTask($this->org, $this->administrator, 'Obtain the road closure permit', [
+            'project_id' => $project->id,
+            'org_unit_id' => $department->id,
+        ]);
+
+        $this->withinOrganization($this->org, function () use ($task, $blocker, $colleague) {
+            app(TaskChecklistService::class)->add(
+                $task,
+                ['title' => 'Photograph the existing spalling'],
+                $this->administrator,
+            );
+
+            app(TaskDependencyService::class)->add($task, $blocker, $this->administrator);
+
+            app(TaskService::class)->subscribe($task, (int) $colleague->id, 'manual', $this->administrator);
+        });
+
+        $this->records['task'] = $task;
     }
 
     #[Test]

@@ -18,6 +18,9 @@ use App\Http\Controllers\ProjectDepartmentController;
 use App\Http\Controllers\ProjectMemberController;
 use App\Http\Controllers\RoleController;
 use App\Http\Controllers\SettingController;
+use App\Http\Controllers\TaskChecklistItemController;
+use App\Http\Controllers\TaskController;
+use App\Http\Controllers\TaskDependencyController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
 
@@ -206,6 +209,73 @@ Route::middleware(['auth', 'password.current'])->group(function () {
             ->middleware('permission:project.manage')->name('projects.departments.update');
         Route::delete('projects/{project}/departments/{department}', [ProjectDepartmentController::class, 'destroy'])
             ->middleware('permission:project.manage')->name('projects.departments.destroy');
+    });
+
+    // --- tasks -----------------------------------------------------------------------------------
+    //
+    // `task.view` on the read routes is the coarsest question — "does this person deal in tasks at
+    // all". Which tasks they then reach is the two-axis union the compiler works out, and every
+    // route below that takes an id calls a policy with the record in hand.
+
+    Route::middleware('permission:task.view')->group(function () {
+        Route::get('tasks', [TaskController::class, 'index'])->name('tasks.index');
+        Route::get('tasks/{task}', [TaskController::class, 'show'])
+            ->whereNumber('task')->name('tasks.show');
+    });
+
+    Route::get('tasks/create', [TaskController::class, 'create'])
+        ->middleware('permission:task.create')->name('tasks.create');
+    Route::post('tasks', [TaskController::class, 'store'])
+        ->middleware('permission:task.create')->name('tasks.store');
+    Route::get('tasks/{task}/edit', [TaskController::class, 'edit'])
+        ->middleware('permission:task.edit')->name('tasks.edit');
+    Route::put('tasks/{task}', [TaskController::class, 'update'])
+        ->middleware('permission:task.edit')->name('tasks.update');
+    Route::delete('tasks/{task}', [TaskController::class, 'destroy'])
+        ->middleware('permission:task.delete')->name('tasks.destroy');
+
+    // Assignment is a GRANT, not an edit: `task.view:assigned` is a real permission, so writing
+    // assignee_id hands that account sight of the record. Its own route, its own permission, and a
+    // policy that asks about the candidate as well as the task (§14, §84).
+    Route::post('tasks/{task}/assignee', [TaskController::class, 'assign'])
+        ->middleware('permission:task.assign,task.reassign')->name('tasks.assign');
+
+    // Status is not a form field. It moves through the configured whitelist, and the endpoint
+    // re-asks StatusMachine with the same actor that drew the buttons (§63, §84).
+    Route::post('tasks/{task}/status', [TaskController::class, 'transition'])
+        ->middleware('permission:task.edit,task.complete,task.verify,task.manage')
+        ->name('tasks.status');
+
+    // Following grants nothing — it is a notification subscription (see the Follower model), and
+    // the notification layer re-checks each recipient's reach at send time (§68). Guarded by
+    // task.view because you may only subscribe to what you can already see.
+    Route::post('tasks/{task}/follow', [TaskController::class, 'follow'])
+        ->middleware('permission:task.view')->name('tasks.follow');
+    Route::delete('tasks/{task}/follow', [TaskController::class, 'unfollow'])
+        ->name('tasks.unfollow');
+
+    // Checklists and dependencies have no permissions of their own; they borrow the task's, which
+    // is why these are guarded by task.edit and authorized against the parent record. Scoped
+    // bindings make /tasks/7/checklist/{item-of-task-8} a 404 at the router (§94).
+    //
+    // The child parameters are named for the relation Laravel will look for: `{checklistItem}`
+    // resolves through Task::checklistItems() and `{dependency}` through Task::dependencies(). A
+    // shorter name like `{item}` would send the router looking for a Task::items() that does not
+    // exist, and the scoping — which is the IDOR control here — would fail at the first request.
+    Route::scopeBindings()->group(function () {
+        Route::post('tasks/{task}/checklist', [TaskChecklistItemController::class, 'store'])
+            ->middleware('permission:task.edit')->name('tasks.checklist.store');
+        Route::put('tasks/{task}/checklist/{checklistItem}', [TaskChecklistItemController::class, 'update'])
+            ->middleware('permission:task.edit')->name('tasks.checklist.update');
+        Route::post('tasks/{task}/checklist/{checklistItem}/toggle', [TaskChecklistItemController::class, 'toggle'])
+            ->middleware('permission:task.edit')->name('tasks.checklist.toggle');
+        Route::delete('tasks/{task}/checklist/{checklistItem}', [TaskChecklistItemController::class, 'destroy'])
+            ->middleware('permission:task.edit')->name('tasks.checklist.destroy');
+
+        Route::post('tasks/{task}/dependencies', [TaskDependencyController::class, 'store'])
+            ->middleware('permission:task.edit')->name('tasks.dependencies.store');
+        Route::delete('tasks/{task}/dependencies/{dependency}', [TaskDependencyController::class, 'destroy'])
+            ->middleware('permission:task.edit')->name('tasks.dependencies.destroy');
     });
 
     // --- administration ------------------------------------------------------------------------
