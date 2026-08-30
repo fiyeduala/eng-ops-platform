@@ -46,7 +46,7 @@ Audiences compose with `->or()` / `->except()` and always de-duplicate.
 |---------|----|-------|
 | In-app | ✅ | `notifications` table; bell + `/notifications`; polled |
 | Email | ✅ | Laravel Mail over SMTP; queued |
-| Web push | ✅ | VAPID Web Push; `push_subscriptions` table; optional per user |
+| Web push | ⛔ | VAPID Web Push; `push_subscriptions` table; optional per user. **Deferred** — see §9 |
 | SMS | ⛔ | interface present, no default provider |
 | WebSocket realtime | ⛔ | V2 on VPS — the in-app channel already writes the row |
 
@@ -64,7 +64,11 @@ account security) cannot be disabled — only their channel mix. A `digest` opti
 low-priority items into a daily summary rather than per-event mail.
 
 Quiet hours and the organization's working calendar suppress non-urgent email outside work hours;
-urgent classes (HSE incident, permit expiry) ignore quiet hours.
+urgent classes (HSE incident, permit expiry) ignore quiet hours. Suppressed means **deferred, never
+dropped** — a notification the sender believes was delivered and never was is worse than a late one.
+
+Quiet hours are an **organization** setting, not a personal one — `notifications.quiet_hours.enabled`
+/ `.start` / `.end`, read through the Configuration engine against `general.timezone`. See §9.
 
 ## 5. Notification catalogue
 
@@ -87,6 +91,12 @@ urgent classes (HSE incident, permit expiry) ignore quiet hours.
 | `expiry.threshold_reached` | Expiry engine | owner + responsible role | high |
 | `report.daily_executive` | scheduler | configured recipients | normal |
 | `account.created` / `password.reset` | auth | the user | high |
+
+The table above is the **design target**, spanning every phase. `App\Support\NotificationCatalogue`
+holds only the keys that have a producer today: a preferences screen offering a switch for something
+that never fires is a lie told in the interface, and indistinguishable from a feature that is quietly
+broken. Later phases add their rows as they add their listeners. See §9 for what is live and for the
+three key names that changed.
 
 ## 6. Delivery pipeline
 
@@ -121,3 +131,48 @@ is cached and invalidated on write to avoid a count query on every page load.
 | Payload minimisation | Notification body contains no restricted field values |
 | Link gating | Deep link returns 403/404 for a recipient who lost access between send and click |
 | Mandatory classes | Workflow-assignment email cannot be disabled entirely |
+
+All six are covered by `tests/Feature/Notifications/NotificationDispatchTest.php`, against Task as the
+subject — plus tenant isolation of the audience, exclusion of the causer, refusal of a disabled
+account, and the IDOR walk over another person's notification ids.
+
+## 9. As built — Phase 2
+
+The engine landed with the security boundary complete and three delivery mechanisms deferred. What
+follows is the difference between this document and the code, recorded here so the next phase reads
+the deviation rather than rediscovering it.
+
+**Live.** `NotificationDispatcher` (expand → authorize per candidate against the subject's policy →
+minimise → preferences → in-app row and/or queued mail), `Audience` with eleven rule kinds, the
+`notifications` and `notification_preferences` tables, the bell and unread count, `/notifications`
+with the read-time re-check, `/notifications/{id}/open` with the click-time re-check, the preferences
+screen, and one producer: `NotifyTaskAssignee` on `TaskAssigned`.
+
+**Catalogue keys — three deviations from §5.**
+
+| §5 says | Code has | Why |
+|---------|----------|-----|
+| `project.memo_published` | `memo.issued` | The module is Memos, not Projects — a memo need not belong to a project at all, and the preferences screen groups by module |
+| — | `meeting.rescheduled`, `meeting.cancelled` | A meeting moving or being called off is not the same event as being invited to it, and a person who mutes invitations still needs to know the room changed |
+| `task.due_soon`, `task.overdue`, `meeting.reminder` | omitted | All three need a scheduler; nothing fires them yet, so no toggle is offered |
+
+**Deferred, with the storage already in place.**
+
+- *Web push* — the `push` column and its catalogue default exist; there is no VAPID transport and no
+  `push_subscriptions` table, so the preferences screen does not render the toggle.
+- *Digest* — the `digest` column exists and the dispatcher honours it (email is held back when set),
+  but nothing assembles or sends the summary, so the toggle is not offered either. A person who could
+  tick it would simply stop receiving that key.
+- *De-duplication* (§6) — not implemented. Every dispatch writes a row. The window belongs with the
+  scheduler work, and until a producer fires repeatedly for one record there is nothing to collapse.
+
+**Listener registration.** `bootstrap/app.php` calls `withEvents(discover: false)` and the map lives
+in `AppServiceProvider::configureEventListeners()`. Discovery would otherwise scan `app/Listeners`,
+which means a file rename silently changes who gets told what — and a listener registered both ways
+sends everything twice.
+
+**No permission module.** Notifications have no entry in the permission catalogue and
+`NotificationPolicy` does not extend `ScopedPolicy`. The rule is ownership and nothing else: a
+department-scoped `notification.view` would be a licence to read other people's post, and every
+notification is only ever a restatement of a record the manager can already open on their own
+authority.

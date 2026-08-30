@@ -1,6 +1,11 @@
 @php
     /** @var \App\Models\User $me */
     $me = auth()->user();
+
+    // A count, not content. It renders on every authenticated page, so it is cached for a minute
+    // and invalidated on every write — and nothing here needs authorizing, because the rows were
+    // authorized when they were written and the list re-checks them when it is opened.
+    $unread = app(\App\Engines\Notification\NotificationDispatcher::class)->unreadCountFor($me);
 @endphp
 
 <header class="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-[var(--surface-border)] bg-[var(--surface-card)] px-4 sm:px-6 lg:px-8">
@@ -14,6 +19,16 @@
             <h1 class="truncate text-sm font-semibold text-[var(--text-strong)]">{{ $title }}</h1>
         @endisset
     </div>
+
+    <a href="{{ route('notifications.index') }}" class="btn btn-ghost relative px-2"
+       aria-label="{{ $unread === 0 ? 'Notifications' : $unread.' unread notifications' }}">
+        <x-icon name="bell" class="h-4 w-4"/>
+        @if ($unread > 0)
+            <span class="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-600 px-1 text-[10px] font-semibold text-white">
+                {{ $unread > 99 ? '99+' : $unread }}
+            </span>
+        @endif
+    </a>
 
     <button type="button" @click="$store.theme.toggle()" class="btn btn-ghost px-2"
             :aria-label="$store.theme.dark ? 'Switch to light theme' : 'Switch to dark theme'">
@@ -39,6 +54,9 @@
             <div class="p-1">
                 <a href="{{ route('profile.show') }}" class="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-[var(--surface-muted)]">
                     <x-icon name="user" class="h-4 w-4 text-[var(--text-muted)]"/> My profile
+                </a>
+                <a href="{{ route('notifications.preferences') }}" class="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-[var(--surface-muted)]">
+                    <x-icon name="bell" class="h-4 w-4 text-[var(--text-muted)]"/> Notification settings
                 </a>
                 <a href="{{ route('password.edit') }}" class="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-[var(--surface-muted)]">
                     <x-icon name="lock" class="h-4 w-4 text-[var(--text-muted)]"/> Change password

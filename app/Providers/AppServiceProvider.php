@@ -12,11 +12,15 @@ use App\Engines\Access\ScopeCompiler;
 use App\Engines\Audit\AuditContext;
 use App\Engines\Audit\AuditLogger;
 use App\Engines\Configuration\SettingsRepository;
+use App\Events\TaskAssigned;
+use App\Listeners\NotifyTaskAssignee;
 use App\Models\ActivityLog;
 use App\Models\AuditLog;
 use App\Models\Employee;
 use App\Models\Follower;
 use App\Models\Location;
+use App\Models\Notification;
+use App\Models\NotificationPreference;
 use App\Models\NumberingScheme;
 use App\Models\NumberSequence;
 use App\Models\Organization;
@@ -40,6 +44,7 @@ use App\Policies\AuditLogPolicy;
 use App\Policies\EmployeePolicy;
 use App\Policies\FollowerPolicy;
 use App\Policies\LocationPolicy;
+use App\Policies\NotificationPolicy;
 use App\Policies\NumberingSchemePolicy;
 use App\Policies\NumberSequencePolicy;
 use App\Policies\OrganizationPolicy;
@@ -63,6 +68,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
@@ -91,6 +97,7 @@ class AppServiceProvider extends ServiceProvider
         $this->configurePolicies();
         $this->configureBlade();
         $this->configureGates();
+        $this->configureEventListeners();
 
         if ($this->app->environment('production')) {
             URL::forceScheme('https');
@@ -157,6 +164,9 @@ class AppServiceProvider extends ServiceProvider
             'task_checklist_item' => TaskChecklistItem::class,
             'task_dependency' => TaskDependency::class,
             'follower' => Follower::class,
+
+            'notification' => Notification::class,
+            'notification_preference' => NotificationPreference::class,
         ]);
     }
 
@@ -207,6 +217,13 @@ class AppServiceProvider extends ServiceProvider
             TaskChecklistItem::class => TaskChecklistItemPolicy::class,
             TaskDependency::class => TaskDependencyPolicy::class,
             Follower::class => FollowerPolicy::class,
+
+            // --- Phase 2: notifications ----------------------------------------------
+            // One policy for both, because both answer the same one-line question: is this
+            // row yours? There is no scope and no administrator override on purpose — see
+            // NotificationPolicy.
+            Notification::class => NotificationPolicy::class,
+            NotificationPreference::class => NotificationPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {
@@ -227,6 +244,34 @@ class AppServiceProvider extends ServiceProvider
 
                 return [];
             });
+        }
+    }
+
+    /**
+     * Events to listeners, written out rather than discovered.
+     *
+     * bootstrap/app.php does not call withEvents(), so Laravel's convention-based listener discovery
+     * is not running — and that is the intended arrangement, not an omission. Discovery decides what
+     * the application does by scanning a directory, which means a file added, renamed or moved
+     * silently changes who gets told what. Notifications are exactly the wrong place for that: a
+     * listener registered twice sends everything twice, and one that stops being found fails
+     * completely silently.
+     *
+     * Same reasoning as configurePolicies() above — the map lives in one readable file, and an
+     * absence is visible.
+     */
+    private function configureEventListeners(): void
+    {
+        $listeners = [
+            TaskAssigned::class => [
+                NotifyTaskAssignee::class,
+            ],
+        ];
+
+        foreach ($listeners as $event => $handlers) {
+            foreach ($handlers as $handler) {
+                Event::listen($event, $handler);
+            }
         }
     }
 

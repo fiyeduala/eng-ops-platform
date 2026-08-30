@@ -22,6 +22,12 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    // Listener discovery OFF. Laravel otherwise scans app/Listeners and wires each handle()
+    // signature to its event automatically — which means a file added, renamed or moved silently
+    // changes who gets told what, and a class registered both ways gets registered twice and sends
+    // everything twice. Notifications are the wrong place for that kind of magic. The map lives in
+    // AppServiceProvider::configureEventListeners(), where an absence is visible.
+    ->withEvents(discover: false)
     ->withMiddleware(function (Middleware $middleware): void {
         // The tenant is established on EVERY web request, authenticated or not. On an
         // unauthenticated request it is explicitly cleared, so the global scope fails closed

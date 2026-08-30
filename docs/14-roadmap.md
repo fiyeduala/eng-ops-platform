@@ -32,7 +32,7 @@ requests every authenticated route three ways — permitted, unpermitted (403), 
 
 Projects ✅ · project types ✅ · project departments ✅ · project members ✅ · project roles ✅ ·
 activity timeline UI ✅ (project page) · tasks (+ checklists, dependencies, followers) ✅ ·
-notification engine ⬜ · memos ⬜ · announcements ⬜ · meetings ⬜ ·
+notification engine ✅ · memos ⬜ · announcements ⬜ · meetings ⬜ ·
 meeting minutes/decisions/actions ⬜ · calendar ⬜.
 
 **Exit criteria:** the §8 Project Alpha scenario passes as a feature test for all five users.
@@ -73,6 +73,24 @@ granted `task.manage` or `task.assign` with no `task.view`. There is no implicat
 abilities (deliberately), and the baseline grants only `task.view: assigned`, so a project manager
 could reassign and close the work on their own job while the task register showed them nothing but
 their own two tasks.
+
+**Notifications.** `NotificationDispatchTest` (17 tests) covers docs/10 §8 in full, plus four the
+document did not ask for: an audience that cannot cross a tenant boundary, a causer who is not told
+what they just did, a disabled account dropped before a row is written, and the
+`/notifications/{id-of-somebody-else}` IDOR. The two that matter most are the pair around
+revocation — a notification is a durable copy of something a record said, so the list re-checks every
+row's subject at read time and the follow-through link re-checks again at the moment of the click.
+A row that no longer passes is removed rather than greyed out; "there is something here you may not
+see" is itself a disclosure. Deviations from docs/10 are recorded in its §9 rather than left for the
+next phase to find: push and digest are stored but not transported, de-duplication is not yet
+implemented, and listeners are synchronous in V1 because a queued event would deserialize its models
+on a worker with no tenant bound, where `OrganizationScope` fails closed.
+
+One defect that pass caught, now fixed: Laravel's automatic listener discovery is on by default even
+when `bootstrap/app.php` never calls `withEvents()`, so `NotifyTaskAssignee` was registered twice and
+every assignment sent two notifications. `withEvents(discover: false)` now makes the map in
+`AppServiceProvider` the only registration — a file rename must not be able to change who gets told
+what.
 
 **Not yet covered:** the document, HSE and procurement halves of §8. Those grants
 (`document.view`, `hse.*`, `procurement.*`, `finance.view`) belong to Phases 3–5, and the assertions

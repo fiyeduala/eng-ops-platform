@@ -9,6 +9,7 @@ use App\Http\Controllers\Auth\PasswordResetController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\LocationController;
+use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\OrganizationController;
 use App\Http\Controllers\OrgUnitController;
 use App\Http\Controllers\PositionController;
@@ -78,6 +79,25 @@ Route::middleware(['auth', 'password.current'])->group(function () {
     // own profile, and the controller only ever addresses $request->user().
     Route::get('profile', [ProfileController::class, 'show'])->name('profile.show');
     Route::put('profile', [ProfileController::class, 'update'])->name('profile.update');
+
+    // Your own bell — same reasoning as the profile above, and the same absence of permission
+    // middleware. There is no `notification.view` permission because a notification is not a record
+    // anybody administers; see NotificationPolicy for why granting one would be a mistake.
+    //
+    // `notifications/{notification}` is deliberately not a show route. Opening a notification means
+    // going to the record it is about, and `open` is where that record is authorized again at the
+    // moment of the click before any redirect happens.
+    Route::get('notifications', [NotificationController::class, 'index'])->name('notifications.index');
+    Route::get('notifications/preferences', [NotificationController::class, 'preferences'])
+        ->name('notifications.preferences');
+    Route::put('notifications/preferences', [NotificationController::class, 'updatePreferences'])
+        ->name('notifications.preferences.update');
+    Route::post('notifications/read-all', [NotificationController::class, 'markAllRead'])
+        ->name('notifications.read-all');
+    Route::get('notifications/{notification}/open', [NotificationController::class, 'open'])
+        ->whereNumber('notification')->name('notifications.open');
+    Route::post('notifications/{notification}/read', [NotificationController::class, 'markRead'])
+        ->whereNumber('notification')->name('notifications.read');
 
     // --- organization structure ------------------------------------------------------------
 

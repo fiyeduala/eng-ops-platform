@@ -15,6 +15,7 @@ use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -52,6 +53,27 @@ class User extends Authenticatable implements MustVerifyEmail
     public function employee(): HasOne
     {
         return $this->hasOne(Employee::class);
+    }
+
+    /**
+     * This person's bell.
+     *
+     * Overrides the relation the Notifiable trait provides, and must. That one points at
+     * Illuminate\Notifications\DatabaseNotification — a uuid-keyed, `notifiable`-morphed table with
+     * an opaque JSON payload — and this application's `notifications` table is nothing like it (see
+     * the migration for why). Left inherited, `$user->notifications` would query a `notifiable_type`
+     * column that does not exist, and would do it from whichever view first reached for it.
+     *
+     * Notifiable is still used, for `routeNotificationForMail` and the mail channel.
+     */
+    public function notifications(): HasMany
+    {
+        return $this->hasMany(Notification::class)->latest('id');
+    }
+
+    public function notificationPreferences(): HasMany
+    {
+        return $this->hasMany(NotificationPreference::class);
     }
 
     public function roles(): BelongsToMany
