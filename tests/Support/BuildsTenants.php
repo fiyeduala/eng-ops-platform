@@ -9,6 +9,9 @@ use App\Engines\Configuration\StatusMachine;
 use App\Engines\Organization\OrganizationProvisioner;
 use App\Engines\Organization\OrgUnitService;
 use App\Models\Announcement;
+use App\Models\Document;
+use App\Models\DocumentCategory;
+use App\Models\DocumentVersion;
 use App\Models\Employee;
 use App\Models\Meeting;
 use App\Models\Memo;
@@ -19,12 +22,17 @@ use App\Models\Role;
 use App\Models\Status;
 use App\Models\Task;
 use App\Models\User;
+use App\Models\Workflow;
 use App\Services\AnnouncementService;
+use App\Services\DocumentService;
+use App\Services\DocumentVersionService;
 use App\Services\MeetingService;
 use App\Services\MemoService;
 use App\Services\ProjectService;
 use App\Services\TaskService;
+use App\Services\WorkflowDefinitionService;
 use App\Support\Enums\Confidentiality;
+use App\Support\Enums\DocumentKind;
 use App\Support\Enums\OrgUnitType;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -413,6 +421,132 @@ trait BuildsTenants
             };
 
             return $service->transition($record, $to, $actor, $comment)->refresh();
+        });
+    }
+
+    // ================================================================== documents (Phase 3)
+
+    /**
+     * A register: the configuration that decides how documents in it are numbered, revised,
+     * approved and defaulted.
+     *
+     * Created directly rather than through a service because DocumentCategory has no service — it
+     * is configuration, written by the controller from a validated request. What matters for the
+     * tests is that the flags a document then inherits are visible in the test file.
+     *
+     * @param  array<string,mixed>  $attributes
+     */
+    protected function makeDocumentCategory(
+        Organization $organization,
+        string $name,
+        array $attributes = [],
+    ): DocumentCategory {
+        $this->provisionConfiguration($organization);
+
+        return $this->withinOrganization($organization, fn () => DocumentCategory::create([
+            'organization_id' => $organization->id,
+            'name' => $name,
+            'slug' => Str::slug($name).'-'.Str::random(4),
+            'code' => Str::upper(Str::substr(Str::slug($name), 0, 4)),
+            'revision_scheme' => 'alpha',
+            'default_confidentiality' => Confidentiality::Internal->value,
+            'default_kind' => DocumentKind::Native->value,
+            'is_controlled' => true,
+            'requires_approval' => true,
+            'is_active' => true,
+            ...$attributes,
+        ]));
+    }
+
+    /**
+     * A document, raised through DocumentService so it gets its number, its opening status and the
+     * defaults its register carries. A Document::create() in a fixture would have none of those,
+     * and every lifecycle assertion below it would be testing a state the application cannot reach.
+     *
+     * @param  array<string,mixed>  $attributes
+     */
+    protected function makeDocument(
+        Organization $organization,
+        User $actor,
+        string $title,
+        array $attributes = [],
+    ): Document {
+        $this->provisionConfiguration($organization);
+
+        return $this->withinOrganization($organization, fn () => app(DocumentService::class)->create([
+            'title' => $title,
+            'kind' => DocumentKind::Native->value,
+            'confidentiality' => Confidentiality::Internal->value,
+            ...$attributes,
+        ], $actor));
+    }
+
+    /**
+     * A draft revision with authored content.
+     *
+     * Note what this does NOT do: it does not make the revision current and it does not approve it.
+     * Both of those are things the workflow does, and a fixture that did them silently would hide
+     * the half of the module the tests exist to check.
+     *
+     * @param  array<string,mixed>  $attributes
+     */
+    protected function makeNativeVersion(
+        Organization $organization,
+        Document $document,
+        User $actor,
+        string $html = '<p>The procedure text.</p>',
+        array $attributes = [],
+    ): DocumentVersion {
+        return $this->withinOrganization($organization, fn () => app(DocumentVersionService::class)->createNative(
+            $document,
+            ['content_html' => $html, 'change_summary' => 'First issue.', ...$attributes],
+            $actor,
+        ));
+    }
+
+    // ================================================================== workflow (Phase 3)
+
+    /**
+     * A published, single-stage approval route.
+     *
+     * Published on purpose: an unpublished definition is invisible to the engine, so a fixture that
+     * forgot this step would produce tests where "nothing was routed" passes for the wrong reason.
+     * The stage names a ROLE by id, which is also the shape the assignee_ref regression test below
+     * pins down.
+     *
+     * @param  array<int,array<string,mixed>>  $stages
+     */
+    protected function makeWorkflow(
+        Organization $organization,
+        User $actor,
+        string $name,
+        string $entityType,
+        array $stages,
+        array $attributes = [],
+    ): Workflow {
+        return $this->withinOrganization($organization, function () use ($actor, $name, $entityType, $stages, $attributes) {
+            $definitions = app(WorkflowDefinitionService::class);
+
+            $workflow = $definitions->create([
+                'name' => $name,
+                'entity_type' => $entityType,
+                'is_default' => true,
+                ...$attributes,
+            ], $actor);
+
+            foreach ($stages as $stage) {
+                $definitions->addStage($workflow, [
+                    'action_type' => 'approve',
+                    'quorum' => 'all',
+                    'on_reject' => 'return_to_owner',
+                    'allow_delegate' => true,
+                    'allow_self_approval' => false,
+                    'is_active' => true,
+                    ...$stage,
+                ], $actor);
+            }
+
+            return $definitions->publish($workflow->refresh(), $actor)->refresh();
         });
     }
 }

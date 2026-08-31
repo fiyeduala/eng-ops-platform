@@ -134,6 +134,21 @@ class Navigation
                 ],
             ],
             [
+                'label' => 'Documents',
+                'items' => [
+                    ['label' => 'Documents', 'route' => 'documents.index', 'icon' => 'file-text',
+                        'permission' => 'document.view', 'active' => 'documents.*'],
+                    ['label' => 'Transmittals', 'route' => 'transmittals.index', 'icon' => 'download',
+                        'permission' => 'transmittal.view', 'active' => 'transmittals.*'],
+
+                    // The approvals inbox is listed for anyone who can act on OR merely watch an
+                    // approval, because a reviewer with `approval.view` and no `approval.act` is a
+                    // real role — the person who needs to see where a submission has got to.
+                    ['label' => 'My approvals', 'route' => 'approvals.index', 'icon' => 'gavel',
+                        'permission' => ['approval.view', 'approval.act'], 'active' => 'approvals.*'],
+                ],
+            ],
+            [
                 'label' => 'Administration',
                 'items' => [
                     ['label' => 'User accounts', 'route' => 'users.index', 'icon' => 'key',
@@ -144,6 +159,13 @@ class Navigation
                         'permission' => ['organization.view', 'organization.configure'], 'active' => 'organization.*'],
                     ['label' => 'Settings', 'route' => 'settings.index', 'icon' => 'sliders',
                         'permission' => ['setting.view', 'setting.manage'], 'active' => 'settings.*'],
+                    ['label' => 'Workflows', 'route' => 'workflows.index', 'icon' => 'target',
+                        'permission' => ['workflow.view', 'workflow.manage'], 'active' => 'workflows.*'],
+                    ['label' => 'Document registers', 'route' => 'document-categories.index', 'icon' => 'archive',
+                        'permission' => ['document_category.view', 'document_category.manage'],
+                        'active' => 'document-categories.*'],
+                    ['label' => 'Templates', 'route' => 'templates.index', 'icon' => 'file-text',
+                        'permission' => ['template.view', 'template.manage'], 'active' => 'templates.*'],
                     ['label' => 'Audit trail', 'route' => 'audit.index', 'icon' => 'scroll',
                         'permission' => 'audit_log.view', 'active' => 'audit.*'],
                 ],

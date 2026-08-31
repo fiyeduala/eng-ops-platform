@@ -90,6 +90,55 @@ final class NotificationCatalogue
             'The minutes of a meeting you were part of have been circulated.',
             'normal', false, [true, true, false],
         ],
+
+        // --- approvals ------------------------------------------------------------------------
+        //
+        // `approval.requested` is mandatory and urgent, and both flags are deliberate. An approval
+        // sitting unseen in an inbox is the single most expensive failure mode in this module —
+        // work stops, deadlines pass, and the person waiting has no way of knowing whether the
+        // approver is thinking about it or never heard. Somebody who muted this and then held up a
+        // drawing for a fortnight would fairly say the system never told them.
+        'approval.requested' => [
+            'approval', 'Approvals', 'Something needs your approval',
+            'A record reached a stage of an approval route that is assigned to you.',
+            'urgent', true, [true, true, false],
+        ],
+        'approval.decided' => [
+            'approval', 'Approvals', 'A decision was made',
+            'Somebody approved, rejected or asked for changes on a record you own.',
+            'high', true, [true, true, false],
+        ],
+        'approval.overdue' => [
+            'approval', 'Approvals', 'An approval is overdue',
+            'An approval assigned to you has passed the time allowed for it.',
+            'urgent', false, [true, true, false],
+        ],
+        // Not mandatory: it goes to administrators, who may reasonably want it in-app only. It IS
+        // urgent, because a stalled route is a record that has silently stopped moving.
+        'workflow.stalled' => [
+            'workflow', 'Approvals', 'An approval route stalled',
+            'A stage of an approval route resolved to nobody, so the record has stopped.',
+            'urgent', false, [true, true, false],
+        ],
+
+        // --- documents ------------------------------------------------------------------------
+        'document.approved' => [
+            'document', 'Documents', 'A document was approved',
+            'A document you own or follow completed its approval route.',
+            'high', false, [true, true, false],
+        ],
+        'document.revision_requested' => [
+            'document', 'Documents', 'Changes were requested',
+            'A reviewer asked for changes to a document you own.',
+            'high', true, [true, true, false],
+        ],
+
+        // --- transmittals ---------------------------------------------------------------------
+        'transmittal.issued' => [
+            'transmittal', 'Documents', 'A transmittal was issued',
+            'Documents were formally issued outside the company on a transmittal you are named on.',
+            'normal', false, [true, true, false],
+        ],
     ];
 
     /**

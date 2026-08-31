@@ -3,12 +3,16 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\AnnouncementController;
+use App\Http\Controllers\ApprovalController;
 use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\PasswordController;
 use App\Http\Controllers\Auth\PasswordResetController;
 use App\Http\Controllers\CalendarController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DocumentCategoryController;
+use App\Http\Controllers\DocumentController;
+use App\Http\Controllers\DocumentVersionController;
 use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\LocationController;
 use App\Http\Controllers\MeetingController;
@@ -26,7 +30,11 @@ use App\Http\Controllers\SettingController;
 use App\Http\Controllers\TaskChecklistItemController;
 use App\Http\Controllers\TaskController;
 use App\Http\Controllers\TaskDependencyController;
+use App\Http\Controllers\TemplateController;
+use App\Http\Controllers\TransmittalController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\WorkflowController;
+use App\Http\Controllers\WorkflowStageController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -429,6 +437,258 @@ Route::middleware(['auth', 'password.current'])->group(function () {
     // one (§90). The guard here is only "you deal in at least one of the two things it shows".
     Route::get('calendar', [CalendarController::class, 'index'])
         ->middleware('permission:meeting.view,task.view')->name('calendar.index');
+
+    // --- documents -----------------------------------------------------------------------------
+    //
+    // The register, its revisions, and the two ways a document leaves the platform. Note how many
+    // separate permissions appear here for one module: viewing a controlled procedure on screen,
+    // taking the file away, and printing it are three different acts with three different
+    // consequences, so they are three different abilities (§67). The middleware is only the first
+    // gate — DocumentPolicy re-answers all of them with the record in hand.
+
+    Route::middleware('permission:document.view')->group(function () {
+        Route::get('documents', [DocumentController::class, 'index'])->name('documents.index');
+    });
+
+    Route::get('documents/create', [DocumentController::class, 'create'])
+        ->middleware('permission:document.create')->name('documents.create');
+    Route::post('documents', [DocumentController::class, 'store'])
+        ->middleware('permission:document.create')->name('documents.store');
+
+    Route::get('documents/{document}', [DocumentController::class, 'show'])
+        ->middleware('permission:document.view')->whereNumber('document')->name('documents.show');
+    Route::get('documents/{document}/edit', [DocumentController::class, 'edit'])
+        ->middleware('permission:document.edit')->whereNumber('document')->name('documents.edit');
+    Route::put('documents/{document}', [DocumentController::class, 'update'])
+        ->middleware('permission:document.edit')->whereNumber('document')->name('documents.update');
+    Route::delete('documents/{document}', [DocumentController::class, 'destroy'])
+        ->middleware('permission:document.delete')->whereNumber('document')->name('documents.destroy');
+
+    // Check-out is guarded by `document.edit` rather than a lock permission of its own: taking the
+    // lock IS the act of starting to edit, and a separate permission would let somebody hold a
+    // document they could never change.
+    Route::post('documents/{document}/check-out', [DocumentController::class, 'checkOut'])
+        ->middleware('permission:document.edit')->whereNumber('document')->name('documents.check-out');
+    Route::post('documents/{document}/check-in', [DocumentController::class, 'checkIn'])
+        ->middleware('permission:document.edit,document.manage')->whereNumber('document')->name('documents.check-in');
+
+    Route::post('documents/{document}/submit', [DocumentController::class, 'submit'])
+        ->middleware('permission:document.submit')->whereNumber('document')->name('documents.submit');
+    Route::post('documents/{document}/withdraw', [DocumentController::class, 'withdraw'])
+        ->middleware('permission:document.submit,document.manage')->whereNumber('document')->name('documents.withdraw');
+
+    Route::post('documents/{document}/archive', [DocumentController::class, 'archive'])
+        ->middleware('permission:document.archive')->whereNumber('document')->name('documents.archive');
+    Route::post('documents/{document}/restore', [DocumentController::class, 'restore'])
+        ->middleware('permission:document.restore')->whereNumber('document')->name('documents.restore');
+
+    // Revisions. Nested, and every method re-checks the nesting — `/documents/1/versions/97` where
+    // 97 belongs to another document is a 404, which is §94's IDOR case for this module.
+    Route::whereNumber(['document', 'version'])->group(function () {
+        Route::get('documents/{document}/versions/create', [DocumentVersionController::class, 'create'])
+            ->middleware('permission:document.edit')->name('documents.versions.create');
+        Route::post('documents/{document}/versions', [DocumentVersionController::class, 'store'])
+            ->middleware('permission:document.edit')->name('documents.versions.store');
+
+        Route::get('documents/{document}/versions/{version}', [DocumentVersionController::class, 'show'])
+            ->middleware('permission:document.view')->name('documents.versions.show');
+
+        // The editor, and its autosave. Both `document.edit`; the policy additionally refuses while
+        // somebody else holds the lock, and the service refuses on an approved revision whoever asks.
+        Route::get('documents/{document}/versions/{version}/edit', [DocumentVersionController::class, 'edit'])
+            ->middleware('permission:document.edit')->name('documents.versions.edit');
+        Route::put('documents/{document}/versions/{version}', [DocumentVersionController::class, 'update'])
+            ->middleware('permission:document.edit')->name('documents.versions.update');
+
+        Route::post('documents/{document}/versions/{version}/current', [DocumentVersionController::class, 'makeCurrent'])
+            ->middleware('permission:document.manage')->name('documents.versions.current');
+        Route::delete('documents/{document}/versions/{version}', [DocumentVersionController::class, 'destroy'])
+            ->middleware('permission:document.delete')->name('documents.versions.destroy');
+
+        // Getting it out. Nothing is served from a public disk and nothing is guessable: these
+        // three stream from private storage after the policy has answered (§67).
+        Route::get('documents/{document}/versions/{version}/download', [DocumentVersionController::class, 'download'])
+            ->middleware('permission:document.download')->name('documents.versions.download');
+        Route::get('documents/{document}/versions/{version}/docx', [DocumentVersionController::class, 'exportDocx'])
+            ->middleware('permission:document.download')->name('documents.versions.docx');
+        Route::get('documents/{document}/versions/{version}/pdf', [DocumentVersionController::class, 'exportPdf'])
+            ->middleware('permission:document.print')->name('documents.versions.pdf');
+    });
+
+    // Registers. Administration: one `manage` permission covers the lot, because anybody trusted to
+    // define how a company numbers its documents is trusted with all of it.
+    Route::middleware('permission:document_category.view')->group(function () {
+        Route::get('document-categories', [DocumentCategoryController::class, 'index'])
+            ->name('document-categories.index');
+        Route::get('document-categories/{document_category}', [DocumentCategoryController::class, 'show'])
+            ->whereNumber('document_category')->name('document-categories.show');
+    });
+
+    Route::middleware('permission:document_category.manage')->group(function () {
+        Route::get('document-categories/create', [DocumentCategoryController::class, 'create'])
+            ->name('document-categories.create');
+        Route::post('document-categories', [DocumentCategoryController::class, 'store'])
+            ->name('document-categories.store');
+        Route::get('document-categories/{document_category}/edit', [DocumentCategoryController::class, 'edit'])
+            ->whereNumber('document_category')->name('document-categories.edit');
+        Route::put('document-categories/{document_category}', [DocumentCategoryController::class, 'update'])
+            ->whereNumber('document_category')->name('document-categories.update');
+        Route::delete('document-categories/{document_category}', [DocumentCategoryController::class, 'destroy'])
+            ->whereNumber('document_category')->name('document-categories.destroy');
+    });
+
+    // --- transmittals --------------------------------------------------------------------------
+
+    Route::middleware('permission:transmittal.view')->group(function () {
+        Route::get('transmittals', [TransmittalController::class, 'index'])->name('transmittals.index');
+        Route::get('transmittals/{transmittal}', [TransmittalController::class, 'show'])
+            ->whereNumber('transmittal')->name('transmittals.show');
+
+        // The cover sheet is the deliverable, and reading it is reading the transmittal.
+        Route::get('transmittals/{transmittal}/cover-sheet', [TransmittalController::class, 'coverSheet'])
+            ->whereNumber('transmittal')->name('transmittals.cover-sheet');
+    });
+
+    Route::get('transmittals/create', [TransmittalController::class, 'create'])
+        ->middleware('permission:transmittal.create')->name('transmittals.create');
+    Route::post('transmittals', [TransmittalController::class, 'store'])
+        ->middleware('permission:transmittal.create')->name('transmittals.store');
+
+    Route::whereNumber('transmittal')->group(function () {
+        Route::get('transmittals/{transmittal}/edit', [TransmittalController::class, 'edit'])
+            ->middleware('permission:transmittal.edit')->name('transmittals.edit');
+        Route::put('transmittals/{transmittal}', [TransmittalController::class, 'update'])
+            ->middleware('permission:transmittal.edit')->name('transmittals.update');
+        Route::delete('transmittals/{transmittal}', [TransmittalController::class, 'destroy'])
+            ->middleware('permission:transmittal.delete')->name('transmittals.destroy');
+
+        // The item picker lists documents through `document.download`, so it obeys exactly the same
+        // authorization as the register and can never become a way to enumerate what somebody
+        // cannot open (§61).
+        Route::get('transmittals/{transmittal}/picker', [TransmittalController::class, 'documentPicker'])
+            ->middleware('permission:transmittal.edit')->name('transmittals.picker');
+        Route::post('transmittals/{transmittal}/items', [TransmittalController::class, 'addItem'])
+            ->middleware('permission:transmittal.edit')->name('transmittals.items.store');
+        Route::delete('transmittals/{transmittal}/items/{item}', [TransmittalController::class, 'removeItem'])
+            ->middleware('permission:transmittal.edit')->whereNumber('item')->name('transmittals.items.destroy');
+
+        // Issuing is the one-way door, and its own authority: `transmittal.edit` is not
+        // `transmittal.issue`, because sending documents to a client is not the same act as
+        // correcting a typo in the cover note.
+        Route::post('transmittals/{transmittal}/issue', [TransmittalController::class, 'issue'])
+            ->middleware('permission:transmittal.issue')->name('transmittals.issue');
+        Route::post('transmittals/{transmittal}/acknowledge', [TransmittalController::class, 'acknowledge'])
+            ->middleware('permission:transmittal.acknowledge')->name('transmittals.acknowledge');
+        Route::post('transmittals/{transmittal}/cancel', [TransmittalController::class, 'cancel'])
+            ->middleware('permission:transmittal.manage')->name('transmittals.cancel');
+    });
+
+    // --- approvals -----------------------------------------------------------------------------
+    //
+    // One inbox, every module. `approval.view` is deliberately broad — everyone who can be asked to
+    // approve anything holds it — because what a person actually sees is decided twice inside the
+    // controller: the engine narrows to the stages they are assigned, and each row's SUBJECT is then
+    // put through its own policy (§61, §68).
+
+    Route::middleware('permission:approval.view')->group(function () {
+        Route::get('approvals', [ApprovalController::class, 'index'])->name('approvals.index');
+        Route::get('approvals/{approval}', [ApprovalController::class, 'show'])
+            ->whereNumber('approval')->name('approvals.show');
+    });
+
+    // Recording a decision. The body carries no actor and no stage id — both come from the session
+    // and the bound route model, and the policy re-checks them against the frozen assignee list
+    // before anything is written (§84).
+    Route::post('approvals/{approval}/decide', [ApprovalController::class, 'decide'])
+        ->middleware('permission:approval.act,approval.delegate')
+        ->whereNumber('approval')->name('approvals.decide');
+
+    // Administrative, and deliberately not available to the people on the stage: being asked to
+    // approve something does not give you authority over who approves it instead.
+    Route::post('approvals/{approval}/reassign', [ApprovalController::class, 'reassign'])
+        ->middleware('permission:approval.reassign')
+        ->whereNumber('approval')->name('approvals.reassign');
+    Route::post('approvals/instances/{instance}/cancel', [ApprovalController::class, 'cancel'])
+        ->middleware('permission:approval.reassign')
+        ->whereNumber('instance')->name('approvals.cancel');
+
+    // --- workflow definitions ------------------------------------------------------------------
+    //
+    // Phase 3's exit criteria, as routes: a workflow defined entirely through the UI routes a
+    // document through approval. Publishing is separated from editing because a published route is
+    // live configuration — new records start taking it the moment it goes out.
+
+    Route::middleware('permission:workflow.view')->group(function () {
+        Route::get('workflows', [WorkflowController::class, 'index'])->name('workflows.index');
+        Route::get('workflows/{workflow}', [WorkflowController::class, 'show'])
+            ->whereNumber('workflow')->name('workflows.show');
+    });
+
+    Route::get('workflows/create', [WorkflowController::class, 'create'])
+        ->middleware('permission:workflow.create')->name('workflows.create');
+    Route::post('workflows', [WorkflowController::class, 'store'])
+        ->middleware('permission:workflow.create')->name('workflows.store');
+
+    Route::whereNumber(['workflow', 'stage'])->group(function () {
+        Route::get('workflows/{workflow}/edit', [WorkflowController::class, 'edit'])
+            ->middleware('permission:workflow.edit')->name('workflows.edit');
+        Route::put('workflows/{workflow}', [WorkflowController::class, 'update'])
+            ->middleware('permission:workflow.edit')->name('workflows.update');
+        Route::delete('workflows/{workflow}', [WorkflowController::class, 'destroy'])
+            ->middleware('permission:workflow.delete')->name('workflows.destroy');
+
+        Route::post('workflows/{workflow}/publish', [WorkflowController::class, 'publish'])
+            ->middleware('permission:workflow.publish')->name('workflows.publish');
+        Route::post('workflows/{workflow}/version', [WorkflowController::class, 'version'])
+            ->middleware('permission:workflow.publish')->name('workflows.version');
+        Route::post('workflows/{workflow}/deactivate', [WorkflowController::class, 'deactivate'])
+            ->middleware('permission:workflow.publish')->name('workflows.deactivate');
+
+        // Stages. Guarded by the route's own permission and then by WorkflowStagePolicy, which
+        // delegates to the parent workflow — one rule, one place.
+        Route::get('workflows/{workflow}/stages/create', [WorkflowStageController::class, 'create'])
+            ->middleware('permission:workflow.edit')->name('workflows.stages.create');
+        Route::post('workflows/{workflow}/stages', [WorkflowStageController::class, 'store'])
+            ->middleware('permission:workflow.edit')->name('workflows.stages.store');
+        Route::get('workflows/{workflow}/stages/{stage}/edit', [WorkflowStageController::class, 'edit'])
+            ->middleware('permission:workflow.edit')->name('workflows.stages.edit');
+        Route::put('workflows/{workflow}/stages/{stage}', [WorkflowStageController::class, 'update'])
+            ->middleware('permission:workflow.edit')->name('workflows.stages.update');
+        Route::delete('workflows/{workflow}/stages/{stage}', [WorkflowStageController::class, 'destroy'])
+            ->middleware('permission:workflow.edit')->name('workflows.stages.destroy');
+
+        // Drag-and-drop. Answers JSON, takes the whole ordered list, and refuses a partial one.
+        Route::post('workflows/{workflow}/stages/reorder', [WorkflowStageController::class, 'reorder'])
+            ->middleware('permission:workflow.edit')->name('workflows.stages.reorder');
+    });
+
+    // --- templates -----------------------------------------------------------------------------
+
+    Route::middleware('permission:template.view')->group(function () {
+        Route::get('templates', [TemplateController::class, 'index'])->name('templates.index');
+        Route::get('templates/{template}', [TemplateController::class, 'show'])
+            ->whereNumber('template')->name('templates.show');
+
+        // Rendered with the placeholder names standing and a PREVIEW watermark — never against a
+        // live record, which would put that record's content behind a template permission (§61).
+        Route::get('templates/{template}/preview', [TemplateController::class, 'preview'])
+            ->whereNumber('template')->name('templates.preview');
+    });
+
+    Route::middleware('permission:template.manage')->group(function () {
+        Route::get('templates/create', [TemplateController::class, 'create'])->name('templates.create');
+        Route::post('templates', [TemplateController::class, 'store'])->name('templates.store');
+
+        Route::whereNumber('template')->group(function () {
+            Route::get('templates/{template}/edit', [TemplateController::class, 'edit'])->name('templates.edit');
+            Route::put('templates/{template}', [TemplateController::class, 'update'])->name('templates.update');
+            Route::post('templates/{template}/duplicate', [TemplateController::class, 'duplicate'])
+                ->name('templates.duplicate');
+            Route::post('templates/{template}/activate', [TemplateController::class, 'activate'])
+                ->name('templates.activate');
+            Route::delete('templates/{template}', [TemplateController::class, 'destroy'])->name('templates.destroy');
+        });
+    });
 
     // --- administration ------------------------------------------------------------------------
 

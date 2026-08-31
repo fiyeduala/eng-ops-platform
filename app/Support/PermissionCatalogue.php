@@ -64,6 +64,11 @@ final class PermissionCatalogue
                 ...self::CRUD, 'manage', 'submit', 'review', 'approve', 'reject',
                 'sign', 'download', 'print', 'archive', 'restore', 'share', 'view_confidential',
             ]],
+            // Categories are the document register's configuration: they decide the revision
+            // scheme, the upload rules and which workflow a new document enters. That is
+            // administration of the module rather than work within it, so `manage` is the only
+            // write action — there is no meaningful "edit a category but not create one".
+            'document_category' => ['Documents', 'Document Categories', ['view', 'manage']],
             'transmittal' => ['Documents', 'Transmittals', [...self::CRUD, 'manage', 'issue', 'acknowledge']],
             'memo' => ['Documents', 'Memos', [...self::CRUD, 'issue']],
             'announcement' => ['Documents', 'Announcements', [...self::CRUD, 'publish']],

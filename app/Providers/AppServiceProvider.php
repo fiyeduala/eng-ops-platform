@@ -12,23 +12,41 @@ use App\Engines\Access\ScopeCompiler;
 use App\Engines\Audit\AuditContext;
 use App\Engines\Audit\AuditLogger;
 use App\Engines\Configuration\SettingsRepository;
+use App\Engines\Workflow\AssigneeResolver;
 use App\Events\AnnouncementPublished;
+use App\Events\ApprovalDecided;
+use App\Events\ApprovalRequested;
+use App\Events\DocumentApproved;
+use App\Events\DocumentRevisionRequested;
 use App\Events\MeetingCancelled;
 use App\Events\MeetingInvited;
 use App\Events\MeetingMinutesCirculated;
 use App\Events\MeetingRescheduled;
 use App\Events\MemoIssued;
 use App\Events\TaskAssigned;
+use App\Events\TransmittalIssued;
+use App\Events\WorkflowStalled;
 use App\Listeners\NotifyAnnouncementAudience;
+use App\Listeners\NotifyApprovalAssignees;
+use App\Listeners\NotifyApprovalOutcome;
+use App\Listeners\NotifyDocumentApproved;
+use App\Listeners\NotifyDocumentRevisionRequested;
 use App\Listeners\NotifyMeetingCancelled;
 use App\Listeners\NotifyMeetingMinutes;
 use App\Listeners\NotifyMeetingParticipants;
 use App\Listeners\NotifyMeetingRescheduled;
 use App\Listeners\NotifyMemoRecipients;
 use App\Listeners\NotifyTaskAssignee;
+use App\Listeners\NotifyTransmittalIssued;
+use App\Listeners\NotifyWorkflowStalled;
+use App\Listeners\RecordDocumentSignature;
 use App\Models\ActivityLog;
 use App\Models\Announcement;
+use App\Models\Approval;
 use App\Models\AuditLog;
+use App\Models\Document;
+use App\Models\DocumentCategory;
+use App\Models\DocumentVersion;
 use App\Models\Employee;
 use App\Models\Follower;
 use App\Models\Location;
@@ -52,14 +70,27 @@ use App\Models\ProjectType;
 use App\Models\RecordPermission;
 use App\Models\Role;
 use App\Models\Setting;
+use App\Models\Signature;
 use App\Models\Status;
 use App\Models\StatusTransition;
 use App\Models\Task;
 use App\Models\TaskChecklistItem;
 use App\Models\TaskDependency;
+use App\Models\Template;
+use App\Models\Transmittal;
+use App\Models\TransmittalItem;
 use App\Models\User;
+use App\Models\Workflow;
+use App\Models\WorkflowInstance;
+use App\Models\WorkflowStage;
+use App\Models\WorkflowStageCondition;
+use App\Models\WorkflowStageInstance;
 use App\Policies\AnnouncementPolicy;
+use App\Policies\ApprovalPolicy;
 use App\Policies\AuditLogPolicy;
+use App\Policies\DocumentCategoryPolicy;
+use App\Policies\DocumentPolicy;
+use App\Policies\DocumentVersionPolicy;
 use App\Policies\EmployeePolicy;
 use App\Policies\FollowerPolicy;
 use App\Policies\LocationPolicy;
@@ -81,12 +112,21 @@ use App\Policies\ProjectRolePolicy;
 use App\Policies\ProjectTypePolicy;
 use App\Policies\RolePolicy;
 use App\Policies\SettingPolicy;
+use App\Policies\SignaturePolicy;
 use App\Policies\StatusPolicy;
 use App\Policies\StatusTransitionPolicy;
 use App\Policies\TaskChecklistItemPolicy;
 use App\Policies\TaskDependencyPolicy;
 use App\Policies\TaskPolicy;
+use App\Policies\TemplatePolicy;
+use App\Policies\TransmittalItemPolicy;
+use App\Policies\TransmittalPolicy;
 use App\Policies\UserPolicy;
+use App\Policies\WorkflowInstancePolicy;
+use App\Policies\WorkflowPolicy;
+use App\Policies\WorkflowStageConditionPolicy;
+use App\Policies\WorkflowStageInstancePolicy;
+use App\Policies\WorkflowStagePolicy;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
@@ -111,6 +151,11 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(ScopeCompiler::class);
         $this->app->singleton(AuditLogger::class);
         $this->app->singleton(SettingsRepository::class);
+
+        // Shared for a different reason: a custom assignee rule registered by a tenant must be
+        // visible to the workflow engine AND to the builder that lists what can be chosen. Two
+        // instances would mean a rule that resolves at runtime but cannot be selected in the UI.
+        $this->app->singleton(AssigneeResolver::class);
     }
 
     public function boot(): void
@@ -198,6 +243,22 @@ class AppServiceProvider extends ServiceProvider
             'meeting' => Meeting::class,
             'meeting_participant' => MeetingParticipant::class,
             'meeting_decision' => MeetingDecision::class,
+
+            'document_category' => DocumentCategory::class,
+            'document' => Document::class,
+            'document_version' => DocumentVersion::class,
+
+            'workflow' => Workflow::class,
+            'workflow_stage' => WorkflowStage::class,
+            'workflow_stage_condition' => WorkflowStageCondition::class,
+            'workflow_instance' => WorkflowInstance::class,
+            'workflow_stage_instance' => WorkflowStageInstance::class,
+            'approval' => Approval::class,
+            'signature' => Signature::class,
+
+            'transmittal' => Transmittal::class,
+            'transmittal_item' => TransmittalItem::class,
+            'template' => Template::class,
         ]);
     }
 
@@ -267,6 +328,34 @@ class AppServiceProvider extends ServiceProvider
             Meeting::class => MeetingPolicy::class,
             MeetingParticipant::class => MeetingParticipantPolicy::class,
             MeetingDecision::class => MeetingDecisionPolicy::class,
+
+            // --- Phase 3: documents --------------------------------------------------
+            // DocumentVersionPolicy delegates every ability to the parent document, so there is
+            // one definition of who may see a document and revisions cannot drift onto an older
+            // answer. The register (category) is configuration and takes `manage` alone.
+            Document::class => DocumentPolicy::class,
+            DocumentCategory::class => DocumentCategoryPolicy::class,
+            DocumentVersion::class => DocumentVersionPolicy::class,
+
+            // --- Phase 3: workflow ---------------------------------------------------
+            // Definitions are governed by `workflow.*`; the records travelling through them are
+            // governed by whether you can see the SUBJECT. That split is the reason a workflow
+            // administrator cannot read the approval history of a confidential record just
+            // because they configured the route it took.
+            Workflow::class => WorkflowPolicy::class,
+            WorkflowStage::class => WorkflowStagePolicy::class,
+            WorkflowStageCondition::class => WorkflowStageConditionPolicy::class,
+            WorkflowInstance::class => WorkflowInstancePolicy::class,
+            WorkflowStageInstance::class => WorkflowStageInstancePolicy::class,
+
+            // Approvals and signatures are evidence: readable, never writable, by anyone (§59).
+            Approval::class => ApprovalPolicy::class,
+            Signature::class => SignaturePolicy::class,
+
+            // --- Phase 3: issue and house style --------------------------------------
+            Transmittal::class => TransmittalPolicy::class,
+            TransmittalItem::class => TransmittalItemPolicy::class,
+            Template::class => TemplatePolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {
@@ -334,6 +423,43 @@ class AppServiceProvider extends ServiceProvider
             // why announcing a draft would be a disclosure of the thing being withheld.
             MeetingMinutesCirculated::class => [
                 NotifyMeetingMinutes::class,
+            ],
+
+            // --- workflow ------------------------------------------------------------
+            // The engine NEVER sends a notification itself. It dispatches events and these
+            // listeners decide who hears about them, which is what lets the engine stay
+            // module-agnostic: adding purchase requests to the workflow later needs no new
+            // notification code at all (§78).
+            ApprovalRequested::class => [
+                NotifyApprovalAssignees::class,
+            ],
+            // The signature is written BEFORE the owner is told, so a failure to record the
+            // evidence takes the whole decision down with it inside the engine's transaction
+            // rather than leaving a notified approval nobody signed.
+            ApprovalDecided::class => [
+                RecordDocumentSignature::class,
+                NotifyApprovalOutcome::class,
+            ],
+
+            // A stage that resolved to nobody halts the route rather than auto-approving. This
+            // is the message that turns that halt into somebody's problem instead of a document
+            // silently sitting still for a fortnight.
+            WorkflowStalled::class => [
+                NotifyWorkflowStalled::class,
+            ],
+
+            // --- documents -----------------------------------------------------------
+            DocumentApproved::class => [
+                NotifyDocumentApproved::class,
+            ],
+            DocumentRevisionRequested::class => [
+                NotifyDocumentRevisionRequested::class,
+            ],
+
+            // Internal only — the addressee of a transmittal is usually outside this system
+            // entirely, and has no account for the access engine to reason about.
+            TransmittalIssued::class => [
+                NotifyTransmittalIssued::class,
             ],
         ];
 

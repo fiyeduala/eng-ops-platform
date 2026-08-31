@@ -31,6 +31,18 @@ ORGANIZATION  →  DEPARTMENT / TEAM  →  PROJECT  →  ROLE / ASSIGNMENT
 
 ---
 
+## Status
+
+Phases 1–3 of nine are complete: the access and organization foundation, the configuration and
+notification engines with memos, announcements, meetings and the calendar, and the document,
+workflow, approval and signature stack — including native in-browser authoring with .docx import and
+.docx/PDF export. Phase 3's exit criterion is pinned by a test that defines an approval route
+entirely through the same HTTP endpoints the builder screen posts to, then walks a real document
+through it. See [docs/14-roadmap.md](docs/14-roadmap.md) for what each phase covers and what is
+deliberately out of V1.
+
+---
+
 ## Documentation
 
 Architecture and design documents live in [`docs/`](docs/):

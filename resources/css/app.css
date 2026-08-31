@@ -366,3 +366,159 @@
         color: var(--color-slate-500);
     }
 }
+
+/* ====================================================================== documents
+ *
+ * The rendered body of a document, used by three surfaces that must agree: the TipTap canvas, the
+ * read-only revision view, and the print/PDF stylesheet. One ruleset, because a document that looks
+ * one way on screen and another in the PDF the client receives is a document-control problem
+ * wearing a CSS costume.
+ *
+ * Deliberately NOT Tailwind's typography plugin: the export path renders this HTML through PhpWord
+ * and Dompdf, which understand a small, boring subset of CSS. Keeping the rules boring here is what
+ * makes the exported file resemble the screen.
+ */
+@layer components {
+    .prose-document {
+        font-size: 0.9375rem;
+        line-height: 1.7;
+        color: var(--text-body);
+    }
+
+    .prose-document > * + * {
+        margin-top: 0.85em;
+    }
+
+    .prose-document h1,
+    .prose-document h2,
+    .prose-document h3,
+    .prose-document h4 {
+        font-weight: 600;
+        line-height: 1.3;
+        color: var(--text-strong);
+        margin-top: 1.6em;
+    }
+
+    .prose-document h1 { font-size: 1.5rem; }
+    .prose-document h2 { font-size: 1.25rem; }
+    .prose-document h3 { font-size: 1.0625rem; }
+    .prose-document h4 { font-size: 0.9375rem; }
+
+    .prose-document ul,
+    .prose-document ol {
+        padding-left: 1.5rem;
+    }
+
+    .prose-document ul { list-style: disc; }
+    .prose-document ol { list-style: decimal; }
+    .prose-document li + li { margin-top: 0.25em; }
+
+    .prose-document blockquote {
+        border-left: 3px solid var(--surface-border);
+        padding-left: 1rem;
+        color: var(--text-muted);
+    }
+
+    .prose-document pre {
+        background-color: var(--surface-muted);
+        border-radius: 0.5rem;
+        padding: 0.875rem 1rem;
+        overflow-x: auto;
+        font-size: 0.8125rem;
+    }
+
+    .prose-document code {
+        font-size: 0.875em;
+    }
+
+    .prose-document hr {
+        border-color: var(--surface-border);
+    }
+
+    .prose-document a {
+        color: var(--color-brand-600);
+        text-decoration: underline;
+    }
+
+    /* Tables carry most of the real content in engineering documents — schedules, registers,
+     * revision blocks — so they get borders on every cell rather than the fashionable
+     * horizontal-rules-only treatment, which is unreadable once a cell wraps. */
+    .prose-document table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+        overflow: hidden;
+    }
+
+    .prose-document th,
+    .prose-document td {
+        border: 1px solid var(--surface-border);
+        padding: 0.4rem 0.6rem;
+        vertical-align: top;
+        position: relative;
+    }
+
+    .prose-document th {
+        background-color: var(--surface-muted);
+        font-weight: 600;
+        text-align: left;
+    }
+
+    /* TipTap's column-resize handle and cell selection. */
+    .prose-document .column-resize-handle {
+        position: absolute;
+        right: -2px;
+        top: 0;
+        bottom: 0;
+        width: 4px;
+        background-color: var(--color-brand-500);
+        pointer-events: none;
+    }
+
+    .prose-document .selectedCell::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: rgb(59 130 246 / 0.12);
+        pointer-events: none;
+    }
+
+    /* The page the author writes on. Sized like paper on purpose — an author who cannot see roughly
+     * where the page break falls will hand you a document that paginates badly. */
+    .document-canvas {
+        background-color: var(--surface-card);
+        border: 1px solid var(--surface-border);
+        border-radius: 0.5rem;
+        padding: 3rem;
+        min-height: 60vh;
+    }
+
+    .toolbar-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 1.875rem;
+        min-width: 1.875rem;
+        padding: 0 0.4rem;
+        border-radius: 0.375rem;
+        font-size: 0.8125rem;
+        font-weight: 600;
+        color: var(--text-muted);
+        transition: background-color 120ms, color 120ms;
+    }
+
+    .toolbar-btn:hover {
+        background-color: var(--surface-muted);
+        color: var(--text-strong);
+    }
+
+    .toolbar-btn-active {
+        background-color: var(--color-brand-600);
+        color: #fff;
+    }
+
+    .toolbar-btn-active:hover {
+        background-color: var(--color-brand-600);
+        color: #fff;
+    }
+}

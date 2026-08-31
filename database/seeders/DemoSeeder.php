@@ -7,9 +7,14 @@ namespace Database\Seeders;
 use App\Engines\Access\OrganizationContext;
 use App\Engines\Audit\ActivityRecorder;
 use App\Engines\Configuration\StatusMachine;
+use App\Engines\Document\PdfRenderer;
 use App\Engines\Organization\OrganizationProvisioner;
 use App\Engines\Organization\OrgUnitService;
+use App\Engines\Workflow\WorkflowEngine;
 use App\Models\Announcement;
+use App\Models\Document;
+use App\Models\DocumentCategory;
+use App\Models\DocumentVersion;
 use App\Models\Employee;
 use App\Models\Location;
 use App\Models\Meeting;
@@ -23,8 +28,14 @@ use App\Models\ProjectType;
 use App\Models\Role;
 use App\Models\Status;
 use App\Models\Task;
+use App\Models\Transmittal;
 use App\Models\User;
+use App\Models\Workflow;
+use App\Models\WorkflowStage;
+use App\Models\WorkflowStageInstance;
 use App\Services\AnnouncementService;
+use App\Services\DocumentService;
+use App\Services\DocumentVersionService;
 use App\Services\MeetingService;
 use App\Services\MemoService;
 use App\Services\ProjectService;
@@ -32,8 +43,13 @@ use App\Services\ProjectTeamService;
 use App\Services\TaskChecklistService;
 use App\Services\TaskDependencyService;
 use App\Services\TaskService;
+use App\Services\TemplateService;
+use App\Services\TransmittalService;
+use App\Services\WorkflowDefinitionService;
+use App\Support\Enums\Decision;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Seeder;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -85,6 +101,22 @@ class DemoSeeder extends Seeder
 
     private StatusMachine $statuses;
 
+    // The document half, resolved by bootDocuments() for the same reason as the block above: the
+    // numbering engine, the revision sequencer and the status vocabulary are all per-tenant.
+    private DocumentService $documents;
+
+    private DocumentVersionService $revisions;
+
+    private TransmittalService $transmittals;
+
+    private TemplateService $templates;
+
+    private WorkflowDefinitionService $routes;
+
+    private WorkflowEngine $approvals;
+
+    private PdfRenderer $pdfs;
+
     /** @var array<string,ProjectType> slug => type, for the tenant currently being seeded */
     private array $projectTypes = [];
 
@@ -117,6 +149,14 @@ class DemoSeeder extends Seeder
         $this->seedMeridianCommunications($meridian);
         $this->seedKestrelCommunications($kestrel);
 
+        // What each company has WRITTEN DOWN, and who had to agree to it (§27–§38). Last of the
+        // content passes because a document is about a project, is owned by a person, originates in
+        // a department and is approved by whoever heads it — every one of which the passes above
+        // created. The two companies deliberately route documents differently, and neither of them
+        // needed a line of company-specific code to do it (§73).
+        $this->seedMeridianDocuments($meridian);
+        $this->seedKestrelDocuments($kestrel);
+
         // The rows above were written straight to the database, so nothing observed them happening.
         // A demo whose record timelines are all blank teaches the wrong lesson about Engine 4 — the
         // timeline is meant to be the first thing you see on a record, and an empty one looks like
@@ -127,7 +167,8 @@ class DemoSeeder extends Seeder
         $this->command?->newLine();
         $this->command?->info('Demo organizations created:');
         $this->command?->table(
-            ['Organization', 'Structure', 'Units', 'People', 'Projects', 'Tasks', 'Memos/notices/meetings', 'Sign in with'],
+            ['Organization', 'Structure', 'Units', 'People', 'Projects', 'Tasks', 'Memos/notices/meetings',
+                'Docs/awaiting/issued', 'Sign in with'],
             [
                 ['Meridian Engineering & Infrastructure', '4-level (division→team)',
                     ...$this->tally($meridian), 'a.okonkwo@meridian-eng.example'],
@@ -151,7 +192,7 @@ class DemoSeeder extends Seeder
      * behaving correctly; a seeder summary that reported real numbers from nowhere would mean
      * the isolation guarantee had a hole in it.
      *
-     * @return array{0:int,1:int,2:int,3:int,4:string}
+     * @return array{0:int,1:int,2:int,3:int,4:string,5:string}
      */
     private function tally(Organization $organization): array
     {
@@ -165,6 +206,15 @@ class DemoSeeder extends Seeder
                 Memo::query()->count(),
                 Announcement::query()->count(),
                 Meeting::query()->count(),
+            ),
+            sprintf(
+                '%d / %d / %d',
+                Document::query()->count(),
+                // Decisions actually sitting in somebody's inbox, not routes in flight: a stage
+                // whose assignee list emptied is a stalled route with nothing to act on, and
+                // counting it here would promise the evaluator an approval that is not there.
+                WorkflowStageInstance::query()->where('status', WorkflowStageInstance::STATUS_PENDING)->count(),
+                Transmittal::query()->whereNotNull('issued_at')->count(),
             ),
         ]);
     }
@@ -398,6 +448,14 @@ class DemoSeeder extends Seeder
             $md = $this->person($organization, 'KFM-001', 'Rowan', 'Calder', $ops, $positions['MD'],
                 null, $locations['MCR'], $roles['managing-director'], 'r.calder');
 
+            // Somebody has to be able to configure the system, and in a company of eight it is the
+            // MD. Meridian has a dedicated IT administrator; Kestrel does not, and the platform has
+            // to work for both without either being the special case (§73). Note that this is an
+            // ADDITIONAL role rather than a wider one: managing-director still grants no
+            // `setting.manage`, and it is the administrator hat that carries `workflow.*` — which
+            // is what lets him rewrite the starter approval route further down.
+            $md->user?->assignRole($roles['system-administrator']);
+
             $opsManager = $this->person($organization, 'KFM-002', 'Priti', 'Shah', $ops, $positions['OM'],
                 $md, $locations['MCR'], $roles['operations-manager'], 'p.shah');
 
@@ -420,6 +478,14 @@ class DemoSeeder extends Seeder
                 $md, $locations['MCR'], $roles['hr-officer'], 'm.ellis');
             $generalist->user?->assignRole($roles['finance-officer']);
             $generalist->user?->assignRole($roles['office-administrator']);
+
+            // A fourth hat, and the one that makes the document register usable here. `office-
+            // administrator` deliberately grants no `transmittal.*` — issuing a controlled document
+            // to a client is a document-control act, not an office-admin one — so without this the
+            // company could file documents and never send any. In a firm this size the person who
+            // runs the office is also the document controller, which is the whole argument for
+            // roles being additive rather than a single "user type" column (§9).
+            $generalist->user?->assignRole($roles['document-controller']);
 
             $this->setHeads([
                 $ops->id => $opsManager->id,
@@ -1794,6 +1860,660 @@ class DemoSeeder extends Seeder
     private function idsOf(array $users): array
     {
         return array_values(array_map(fn (User $user) => (int) $user->id, $users));
+    }
+
+    // ================================================================= documents & approvals
+
+    /**
+     * Meridian's register: what has been approved, what is out for approval right now, and what has
+     * been issued to the client (§27–§38, docs/09).
+     *
+     * Every state the module actually has is represented once, because the missing ones are exactly
+     * where a demo stops being able to answer a question:
+     *
+     *   - a native document that went the whole way through the seeded two-stage route and is now
+     *     read-only at Revision A;
+     *   - a second one SITTING at technical review and already past its SLA, so the approvals inbox
+     *     is not empty and the escalation sweep has something real to find;
+     *   - an uploaded PDF drawing, so the private-storage half of §67 has an actual file behind an
+     *     actual authorization check rather than a paragraph promising one;
+     *   - an incoming letter in an uncontrolled register, which submits and is approved outright
+     *     because its register carries no route — the branch that distinguishes "no route" from
+     *     "route that could not find anybody", which stalls;
+     *   - a draft checked out and still in somebody's hands, so the lock is visible on a screen.
+     *
+     * Nothing here is written straight to the database. Documents are raised, revised, submitted and
+     * decided through the same services the controllers call, so a defect in the approval path shows
+     * up on `db:seed` rather than on somebody's first real procedure. Each actor is also somebody
+     * whose role would genuinely have permitted the act: Ngozi holds `document.submit` over her own
+     * work, Marcus and Farida hold `approval.act`, and every transmittal is issued by the document
+     * controller, because `transmittal.issue` lives in exactly one role template.
+     */
+    private function seedMeridianDocuments(Organization $organization): void
+    {
+        $this->context->within($organization, function () {
+            $this->bootDocuments();
+
+            $staff = $this->staff();
+            $unit = $this->unitsByCode();
+            $job = Project::query()->get()->keyBy('code');
+            $register = $this->registersByCode();
+
+            $leadEngineer = $this->accountOf($staff, 'MEI-0005');    // Marcus Adeyemi, heads Civil
+            $structuralEng = $this->accountOf($staff, 'MEI-0006');   // Ngozi Eze
+            $electricalEng = $this->accountOf($staff, 'MEI-0008');   // Priya Raghunathan
+            $geotechEng = $this->accountOf($staff, 'MEI-0009');      // Ibrahim Sule
+            $controller = $this->accountOf($staff, 'MEI-0010');      // Helen Obi
+            $engManager = $this->accountOf($staff, 'MEI-0004');      // Farida Yusuf
+
+            $delta = $job['DTE'];
+
+            // ------------------------------------------------- the house template
+            // Header and footer carry placeholders rather than a company name, because the same
+            // template has to be correct on a document nobody has written yet. TemplateRenderer
+            // resolves these against a fixed whitelist — this is data substitution, never Blade
+            // compilation of something an administrator typed into a web form (§66).
+            $procedureTemplate = $this->templates->create([
+                'name' => 'Meridian controlled procedure',
+                'kind' => 'document',
+                'document_category_id' => $register['PROC']->id,
+                'description' => 'The house layout for management-system procedures: numbered '
+                    .'sections, a revision block in the header and the confidentiality marking in '
+                    .'the footer. Start a new procedure from this rather than copying an old one.',
+                'header_html' => '<p><strong>{{organization.name}}</strong> &middot; '
+                    .'{{document.number}} &middot; Revision {{document.revision}}</p>',
+                'footer_html' => '<p>{{document.confidentiality}} &middot; '
+                    .'Uncontrolled when printed &middot; {{today}}</p>',
+                'content_html' => '<h1>{{document.title}}</h1>'
+                    .'<p><em>Prepared by {{user.name}}, {{user.job_title}}.</em></p>'
+                    .'<h2>1. Purpose</h2><p>State what this procedure exists to achieve.</p>'
+                    .'<h2>2. Scope</h2><p>State where it applies and where it does not.</p>'
+                    .'<h2>3. Responsibilities</h2><p>Name the roles, not the people.</p>'
+                    .'<h2>4. Procedure</h2><p>The steps, in the order they are carried out.</p>'
+                    .'<h2>5. Records</h2><p>What is kept, by whom, and for how long.</p>',
+                'page_size' => 'A4',
+                'orientation' => 'portrait',
+                'is_active' => true,
+                'is_default' => true,
+            ], $controller);
+
+            // ------------------------------------------------- approved, the whole way through
+            $criteria = $this->raise($structuralEng, [
+                'title' => 'Structural steel design criteria — Delta Terminal',
+                'description' => 'Design loads, load combinations, materials and deflection limits '
+                    .'governing the tank farm steelwork and the pipe rack.',
+                'document_category_id' => $register['SPEC']->id,
+                'project_id' => $delta->id,
+                'org_unit_id' => $unit['ENG-CS-SD']->id,
+                'discipline_id' => $unit['ENG-CS']->id,
+                'tags' => ['structural', 'design basis'],
+            ]);
+
+            $this->draftOn($criteria, $structuralEng, [
+                'change_summary' => 'First issue for review.',
+                'content_html' => '<h1>Structural steel design criteria</h1>'
+                    .'<h2>1. Basis of design</h2><p>Steelwork is designed to BS EN 1993 with the '
+                    .'national annex for the project country, and to the client specification '
+                    .'RPDC/EPC/2025/017 Appendix C where that is more onerous.</p>'
+                    .'<h2>2. Loads</h2><p>Dead, imposed, wind and thermal loads are as tabulated '
+                    .'below. Seismic action is not considered; the site is in a zone of very low '
+                    .'seismicity and the client has confirmed this in writing.</p>'
+                    .'<h2>3. Deflection limits</h2><p>Pipe rack beams are limited to span/300 under '
+                    .'imposed load, tightened to span/500 where a line carries a flanged joint '
+                    .'within one metre of midspan.</p>'
+                    .'<h2>4. Corrosion protection</h2><p>Coastal C5-M environment throughout. '
+                    .'Galvanising plus a two-coat system on all external steel.</p>',
+            ]);
+
+            $this->documents->submit($criteria, $structuralEng);
+            $this->decide($criteria, $leadEngineer, Decision::Approve,
+                'Loads and deflection limits agree with the client specification. '
+                .'The C5-M call is right for this location.');
+            $this->decide($criteria, $engManager, Decision::Approve,
+                'Approved for issue to RPDC. Please transmit with the jetty GA.');
+
+            $this->happened($criteria, $this->workingDay(26, 9), [], 300);
+
+            // ------------------------------------------------- sitting in somebody's inbox, late
+            $piling = $this->raise($geotechEng, [
+                'title' => 'Piling and pile cap method statement — Delta Terminal',
+                'description' => 'Sequence, plant, tolerances and hold points for the driven '
+                    .'tubular piles and the in-situ pile caps to Tanks 1 and 2.',
+                'document_category_id' => $register['MS']->id,
+                'project_id' => $delta->id,
+                'org_unit_id' => $unit['ENG-CS-GT']->id,
+                'discipline_id' => $unit['ENG-CS']->id,
+                'tags' => ['geotechnical', 'site'],
+            ]);
+
+            $pilingDraft = $this->draftOn($piling, $geotechEng, [
+                'change_summary' => 'First issue for technical review.',
+                'content_html' => '<h1>Piling and pile cap method statement</h1>'
+                    .'<h2>1. Sequence</h2><p>Piles are driven from the seaward row inward so that '
+                    .'the rig never tracks over a completed cap.</p>'
+                    .'<h2>2. Set criteria</h2><p>Driving continues to the specified set or to '
+                    .'refusal, whichever comes first, and a redrive is taken 24 hours later on one '
+                    .'pile in ten.</p>'
+                    .'<h2>3. Hold points</h2><p>Pile cut-off level and reinforcement fixing are '
+                    .'both hold points requiring QA sign-off before concrete is ordered.</p>',
+            ]);
+
+            $this->documents->submit($piling, $geotechEng);
+
+            // Backdated so the demo has a genuinely OVERDUE approval. The SLA is 24 hours and this
+            // entered review three days ago, which is what the overdue filter, the escalation sweep
+            // and the reminder digest all key off — none of which can be demonstrated against a
+            // stage instance that was created a second ago.
+            $this->overdueSince($piling, $this->workingDay(3, 14));
+            $this->happened($piling, $this->workingDay(4, 10), [], 180);
+
+            // ------------------------------------------------- an uploaded drawing (§67)
+            $jettyGa = $this->raise($controller, [
+                'title' => 'Jetty topsides general arrangement',
+                'description' => 'Plan and sections of the jetty topsides showing the pipe corridor, '
+                    .'the access walkway and the firewater monitor positions.',
+                'document_category_id' => $register['DWG']->id,
+                'project_id' => $delta->id,
+                'org_unit_id' => $unit['ENG-CS']->id,
+                'discipline_id' => $unit['ENG-CS']->id,
+                'tags' => ['drawing', 'jetty'],
+            ]);
+
+            $this->uploadRevision($jettyGa, $controller, [
+                'change_summary' => 'First issue for review.',
+            ]);
+
+            $this->documents->submit($jettyGa, $controller);
+            $this->decide($jettyGa, $leadEngineer, Decision::Approve,
+                'Walkway width and monitor coverage check out against the fire study.');
+            $this->decide($jettyGa, $engManager, Decision::Approve, 'Approved for issue.');
+
+            $this->happened($jettyGa, $this->workingDay(21, 11), [], 260);
+
+            // ------------------------------------------------- a register with no route at all
+            // Correspondence received is uncontrolled and approves nothing, so submitting it takes
+            // the null-instance branch: the revision becomes current immediately and the timeline
+            // records WHY it was never reviewed. Nobody approves an incoming letter.
+            $rpdcLetter = $this->raise($controller, [
+                'title' => 'RPDC letter — approval of jetty layout, ref RPDC/DC/2026/0311',
+                'description' => 'Client approval of the jetty topsides layout, subject to the two '
+                    .'comments on monitor positions recorded in the attached mark-up.',
+                'document_category_id' => $register['CORR']->id,
+                'project_id' => $delta->id,
+                'org_unit_id' => $unit['ENG-DC']->id,
+                'tags' => ['client', 'correspondence'],
+            ]);
+
+            $this->uploadRevision($rpdcLetter, $controller, [
+                'change_summary' => 'Received by email and filed on the day of receipt.',
+            ]);
+
+            $this->documents->submit($rpdcLetter, $controller);
+            $this->happened($rpdcLetter, $this->workingDay(18, 15), [], 20);
+
+            // ------------------------------------------------- started from the template, locked
+            $testProcedure = $this->raise($electricalEng, [
+                'title' => 'Electrical installation test and inspection procedure',
+                'description' => 'Initial verification and periodic testing of LV installations, '
+                    .'including the records each test produces.',
+                'document_category_id' => $register['PROC']->id,
+                'org_unit_id' => $unit['ENG-EI']->id,
+                'discipline_id' => $unit['ENG-EI']->id,
+                'tags' => ['electrical', 'management system'],
+            ]);
+
+            $this->draftOn($testProcedure, $electricalEng, [
+                'change_summary' => 'Started from the controlled procedure template.',
+                'content_html' => $this->templates->seedContent(
+                    $procedureTemplate,
+                    $this->templates->contextFor($testProcedure, $electricalEng),
+                ),
+            ]);
+
+            // Left CHECKED OUT deliberately. A demo in which no document is locked cannot show what
+            // the lock looks like to the person who does not hold it, and check-out is the whole of
+            // this platform's answer to concurrent editing (§1 rules out real-time co-authoring).
+            $this->documents->checkOut($testProcedure, $electricalEng);
+            $this->happened($testProcedure, $this->workingDay(2, 9), [], 45);
+
+            // ------------------------------------------------- issued, and acknowledged
+            $issued = $this->transmittals->create([
+                'subject' => 'Delta Terminal — design criteria and jetty GA issued for approval',
+                'to_name' => 'Riverine Petroleum Development Company',
+                'to_attention' => 'Ifeoma Bassey, Document Control',
+                'to_email' => 'documentcontrol@rpdc.example',
+                'to_address' => "RPDC House, 4 Refinery Road\nEffurun, Delta State",
+                'purpose' => 'for_approval',
+                'transport' => 'email',
+                'project_id' => $delta->id,
+                'org_unit_id' => $unit['ENG-DC']->id,
+                'cover_note' => 'Two documents are enclosed for your approval under contract '
+                    .'RPDC/EPC/2025/017. Please acknowledge receipt and return comments within ten '
+                    .'working days.',
+                'requires_acknowledgement' => true,
+                // Ten working days from the issue date, which has already passed — and it came back
+                // in two, which is what the acknowledgement below records.
+                'due_response_on' => $this->workingDay(2, 17)->toDateString(),
+            ], $controller);
+
+            $this->transmittals->addItem($issued, $this->currentRevision($criteria), [
+                'media' => 'electronic',
+                'remarks' => 'Issued for approval.',
+            ], $controller);
+
+            $this->transmittals->addItem($issued, $this->currentRevision($jettyGa), [
+                'media' => 'both',
+                'copies' => 2,
+                'remarks' => 'Two paper prints follow by courier.',
+            ], $controller);
+
+            $this->transmittals->issue($issued, $controller);
+            $this->transmittals->acknowledge($issued, $controller, 'Ifeoma Bassey', 'RPDC-DC-2026-0442');
+
+            $this->happened($issued, $this->workingDay(16, 10), [
+                'issued_at' => 90,
+                'acknowledged_at' => 2 * 24 * 60,
+            ], 200);
+
+            // ------------------------------------------------- still being assembled
+            // A DRAFT transmittal, and the reason one is here: an unissued transmittal is scoped by
+            // its publication column, so it is invisible to everybody except its author, an explicit
+            // share, and holders of `transmittal.issue`. That rule has no visible consequence in a
+            // demo where every transmittal has already gone out.
+            $pending = $this->transmittals->create([
+                'subject' => 'Delta Terminal — piling method statement (package being assembled)',
+                'to_name' => 'Riverine Petroleum Development Company',
+                'to_attention' => 'Ifeoma Bassey, Document Control',
+                'to_email' => 'documentcontrol@rpdc.example',
+                'purpose' => 'for_review',
+                'transport' => 'portal',
+                'project_id' => $delta->id,
+                'org_unit_id' => $unit['ENG-DC']->id,
+                'cover_note' => 'Holding until the method statement clears technical review. Do not '
+                    .'issue before then.',
+                'requires_acknowledgement' => true,
+            ], $controller);
+
+            $this->transmittals->addItem($pending, $pilingDraft, [
+                'media' => 'electronic',
+                'remarks' => 'Draft — awaiting technical review. Not for issue.',
+            ], $controller);
+
+            $this->happened($pending, $this->workingDay(2, 16), [], 30);
+        });
+    }
+
+    /**
+     * Kestrel's register — and, first, Kestrel deciding it does not like the route it was given.
+     *
+     * This is the pass that makes §73 a demonstration rather than a claim. Both companies were
+     * provisioned with the identical starter route, whose second stage names an ENGINEERING MANAGER.
+     * Meridian has one. Kestrel is a facilities firm with eight people and never will, and a stage
+     * that resolves to nobody STALLS — correctly, loudly, and uselessly for the people involved.
+     *
+     * So Kestrel's administrator edits the route. Not a fork of the codebase, not a config file, not
+     * a flag: the same screens any other tenant uses, changing an assignee type and a name on a
+     * stage. Afterwards the two companies route documents to genuinely different people through one
+     * engine, which is the entire architectural claim of this platform stated in about fifteen lines.
+     */
+    private function seedKestrelDocuments(Organization $organization): void
+    {
+        $this->context->within($organization, function () {
+            $this->bootDocuments();
+
+            $staff = $this->staff();
+            $unit = $this->unitsByCode();
+            $job = Project::query()->get()->keyBy('code');
+            $register = $this->registersByCode();
+
+            $md = $this->accountOf($staff, 'KFM-001');                 // Rowan Calder
+            $maintenanceHead = $this->accountOf($staff, 'KFM-003');    // Duncan Reilly
+            $complianceHead = $this->accountOf($staff, 'KFM-004');     // Nadia Osei
+            $mechanical = $this->accountOf($staff, 'KFM-005');         // Callum Whitfield
+            $electrical = $this->accountOf($staff, 'KFM-006');         // Erin Doyle
+            $generalist = $this->accountOf($staff, 'KFM-008');         // Marianne Ellis
+
+            $trafford = $job['TPA'];
+
+            // ------------------------------------------------- re-pointing the starter route
+            $route = Workflow::query()
+                ->where('entity_type', 'document')
+                ->where('name', 'Document approval')
+                ->first();
+
+            if ($route !== null) {
+                $complianceRole = Role::query()->where('slug', 'hse-manager')->value('id');
+
+                $approvalStage = WorkflowStage::query()
+                    ->where('workflow_id', $route->getKey())
+                    ->where('sequence', 2)
+                    ->first();
+
+                if ($approvalStage !== null && $complianceRole !== null) {
+                    $this->routes->updateStage($approvalStage, [
+                        'name' => 'Compliance sign-off',
+                        'instructions' => 'Nothing leaves this company as a controlled document '
+                            .'without compliance seeing it. Approving issues the revision; after '
+                            .'that a change means a new revision.',
+                        'assignee_type' => 'role',
+                        'assignee_ref' => (string) $complianceRole,
+                        'sla_hours' => 72,
+                    ], $md);
+                }
+
+                $reviewStage = WorkflowStage::query()
+                    ->where('workflow_id', $route->getKey())
+                    ->where('sequence', 1)
+                    ->first();
+
+                if ($reviewStage !== null) {
+                    $this->routes->updateStage($reviewStage, [
+                        'name' => 'Supervisor review',
+                        'sla_hours' => 48,
+                    ], $md);
+                }
+            }
+
+            // ------------------------------------------------- a template that is not a document
+            // Kind `report`, and that is the point of including it: a template renders straight to
+            // PDF as well as seeding a document, so the module is not quietly document-only.
+            $this->templates->create([
+                'name' => 'Kestrel service visit report',
+                'kind' => 'report',
+                'description' => 'The sheet an engineer completes at the end of a planned or '
+                    .'reactive visit. Prints on one side of A4 on purpose.',
+                'header_html' => '<p><strong>{{organization.name}}</strong> &middot; service visit '
+                    .'report &middot; {{today}}</p>',
+                'footer_html' => '<p>{{organization.address}} &middot; {{organization.phone}}</p>',
+                'content_html' => '<h1>Service visit report</h1>'
+                    .'<h2>Site and asset</h2><p>Site, building, plant reference and location.</p>'
+                    .'<h2>Work carried out</h2><p>What was done, in the order it was done.</p>'
+                    .'<h2>Parts used</h2><p>Part number, quantity, and whether it came off the van.</p>'
+                    .'<h2>Left safe?</h2><p>State the condition the plant was left in.</p>'
+                    .'<h2>Follow-up required</h2><p>Anything the helpdesk has to raise a job for.</p>',
+                'page_size' => 'A4',
+                'orientation' => 'portrait',
+                'is_active' => true,
+            ], $generalist);
+
+            // ------------------------------------------------- approved through the edited route
+            $ppm = $this->raise($mechanical, [
+                'title' => 'Planned preventive maintenance procedure — mechanical plant',
+                'description' => 'Frequencies, tasks and record requirements for AHUs, pumps and '
+                    .'pressure systems across the managed portfolio.',
+                'document_category_id' => $register['PROC']->id,
+                'org_unit_id' => $unit['MNT-MEC']->id,
+                'tags' => ['maintenance', 'management system'],
+            ]);
+
+            $this->draftOn($ppm, $mechanical, [
+                'change_summary' => 'First issue.',
+                'content_html' => '<h1>Planned preventive maintenance — mechanical plant</h1>'
+                    .'<h2>1. Frequencies</h2><p>AHU filter checks monthly, belt and bearing checks '
+                    .'quarterly, full service annually. Pressure systems follow the written scheme '
+                    .'of examination and nothing in this procedure overrides it.</p>'
+                    .'<h2>2. Records</h2><p>Every visit produces a service visit report, which is '
+                    .'filed against the asset the same day. A visit with no report did not happen.</p>'
+                    .'<h2>3. Escalation</h2><p>Anything found that cannot be left safe is reported '
+                    .'to the helpdesk before the engineer leaves site, not at the end of the day.</p>',
+            ]);
+
+            $this->documents->submit($ppm, $mechanical);
+            $this->decide($ppm, $maintenanceHead, Decision::Approve,
+                'Frequencies match the contract schedule. Happy with the escalation wording.');
+            $this->decide($ppm, $complianceHead, Decision::Approve,
+                'Approved. The pressure systems carve-out is the right way round.');
+
+            $this->happened($ppm, $this->workingDay(23, 9), [], 280);
+
+            // ------------------------------------------------- waiting on compliance
+            $isolation = $this->raise($electrical, [
+                'title' => 'Electrical isolation and re-termination method statement — AHU-3',
+                'description' => 'Safe isolation, proving dead, and re-termination of the AHU-3 '
+                    .'supply during the replacement works at Trafford Point.',
+                'document_category_id' => $register['MS']->id,
+                'project_id' => $trafford->id,
+                'org_unit_id' => $unit['MNT-ELE']->id,
+                'tags' => ['electrical', 'site'],
+            ]);
+
+            $this->draftOn($isolation, $electrical, [
+                'change_summary' => 'First issue for review.',
+                'content_html' => '<h1>Electrical isolation and re-termination — AHU-3</h1>'
+                    .'<h2>1. Isolation</h2><p>Isolate at DB-4/way 12, lock off, and prove dead with '
+                    .'a proving unit before and after testing.</p>'
+                    .'<h2>2. Points of work</h2><p>Only the two engineers named on the permit hold '
+                    .'keys. The permit is returned to the helpdesk on completion, not kept in the '
+                    .'van.</p>'
+                    .'<h2>3. Re-energisation</h2><p>Insulation resistance and polarity are recorded '
+                    .'before the supply is restored, and the certificate is filed the same day.</p>',
+            ]);
+
+            $this->documents->submit($isolation, $electrical);
+            $this->decide($isolation, $maintenanceHead, Decision::Approve,
+                'Isolation point and proving sequence are right. Over to compliance.');
+
+            // Left pending at compliance sign-off — the route Kestrel edited into existence,
+            // resolving to a person Meridian's identical starter route would never have found.
+            $this->happened($isolation, $this->workingDay(2, 11), [], 120);
+
+            // ------------------------------------------------- filed, never approved
+            $fireAssessment = $this->raise($generalist, [
+                'title' => 'Trafford Point Estates — landlord fire risk assessment 2026',
+                'description' => 'Issued to us by the landlord. Held for reference; the actions '
+                    .'falling to Kestrel are tracked separately.',
+                'document_category_id' => $register['CORR']->id,
+                'project_id' => $trafford->id,
+                'org_unit_id' => $unit['CMP']->id,
+                'tags' => ['client', 'fire safety'],
+            ]);
+
+            $this->uploadRevision($fireAssessment, $generalist, [
+                'change_summary' => 'Received from the landlord and filed on receipt.',
+            ]);
+
+            $this->documents->submit($fireAssessment, $generalist);
+            $this->happened($fireAssessment, $this->workingDay(12, 14), [], 20);
+
+            // ------------------------------------------------- issued, still unacknowledged
+            // The other half of the acknowledgement story. Meridian's transmittal came back;
+            // this one has not, and the response date is still in the future — which is what the
+            // register has to be able to show, because chasing it is the document controller's job.
+            $toClient = $this->transmittals->create([
+                'subject' => 'Trafford Point — PPM procedure issued for information',
+                'to_name' => 'Trafford Point Estates LLP',
+                'to_attention' => 'Helen Marsh, Estates Manager',
+                'to_email' => 'estates@traffordpoint.example',
+                'purpose' => 'for_information',
+                'transport' => 'email',
+                'project_id' => $trafford->id,
+                'org_unit_id' => $unit['BUS']->id,
+                'cover_note' => 'Issued for your information under contract TPE/PPM/2026/03. '
+                    .'Please confirm receipt.',
+                'requires_acknowledgement' => true,
+                // Still in the future: this one is outstanding, and chasing it is somebody's job.
+                'due_response_on' => now()->addDays(5)->toDateString(),
+            ], $generalist);
+
+            $this->transmittals->addItem($toClient, $this->currentRevision($ppm), [
+                'media' => 'electronic',
+                'remarks' => 'Issued for information.',
+            ], $generalist);
+
+            $this->transmittals->issue($toClient, $generalist);
+
+            $this->happened($toClient, $this->workingDay(4, 12), ['issued_at' => 60], 90);
+        });
+    }
+
+    // ----------------------------------------------------------------- document helpers
+
+    /**
+     * Resolve the document services for the tenant currently in context.
+     *
+     * Same reasoning as bootDelivery(): every one of these memoizes something tenant-shaped — the
+     * numbering pattern, the revision scheme, the configured status vocabulary — and a single
+     * instance shared between the two companies would number Kestrel's documents out of Meridian's
+     * sequence.
+     */
+    private function bootDocuments(): void
+    {
+        $this->documents = app(DocumentService::class);
+        $this->revisions = app(DocumentVersionService::class);
+        $this->transmittals = app(TransmittalService::class);
+        $this->templates = app(TemplateService::class);
+        $this->routes = app(WorkflowDefinitionService::class);
+        $this->approvals = app(WorkflowEngine::class);
+        $this->pdfs = app(PdfRenderer::class);
+    }
+
+    /** @return array<string,DocumentCategory> the tenant's registers, by code */
+    private function registersByCode(): array
+    {
+        return DocumentCategory::query()->orderBy('sort')->get()->keyBy('code')->all();
+    }
+
+    /** @param array<string,mixed> $attributes */
+    private function raise(User $actor, array $attributes): Document
+    {
+        return $this->documents->create($attributes, $actor);
+    }
+
+    /**
+     * Write a native revision.
+     *
+     * @param  array<string,mixed>  $attributes
+     */
+    private function draftOn(Document $document, User $actor, array $attributes): DocumentVersion
+    {
+        return $this->revisions->createNative($document, $attributes, $actor);
+    }
+
+    /**
+     * Attach a real file to a document, through the real upload path.
+     *
+     * The bytes are a genuine PDF rendered by the same renderer the export button uses, wrapped in
+     * an UploadedFile and pushed through FileVault exactly as a browser upload would be — extension
+     * whitelist, MIME sniffing, size limit and all (§67). Inserting a row with a made-up
+     * `file_path` would have been three lines shorter and would have seeded a document whose
+     * download button 404s.
+     *
+     * @param  array<string,mixed>  $attributes
+     */
+    private function uploadRevision(Document $document, User $actor, array $attributes): DocumentVersion
+    {
+        // The vault reads the category to decide which extensions are acceptable here, and lazy
+        // loading is barred outside production — so it is loaded rather than reached for.
+        $document->loadMissing('category');
+
+        $bytes = $this->pdfs->renderHtml(
+            $document->title,
+            '<h1>'.e($document->title).'</h1>'
+            .'<p>'.e((string) $document->description).'</p>'
+            .'<p><em>Demonstration file. A real register would hold the drawing or the scanned '
+            .'letter itself; what matters here is that the bytes are on the private disk and the '
+            .'download route has to authorize before it will hand them over.</em></p>',
+        );
+
+        $path = sys_get_temp_dir().DIRECTORY_SEPARATOR.'demo-'.Str::random(16).'.pdf';
+        file_put_contents($path, $bytes);
+
+        try {
+            $upload = new UploadedFile(
+                $path,
+                Str::slug($document->title).'.pdf',
+                'application/pdf',
+                null,
+                true,   // test mode: the file is already where it is, not a real POST
+            );
+
+            return $this->revisions->createFromUpload($document, $upload, $attributes, $actor);
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    /**
+     * Act on whatever stage the document is currently sitting at.
+     *
+     * Reads the pending stage instance back out of the database rather than remembering one, because
+     * approving stage one ENTERS stage two: the id changes underneath, and a seeder holding the old
+     * model would act on a stage that has already closed.
+     */
+    private function decide(Document $document, User $actor, Decision $decision, string $comment): void
+    {
+        $instance = $document->currentWorkflowInstance();
+
+        if ($instance === null) {
+            throw new \RuntimeException(
+                'The demo expected '.$document->number.' to be out for approval, and it is not.'
+            );
+        }
+
+        $stage = WorkflowStageInstance::query()->whereKey($instance->current_stage_instance_id)->first();
+
+        if ($stage === null) {
+            throw new \RuntimeException(
+                'The route on '.$document->number.' has stalled: '
+                .($instance->outcome_reason ?? 'no stage is current.')
+            );
+        }
+
+        $this->approvals->act($stage, $actor, $decision, $comment);
+    }
+
+    /**
+     * Push a pending stage instance into the past so it is genuinely late.
+     *
+     * `due_at` alone would be enough for the overdue filter, but `entered_at` is what the inbox
+     * shows as "waiting since" and what the escalation sweep measures from, so both move together.
+     * A record that claims to be four days late and arrived a second ago is the kind of detail that
+     * makes an evaluator stop trusting everything else on the screen.
+     */
+    private function overdueSince(Document $document, Carbon $entered): void
+    {
+        $instance = $document->currentWorkflowInstance();
+
+        if ($instance?->current_stage_instance_id === null) {
+            return;
+        }
+
+        $stage = WorkflowStageInstance::query()->whereKey($instance->current_stage_instance_id)->first();
+
+        if ($stage === null) {
+            return;
+        }
+
+        // The SLA the stage was given, preserved: moving the entry backwards must not silently
+        // rewrite how long the company said this step is allowed to take.
+        $sla = ($stage->entered_at !== null && $stage->due_at !== null)
+            ? (int) round($stage->entered_at->diffInMinutes($stage->due_at))
+            : 24 * 60;
+
+        DB::table('workflow_stage_instances')->where('id', $stage->getKey())->update([
+            'entered_at' => $entered,
+            'due_at' => $entered->copy()->addMinutes($sla),
+            'created_at' => $entered,
+        ]);
+
+        DB::table('workflow_instances')->where('id', $instance->getKey())->update([
+            'created_at' => $entered,
+            'started_at' => $entered,
+        ]);
+    }
+
+    /** The approved, current revision — loudly, if the approval never landed. */
+    private function currentRevision(Document $document): DocumentVersion
+    {
+        $version = DocumentVersion::query()->whereKey($document->refresh()->current_version_id)->first();
+
+        if ($version === null) {
+            throw new \RuntimeException(
+                'The demo expected '.$document->number.' to have a current revision by now.'
+            );
+        }
+
+        return $version;
     }
 
     // ----------------------------------------------------------------- delivery helpers

@@ -115,6 +115,66 @@ final class StatusCatalogue
                     ['published', 'draft', 'Unpublish', 'announcement.publish', true],
                 ],
             ],
+
+            /*
+             * A controlled document's life (§26).
+             *
+             * `superseded` is the status that makes this a document control system rather than a
+             * file store. When revision C is approved, revision B does not vanish and does not stay
+             * current — it becomes the thing you can still read, still audit and still prove was
+             * what the client held in March. The move is made by DocumentVersionService inside the
+             * same transaction that promotes the new revision, so the two can never disagree.
+             *
+             * `in_review` is deliberately NOT where the workflow lives. The workflow engine drives
+             * the record through whatever stages the company configured; this status just says the
+             * document is out for approval. A company with a four-stage review and a company with
+             * one both use this vocabulary — the difference is configuration in `workflows`, not a
+             * different set of words here.
+             */
+            'document' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'in_review' => ['label' => 'In review', 'color' => 'brand'],
+                    'approved' => ['label' => 'Approved', 'color' => 'success'],
+                    'rejected' => ['label' => 'Rejected', 'color' => 'danger'],
+                    'superseded' => ['label' => 'Superseded', 'color' => 'neutral'],
+                    'archived' => ['label' => 'Archived', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['draft', 'in_review', 'Submit for review', 'document.submit'],
+                    ['in_review', 'approved', 'Approve', 'document.approve'],
+                    ['in_review', 'rejected', 'Reject', 'document.reject', true],
+                    ['in_review', 'draft', 'Return for revision', 'document.review', true],
+                    ['rejected', 'draft', 'Revise and resubmit', 'document.edit'],
+                    // Not offered in the UI as a button a person presses in the ordinary course:
+                    // DocumentVersionService makes this move when a newer revision is approved.
+                    // It stays a configured transition so the move is auditable and so an
+                    // administrator can supersede by hand when a document is retired outright.
+                    ['approved', 'superseded', 'Supersede', 'document.manage'],
+                    [null, 'archived', 'Archive', 'document.archive', true],
+                    ['archived', 'draft', 'Restore', 'document.restore', true],
+                ],
+            ],
+
+            /*
+             * A transmittal is a covering note for documents leaving the building, so its states
+             * are about the OUTSIDE party, not about internal progress. `acknowledged` is terminal
+             * because the question a transmittal exists to answer — "did they confirm receipt" —
+             * has been answered; anything further is a new transmittal.
+             */
+            'transmittal' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'issued' => ['label' => 'Issued', 'color' => 'brand'],
+                    'acknowledged' => ['label' => 'Acknowledged', 'color' => 'success', 'terminal' => true],
+                    'cancelled' => ['label' => 'Cancelled', 'color' => 'danger', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['draft', 'issued', 'Issue', 'transmittal.issue'],
+                    ['issued', 'acknowledged', 'Record acknowledgement', 'transmittal.acknowledge'],
+                    [null, 'cancelled', 'Cancel', 'transmittal.manage', true],
+                ],
+            ],
         ];
     }
 

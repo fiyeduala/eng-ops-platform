@@ -9,6 +9,11 @@
     "dependencies": {
         "@alpinejs/collapse": "^3.14.9",
         "@alpinejs/focus": "^3.14.9",
+        "@tiptap/core": "^3.30.5",
+        "@tiptap/extension-table": "^3.30.5",
+        "@tiptap/extension-text-align": "^3.30.5",
+        "@tiptap/pm": "^3.30.5",
+        "@tiptap/starter-kit": "^3.30.5",
         "alpinejs": "^3.14.9"
     },
     "devDependencies": {

@@ -130,15 +130,68 @@ imply, which hand-built fixtures never force you to check.
 (`document.view`, `hse.*`, `procurement.*`, `finance.view`) belong to Phases 3–5, and the assertions
 attach to the same test file as each module lands.
 
-## PHASE 3 — Documents & workflow ⬜
+## PHASE 3 — Documents & workflow ✅
 
-Document management · categories · versions/revisions · registers · private storage + authorizing
-download · workflow engine (definitions, stages, conditions, dynamic assignees, SLA) · approval
-engine · My Approvals inbox · signatures · transmittals · templates · PDF generation.
+Document management ✅ · categories/registers ✅ · versions/revisions ✅ · private storage +
+authorizing download ✅ · workflow engine (definitions, stages, conditions, dynamic assignees,
+SLA) ✅ · approval engine ✅ · My Approvals inbox ✅ · signatures ✅ · transmittals ✅ ·
+templates ✅ · PDF generation ✅ · native editor + .docx round trip ✅.
 
 **Exit criteria:** a workflow defined entirely through the UI routes a document through
 Engineer → Lead Engineer → Engineering Manager → Project Manager, with escalation, rejection and
 resubmission, and no approved revision is ever overwritten.
+
+**Met.** 288 tests, 1,771 assertions across the suite. `WorkflowEngineTest` builds the route by
+POSTing to the same endpoints the builder screen posts to — no factories, no service calls — points
+a register at it, and walks a real document through both stages. If any part of defining a route
+required code, that test would not compile.
+
+Alongside the exit criterion it pins the ways a configurable approval system silently goes wrong:
+a published definition is never mutated in place (editing produces a new version; documents already
+travelling the old one keep travelling it) · assignees are frozen at stage entry, so a
+reorganization mid-approval cannot rewrite who was required · a stage that resolves to nobody
+**stalls** rather than being skipped or auto-approved, because a route that cannot find its approver
+and moves on has produced a document marked approved that nobody approved · publishing validates ·
+a role stage stores the role *id*, not its slug (a regression that would have saved cleanly,
+displayed correctly, and resolved to nobody the first time a document actually travelled it).
+
+**Beyond the brief, on the user's instruction that documents should "replace MS Word in a sense or
+integrate with it":** documents are authored natively in the browser (TipTap → sanitized HTML +
+JSON on the version row) with check-out locking, .docx import that keeps the original file, and
+.docx/PDF export whose title block comes from the company's own Template. docs/09 §10 states the
+boundary: this is not byte-faithful Word interoperability, and tracked changes, embedded objects and
+exact pagination do not survive a round trip. Real-time co-editing is out of V1 — it needs a
+WebSocket server, which §1 bars from being mandatory on cPanel.
+
+**Four defects the demo seeder caught**, all fixed, none of which a fixture-built test would have
+found because each needed a whole company's worth of real configuration:
+
+- `requires_approval` on a register was a checkbox the screens explained and nothing read. Finding
+  no route on the category, the engine fell through to the tenant's **default** workflow and sent
+  correspondence received from clients out for technical review. `Document::requiresWorkflow()` now
+  distinguishes "no preference, use the default" from "do not route this at all" (docs/09 §7).
+- `TemplateRenderer` resolved `{{user.job_title}}` against a column that does not exist — job titles
+  live on `positions` — so every rendered letter quietly omitted the signatory's title. Its three
+  relation indirections also lazy-loaded, which throws outside production and silently costs a query
+  per placeholder inside it.
+- Kestrel's starter route named the `engineering-manager` role, which exists as a template in every
+  tenant but has no holder in an eight-person facilities-management firm: the stage would resolve to
+  nobody and stall. Rather than special-casing the seeder, Kestrel's administrator **edits the route
+  through the same service the UI calls** — which is the §73 configurability claim demonstrated on
+  the second tenant rather than asserted.
+- The signature panel on a revision page had never rendered, because nothing ever wrote a signature.
+  The table, the model, the policy, the morph key, the relations, `DocumentVersion::contentHash()`
+  documented as "the bytes a signature is taken over" and a finished Blade panel all existed; the
+  write path did not, and only a seeded route that actually reached a decision made the absence
+  visible. `RecordDocumentSignature` now listens for `ApprovalDecided` — in the document module, not
+  the engine, which names no module — and is registered **before** the notification listener so a
+  failure to record the evidence rolls the decision back with it.
+
+**Known limits, stated rather than discovered:** revision labels follow the register's configured
+scheme, so a numeric register issues its first approved revision as **Rev 0** (the EPC convention),
+not Rev 1 · signatures are internal approval signatures, not qualified ones under eIDAS or ESIGN
+(docs/09 §5) · the TipTap bundle is ~564 kB minified and is loaded on every page; code-splitting it
+behind the editor routes is a Phase 9 performance item, not a correctness one.
 
 ## PHASE 4 — Engineering · HSE · QA/QC ⬜
 

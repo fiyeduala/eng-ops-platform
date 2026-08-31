@@ -233,6 +233,13 @@ class NumberGenerator
             'meeting' => ['prefix' => 'MTG', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
             'memo' => ['prefix' => 'MEMO', 'pattern' => '{PREFIX}/{YYYY}/{SEQ}', 'reset_period' => 'yearly', 'padding' => 3],
             'announcement' => ['prefix' => 'ANN', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 3],
+            // Documents number per year and never reset per project: a document number is quoted on
+            // drawings, in transmittals and in client correspondence, so it must be unique across
+            // the whole company for as long as the company keeps records. A category may override
+            // the pattern (see document_categories.numbering_pattern) for registers that follow a
+            // client's own convention.
+            'document' => ['prefix' => 'DOC', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+            'transmittal' => ['prefix' => 'TRN', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
         ];
     }
 }

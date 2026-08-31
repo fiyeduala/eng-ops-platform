@@ -31,6 +31,25 @@ workflows                                          workflow_instances
 Editing a workflow creates a **new version**. Running instances keep the version they started on, so
 changing the process never corrupts in-flight approvals.
 
+### Which definition a record gets
+
+Three questions, asked in this order, and the order is the whole design:
+
+1. **`$record->requiresWorkflow()`** — does this record get routed at all? Returning false ends it:
+   no route, no instance, and *no fallback*. An uncontrolled register (correspondence received,
+   vendor data) is recording what arrived, not asking anybody to approve it.
+2. **`$record->resolveWorkflowDefinition()`** — does this record name its own route? A document
+   category, a memo type or a requisition class may point at a specific workflow.
+3. **The module default** — the tenant's active workflow for this `entity_type` and trigger.
+
+Steps 1 and 2 look alike and are not. Null at step 2 means *"I have no preference, use the module
+default"*, which is right for a memo whose type names no route. False at step 1 means *"do not route
+this, and do not fall back"*, which is a decision somebody made on a configuration form. Collapsing
+the two — as the engine did until `requiresWorkflow()` existed — makes the fallback overrule the
+configuration: a register whose "requires approval" box was unticked would still send every incoming
+client letter out for technical review, with the screen saying one thing and the system doing
+another. Pinned by `WorkflowEngineTest::a_register_that_requires_no_approval_issues_without_a_route`.
+
 ## 3. Dynamic assignee resolution (§19)
 
 This is the single most important design decision in the engine. Stages never name a person.
@@ -164,6 +183,8 @@ Indexed by `(assignee_id, status, due_at)`. Users never search for pending work.
 | No lost work on reorg | Assignees resolve at runtime from live org data |
 | Full traceability | Every transition writes `ActivityLog` + `AuditLog` |
 | Deterministic replay | Instance stores the workflow **version** it started on |
+| No unsigned approval | `RecordDocumentSignature` runs **before** the notification listener, inside the engine's transaction: if the evidence cannot be written the decision rolls back with it |
+| No route where none was asked for | `requiresWorkflow()` is a veto the module-default fallback cannot overrule (§2) |
 
 ## 10. Public API
 
@@ -174,4 +195,12 @@ $engine->pendingFor($user): Collection;              // My Approvals
 $engine->cancel($instance, $user, reason: '…');
 $engine->reassign($stageInstance, $toUser, $actor);
 $record->workflowInstance;  $record->currentStage;  $record->approvalHistory;
+```
+
+What a routable model provides (`HasWorkflow`):
+
+```php
+$record->requiresWorkflow(): bool;                   // veto — default true
+$record->resolveWorkflowDefinition(): ?Workflow;     // preference — default null
+$record->workflowEntityType(): string;               // which definitions apply
 ```

@@ -5,13 +5,17 @@
 ```
 documents                organization_id, number, title, description,
                          document_category_id, discipline_id, project_id, org_unit_id,
-                         type, confidentiality, status_id, owner_id, current_version_id,
-                         is_controlled, retention_until, tags json
+                         kind, confidentiality, status_id, owner_id, current_version_id,
+                         is_controlled, retention_until, next_review_on, tags json,
+                         locked_by, locked_at, lock_expires_at
 
-document_versions        document_id, revision, revision_index, file_disk, file_path,
-                         file_hash(sha256), file_size, mime_type, original_name,
+document_versions        document_id, revision, revision_index, is_draft_series,
+                         file_disk, file_path, file_hash(sha256), file_size,
+                         mime_type, original_name,
+                         content_html, content_json, word_count,
                          author_id, change_summary, status_id, is_current,
-                         approved_by, approved_at, superseded_at
+                         approved_by, approved_at, superseded_at,
+                         derived_from_version_id
 ```
 
 The `documents` row is the **identity and register entry**; every file lives on a
@@ -80,16 +84,40 @@ Always evaluated server-side, on every read, download, preview, export and searc
 Documents use the workflow engine — there is no separate document approval system.
 
 ```
-signatures  organization_id, signable_type/id (approval), user_id, employee_id,
-            designation_snapshot, document_version_id, action(approve|review|sign|reject),
-            signed_at, ip, user_agent, signature_image_path, hash_of_signed_content
+signatures  organization_id, approval_id, signable_type/id (the record signed),
+            document_version_id, user_id, employee_id,
+            name_snapshot, designation_snapshot, action, signed_at,
+            ip, user_agent, signature_image_path, content_hash,
+            provider(internal|…), provider_reference json
 ```
 
-`designation_snapshot` stores the signatory's title **at the moment of signing**, so a later
-promotion or reorganization does not rewrite history.
+**When a signature is written.** `RecordDocumentSignature` listens for `ApprovalDecided` and writes
+one row per approver, at the moment they decide — so a three-stage route produces the three lines an
+engineering title block has always carried (checked by, reviewed by, approved by), not a single
+stamp from whoever happened to close the route.
 
-`hash_of_signed_content` binds the signature to the exact file bytes signed — if someone later
-claims a different file was approved, the hash disproves it.
+The listener, rather than the engine, makes that decision. `WorkflowEngine` names no module: a
+purchase requisition approved by a manager wants an audit trail, not a signature block. "Approvals
+of *this* kind of record are signatures" is a document-module judgement and lives in the document
+module's wiring, beside the notification listeners that make the same call.
+
+**Only `approve` signs.** A rejection is fully recorded on the `approvals` row with its comment, but
+a signature is an affirmative endorsement, and a signature table where some rows mean the opposite
+is a trap for anybody who later counts them. Delegation and abstention sign nothing either.
+
+`name_snapshot` and `designation_snapshot` store the signatory's name and title **at the moment of
+signing** — the title is read through their *position*, since a job title is a record with its own
+history rather than a column on a person — so a later promotion or reorganization does not rewrite
+who approved a drawing as what they have since become.
+
+`content_hash` binds the signature to the exact bytes signed: a file revision's stored sha256, or
+the sha256 of the approved HTML for a native one (`DocumentVersion::contentHash()`). An approved
+revision cannot be edited, so signature and content can only disagree if the stored bytes were
+changed underneath it — which the revision page states in words rather than leaving two hex strings
+to be compared by eye.
+
+Signatures are written once. There is no update path and no soft delete: withdrawing an approval is
+a new event, not an edit to the old one.
 
 ### Legal scope statement (§28)
 
@@ -121,6 +149,18 @@ status · author · approver · issued date · next review · transmittal histor
 
 Registers respect visibility, so two users legitimately see different register contents.
 
+**`requires_approval` is enforced, not decorative.** A register may hold documents nobody approves —
+correspondence received, vendor data, uncontrolled reference copies. Unticking the box means the
+document is issued by its author the moment it is submitted, and `Document::requiresWorkflow()`
+returns false so the engine does **not** fall through to the tenant's default route. That
+distinction matters: `resolveWorkflowDefinition()` returning null means "no preference, use the
+module default", which is right for a memo; `requiresWorkflow()` returning false means "do not route
+this, and do not fall back". Without the second, an uncontrolled register would quietly send every
+incoming client letter out for technical review.
+
+An unrouted document is still not confused with an approved one: `DocumentService` writes to the
+timeline that it was issued without review, and no signature is recorded, because nobody signed it.
+
 ## 8. Preview
 
 - PDFs and images preview inline through the authorizing controller with
@@ -141,3 +181,47 @@ signatories · approval history. DOCX generation (PhpWord) is available for edit
 
 Rendering is sandboxed: templates are data, rendered through a restricted placeholder resolver —
 never `eval` or raw Blade compilation of user input.
+
+## 10. Native authoring and the .docx round trip (§65)
+
+The brief was for documents that *replace Word in a sense, or integrate with it*. Both halves are
+built, and the honest boundary between them is stated here rather than discovered later.
+
+**Two kinds of document, one register.** `documents.kind` is `native` or `file`:
+
+| | native | file |
+|---|---|---|
+| Where the content lives | `content_html` + `content_json` on the version | private disk, `file_path` + `file_hash` |
+| Authored | in the browser (TipTap), autosaved | produced elsewhere, uploaded |
+| Searchable, diffable, templatable | yes | no — the system does not pretend to read a vendor's PDF |
+| Exports | .docx, PDF | the original bytes, plus PDF where meaningful |
+
+Drawings, vendor data and scanned correspondence stay `file`. Procedures, specifications, method
+statements and letters are `native`, and those are the ones that displace Word.
+
+**Editing is check-out locked, not co-edited.** One person holds the lock (`locked_by`,
+`locked_at`, `lock_expires_at`); it expires after `documents.checkout_hours` (default 8) so a laptop
+closed on a Friday does not freeze a document until Monday. Real-time co-editing is deliberately out
+of V1: it needs a WebSocket server, which §1 bars from being mandatory on cPanel. The editor
+autosaves to `PUT /documents/{document}/versions/{version}`, and the service refuses any write to an
+approved revision whoever asks.
+
+**Content is sanitized on the way in, always.** `ContentSanitizer` (HTMLPurifier) runs on every
+save, every import and every template render: a fixed element and CSS-property allow-list, no
+remote resources, images only as `data:` URIs or paths under this organization's own storage.
+Editor input is untrusted input.
+
+**Import.** `DocxImporter` (PhpWord) reads a .docx body — headings, paragraphs, runs, lists, tables,
+links — into clean HTML. Tracked changes, comments, headers/footers, embedded objects and exact
+pagination do **not** survive, and are dropped visibly rather than accepted silently. **The original
+.docx is always kept alongside the extracted HTML**, so a lossy import is an inconvenience rather
+than a data-loss event.
+
+**Export.** `DocxExporter` writes .docx and `PdfRenderer` (Dompdf) writes PDF, both from the same
+sanitized HTML, with the header, footer and title block coming from the **Template** rather than
+from whatever the author's copy of Word happened to contain. That is the argument for authoring
+here: the controlled document gets its identity from the company's configuration, every time.
+
+**What is not claimed.** This is not byte-faithful Word interoperability, and nothing in the UI
+suggests it is. The contract is: bring your Word content in, keep working on it here, send it back
+out as .docx or PDF.

@@ -1,6 +1,7 @@
 import './bootstrap';
 
 import Alpine from 'alpinejs';
+import documentEditor, { richTextField } from './editor';
 import collapse from '@alpinejs/collapse';
 import focus from '@alpinejs/focus';
 
@@ -46,6 +47,21 @@ Alpine.data('confirmable', (message = 'Are you sure?') => ({
         }
     },
 }));
+
+/*
+ * The document editor (Phase 3).
+ *
+ * Registered as an Alpine component rather than mounted by a selector sweep, so the editor exists
+ * only on the page that asks for it and receives its content, save URL and read-only flag as
+ * ordinary props instead of reading them back out of the DOM.
+ */
+Alpine.data('documentEditor', documentEditor);
+
+/*
+ * The same editor inside an ordinary form — templates, and anything else administrative that is
+ * saved with a Save button rather than autosaved against its own endpoint.
+ */
+Alpine.data('richTextField', richTextField);
 
 window.Alpine = Alpine;
 Alpine.start();
