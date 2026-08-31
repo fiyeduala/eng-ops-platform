@@ -160,6 +160,17 @@ class OrganizationProvisioner
             'document.max_upload_mb' => 25,
             'document.retain_superseded' => true,
 
+            // --- engineering registers ---------------------------------------------------
+            // Blank lists on purpose: OptionList falls back to the model constants, so a new
+            // company gets a sensible vocabulary without a settings row that pretends somebody
+            // chose it. The moment an administrator edits one, the setting starts to exist.
+            'engineering.deliverable_types' => '',
+            'engineering.drawing_purposes' => '',
+            'engineering.submittal_types' => '',
+            'engineering.submittal_review_codes' => '',
+            'engineering.rfi_response_days' => 14,
+            'engineering.submittal_review_days' => 14,
+
             // --- notifications -----------------------------------------------------------
             'notify.channels' => ['database', 'mail'],
             'notify.digest_hour' => 7,

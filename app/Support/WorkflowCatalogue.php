@@ -6,6 +6,7 @@ namespace App\Support;
 
 use App\Engines\Workflow\AutoActionRunner;
 use App\Engines\Workflow\Concerns\HasWorkflow;
+use App\Engines\Workflow\Contracts\SpawnsFromRecord;
 use App\Models\WorkflowStage;
 use App\Models\WorkflowStageCondition;
 use App\Support\Enums\AssigneeType;
@@ -51,7 +52,12 @@ class WorkflowCatalogue
                 continue;
             }
 
-            $entities[$key] = str(class_basename($class))->headline()->plural()->toString();
+            // The derived label is right for most modules and wrong for the ones whose class name
+            // is an acronym — "Rfis" is not a word anybody would pick from a list. A model may
+            // therefore name itself, and only those few need to.
+            $entities[$key] = method_exists($class, 'workflowEntityLabel')
+                ? $class::workflowEntityLabel()
+                : str(class_basename($class))->headline()->plural()->toString();
         }
 
         ksort($entities);
@@ -138,5 +144,32 @@ class WorkflowCatalogue
     public static function autoActions(): array
     {
         return AutoActionRunner::VERBS;
+    }
+
+    /**
+     * Record types a `create_record` action may open: morph key => label.
+     *
+     * Discovered the same way routable entities are — every model in the morph map that declares
+     * itself openable — so a module added in a later phase appears in the builder by implementing
+     * an interface, with no list here to forget (§90).
+     *
+     * @return array<string,string>
+     */
+    public static function spawnableRecords(): array
+    {
+        $records = [];
+
+        foreach (Relation::morphMap() as $key => $class) {
+            if (! class_exists($class) || ! is_subclass_of($class, SpawnsFromRecord::class)) {
+                continue;
+            }
+
+            /** @var class-string<SpawnsFromRecord> $class */
+            $records[$key] = $class::spawnLabel();
+        }
+
+        asort($records);
+
+        return $records;
     }
 }

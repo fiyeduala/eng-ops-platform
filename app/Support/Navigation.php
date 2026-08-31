@@ -149,6 +149,24 @@ class Navigation
                 ],
             ],
             [
+                // The engineering registers. Ordered the way the work runs rather than
+                // alphabetically: you plan deliverables, you draw them, you ask questions about
+                // them, you send things for approval, and then somebody changes the scope.
+                'label' => 'Engineering',
+                'items' => [
+                    ['label' => 'Deliverables', 'route' => 'deliverables.index', 'icon' => 'flag',
+                        'permission' => 'deliverable.view', 'active' => 'deliverables.*'],
+                    ['label' => 'Drawings', 'route' => 'drawings.index', 'icon' => 'pencil',
+                        'permission' => 'drawing.view', 'active' => 'drawings.*'],
+                    ['label' => 'RFIs & queries', 'route' => 'rfis.index', 'icon' => 'info',
+                        'permission' => 'rfi.view', 'active' => 'rfis.*'],
+                    ['label' => 'Submittals', 'route' => 'submittals.index', 'icon' => 'archive',
+                        'permission' => 'submittal.view', 'active' => 'submittals.*'],
+                    ['label' => 'Change requests', 'route' => 'change-requests.index', 'icon' => 'activity',
+                        'permission' => 'change_request.view', 'active' => 'change-requests.*'],
+                ],
+            ],
+            [
                 'label' => 'Administration',
                 'items' => [
                     ['label' => 'User accounts', 'route' => 'users.index', 'icon' => 'key',

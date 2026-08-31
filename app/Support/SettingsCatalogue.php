@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use App\Models\Deliverable;
+use App\Models\Drawing;
+use App\Models\Submittal;
+
 /**
  * How each configurable setting is presented and validated (§72, §86).
  *
@@ -83,6 +87,31 @@ final class SettingsCatalogue
                     'document.require_approval_before_issue' => ['label' => 'Documents must be approved before they can be issued', 'type' => 'boolean'],
                     'document.retain_superseded' => ['label' => 'Keep superseded revisions', 'type' => 'boolean', 'help' => 'Turning this off destroys history. Most engineering organizations are contractually required to leave it on.'],
                     'document.max_upload_mb' => ['label' => 'Largest upload allowed (MB)', 'type' => 'integer', 'rules' => ['required', 'integer', 'between:1,512'], 'help' => 'The server’s own upload limit still applies and may be lower.'],
+                ],
+            ],
+
+            /*
+             * The vocabulary of the engineering registers.
+             *
+             * Every one of these is a list of short strings that differs between companies and
+             * between contracts on the same company's books, and none of them is a business rule —
+             * which is exactly the test for "configuration, not code". They are stored as
+             * comma-separated text and read through OptionList, which slugs the labels so that
+             * editing a label never orphans the records that used it.
+             *
+             * The response targets below are DEFAULTS for a new record's due date, never a cap: a
+             * user may always type a different date, because the contract governs, not the setting.
+             */
+            'engineering' => [
+                'label' => 'Engineering registers',
+                'description' => 'The vocabulary your deliverables, drawings, RFIs and submittals use. Separate each entry with a comma.',
+                'settings' => [
+                    'engineering.deliverable_types' => ['label' => 'Deliverable types', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Leave blank to use: '.implode(', ', Deliverable::DEFAULT_TYPES)],
+                    'engineering.drawing_purposes' => ['label' => 'Drawing issue purposes', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'The title-block state of a sheet. Leave blank to use: '.implode(', ', Drawing::DEFAULT_PURPOSES)],
+                    'engineering.submittal_types' => ['label' => 'Submittal types', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Leave blank to use: '.implode(', ', Submittal::DEFAULT_TYPES)],
+                    'engineering.submittal_review_codes' => ['label' => 'Submittal review codes', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'What a reviewer stamps on a package. Leave blank to use: '.implode(', ', Submittal::DEFAULT_REVIEW_CODES)],
+                    'engineering.rfi_response_days' => ['label' => 'Default RFI response time', 'type' => 'integer', 'rules' => ['required', 'integer', 'between:1,90'], 'help' => 'Working days, used to suggest a required-by date. Anyone raising an RFI can still choose their own.'],
+                    'engineering.submittal_review_days' => ['label' => 'Default submittal review time', 'type' => 'integer', 'rules' => ['required', 'integer', 'between:1,90'], 'help' => 'Days, used to suggest a required-by date.'],
                 ],
             ],
 

@@ -240,6 +240,25 @@ class NumberGenerator
             // client's own convention.
             'document' => ['prefix' => 'DOC', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
             'transmittal' => ['prefix' => 'TRN', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+
+            // --- Phase 4: engineering, HSE and quality registers ----------------------
+            // Every one of these would be auto-provisioned by schemeFor() anyway; they are listed
+            // to give each register the abbreviation its industry actually uses, because the
+            // number is what people say out loud in a meeting.
+            'deliverable' => ['prefix' => 'MDR', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+            // Drawing numbers are the one series that does NOT reset. A drawing number is stamped
+            // in a title block, quoted in a transmittal and referenced in as-builts a decade later;
+            // a year-resetting series would eventually issue the same number twice.
+            'drawing' => ['prefix' => 'DWG', 'pattern' => '{PREFIX}-{SEQ}', 'reset_period' => 'none', 'padding' => 5],
+            // Three series, one register. An RFI, a technical query and a site query live in the
+            // same table and share a status vocabulary, but an engineer quoting "TQ-2026-0031"
+            // means a specific document — so the numbers must not interleave. See
+            // RegisterService::numberingEntityType().
+            'rfi' => ['prefix' => 'RFI', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+            'technical_query' => ['prefix' => 'TQ', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+            'site_query' => ['prefix' => 'SQ', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+            'submittal' => ['prefix' => 'SUB', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+            'change_request' => ['prefix' => 'ECR', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
         ];
     }
 }

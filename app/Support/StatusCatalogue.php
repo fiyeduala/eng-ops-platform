@@ -175,6 +175,150 @@ final class StatusCatalogue
                     [null, 'cancelled', 'Cancel', 'transmittal.manage', true],
                 ],
             ],
+
+            /*
+             * A deliverable's life is the life of a PROMISE, not of a file (§26).
+             *
+             * `not_started` is the initial state and is the one most registers get wrong by not
+             * having: a deliverable exists from the day the schedule is signed, and a register
+             * whose first status is "in progress" cannot distinguish work nobody has begun from
+             * work nobody has reported. `issued` is not terminal — a deliverable is re-issued at
+             * the next revision, which is the ordinary case, not an exception.
+             */
+            'deliverable' => [
+                'statuses' => [
+                    'not_started' => ['label' => 'Not started', 'color' => 'neutral', 'initial' => true],
+                    'in_progress' => ['label' => 'In progress', 'color' => 'brand'],
+                    'in_review' => ['label' => 'In review', 'color' => 'brand'],
+                    'issued' => ['label' => 'Issued', 'color' => 'success'],
+                    'on_hold' => ['label' => 'On hold', 'color' => 'warning'],
+                    'cancelled' => ['label' => 'Cancelled', 'color' => 'danger', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['not_started', 'in_progress', 'Start', null],
+                    ['in_progress', 'in_review', 'Submit for review', 'deliverable.submit'],
+                    ['in_review', 'in_progress', 'Return for revision', 'deliverable.review', true],
+                    ['in_review', 'issued', 'Issue', 'deliverable.approve'],
+                    // Re-issue at the next revision. Deliberately available, because a register
+                    // that cannot reopen an issued deliverable forces a duplicate row for Rev B.
+                    ['issued', 'in_progress', 'Revise', 'deliverable.edit', true],
+                    ['in_progress', 'on_hold', 'Put on hold', 'deliverable.edit', true],
+                    ['on_hold', 'in_progress', 'Resume', 'deliverable.edit'],
+                    [null, 'cancelled', 'Cancel', 'deliverable.delete', true],
+                ],
+            ],
+
+            /*
+             * The drawing register's vocabulary is the ISSUE PURPOSE, because that is what an
+             * engineer means when they ask what state a drawing is in. IFR/IFA/IFC/AB are the
+             * near-universal set; a company that uses different codes renames them, and nothing in
+             * the application branches on the keys.
+             *
+             * `as_built` is terminal: a drawing marked as-built records what was constructed, and
+             * changing it afterwards is a new revision, not an edit of the record of what was.
+             */
+            'drawing' => [
+                'statuses' => [
+                    'in_preparation' => ['label' => 'In preparation', 'color' => 'neutral', 'initial' => true],
+                    'ifr' => ['label' => 'Issued for review', 'color' => 'brand'],
+                    'ifa' => ['label' => 'Issued for approval', 'color' => 'brand'],
+                    'ifc' => ['label' => 'Issued for construction', 'color' => 'success'],
+                    'as_built' => ['label' => 'As-built', 'color' => 'success', 'terminal' => true],
+                    'superseded' => ['label' => 'Superseded', 'color' => 'neutral'],
+                    'void' => ['label' => 'Void', 'color' => 'danger', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['in_preparation', 'ifr', 'Issue for review', 'drawing.submit'],
+                    ['ifr', 'in_preparation', 'Return for revision', 'drawing.review', true],
+                    ['ifr', 'ifa', 'Issue for approval', 'drawing.submit'],
+                    ['ifa', 'in_preparation', 'Return for revision', 'drawing.review', true],
+                    ['ifa', 'ifc', 'Issue for construction', 'drawing.approve'],
+                    ['ifc', 'as_built', 'Mark as-built', 'drawing.approve'],
+                    ['ifc', 'superseded', 'Supersede', 'drawing.approve'],
+                    ['superseded', 'in_preparation', 'Revise', 'drawing.edit'],
+                    // "This drawing should never have existed." Distinct from superseded, which
+                    // says it was right until something replaced it.
+                    [null, 'void', 'Void', 'drawing.delete', true],
+                ],
+            ],
+
+            /*
+             * A question's life. The three-way ending is the point: `closed` means the asker got
+             * what they needed, `answered` means somebody replied and nobody has agreed that
+             * settles it, and `withdrawn` means the question went away unanswered. A register that
+             * collapses those cannot tell an outstanding query from a forgotten one.
+             */
+            'rfi' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'open' => ['label' => 'Open', 'color' => 'brand'],
+                    'answered' => ['label' => 'Answered', 'color' => 'brand'],
+                    'closed' => ['label' => 'Closed', 'color' => 'success', 'terminal' => true],
+                    'withdrawn' => ['label' => 'Withdrawn', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['draft', 'open', 'Send', 'rfi.submit'],
+                    ['open', 'answered', 'Record answer', 'rfi.respond'],
+                    ['answered', 'closed', 'Accept and close', 'rfi.close'],
+                    // The asker did not accept it. Back to open, with a reason, rather than a
+                    // second answer overwriting the first.
+                    ['answered', 'open', 'Answer not accepted', 'rfi.close', true],
+                    [null, 'withdrawn', 'Withdraw', 'rfi.edit', true],
+                ],
+            ],
+
+            /*
+             * Submittals turn on the review code. `revise_resubmit` is a status of its own rather
+             * than a rejection because it is not one: the reviewer is asking for a change, the
+             * package is still live, and the next event is a resubmittal that points back at this
+             * record. Marking it "rejected" would lose the distinction the contract cares about.
+             */
+            'submittal' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'submitted' => ['label' => 'Submitted', 'color' => 'brand'],
+                    'under_review' => ['label' => 'Under review', 'color' => 'brand'],
+                    'approved' => ['label' => 'Approved', 'color' => 'success', 'terminal' => true],
+                    'approved_as_noted' => ['label' => 'Approved as noted', 'color' => 'success', 'terminal' => true],
+                    'revise_resubmit' => ['label' => 'Revise and resubmit', 'color' => 'warning'],
+                    'rejected' => ['label' => 'Rejected', 'color' => 'danger', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['draft', 'submitted', 'Submit', 'submittal.submit'],
+                    ['submitted', 'under_review', 'Start review', 'submittal.review'],
+                    ['under_review', 'approved', 'Code as approved', 'submittal.review'],
+                    ['under_review', 'approved_as_noted', 'Code as approved as noted', 'submittal.review'],
+                    ['under_review', 'revise_resubmit', 'Code as revise and resubmit', 'submittal.review', true],
+                    ['under_review', 'rejected', 'Code as rejected', 'submittal.review', true],
+                    // The resubmittal is a NEW record; this move just parks the old one.
+                    ['revise_resubmit', 'draft', 'Prepare resubmittal', 'submittal.create'],
+                ],
+            ],
+
+            /*
+             * A change request's status is where it has got to; its DISPOSITION is the answer, and
+             * they are separate columns for a reason spelled out on the model. The statuses below
+             * therefore never say "approved" — that is the disposition's word — they say where the
+             * paperwork is.
+             */
+            'change_request' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'submitted' => ['label' => 'Submitted', 'color' => 'brand'],
+                    'under_review' => ['label' => 'Under review', 'color' => 'brand'],
+                    'awaiting_decision' => ['label' => 'Awaiting decision', 'color' => 'warning'],
+                    'decided' => ['label' => 'Decided', 'color' => 'success'],
+                    'closed' => ['label' => 'Closed', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['draft', 'submitted', 'Submit', 'change_request.submit'],
+                    ['submitted', 'under_review', 'Start assessment', 'change_request.review'],
+                    ['under_review', 'awaiting_decision', 'Send for decision', 'change_request.review'],
+                    ['under_review', 'draft', 'Return to originator', 'change_request.review', true],
+                    ['awaiting_decision', 'decided', 'Record decision', 'change_request.approve', true],
+                    ['decided', 'closed', 'Close', 'change_request.edit'],
+                ],
+            ],
         ];
     }
 

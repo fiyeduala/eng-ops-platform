@@ -9,10 +9,13 @@ use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\PasswordController;
 use App\Http\Controllers\Auth\PasswordResetController;
 use App\Http\Controllers\CalendarController;
+use App\Http\Controllers\ChangeRequestController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DeliverableController;
 use App\Http\Controllers\DocumentCategoryController;
 use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\DocumentVersionController;
+use App\Http\Controllers\DrawingController;
 use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\LocationController;
 use App\Http\Controllers\MeetingController;
@@ -25,8 +28,10 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\ProjectDepartmentController;
 use App\Http\Controllers\ProjectMemberController;
+use App\Http\Controllers\RfiController;
 use App\Http\Controllers\RoleController;
 use App\Http\Controllers\SettingController;
+use App\Http\Controllers\SubmittalController;
 use App\Http\Controllers\TaskChecklistItemController;
 use App\Http\Controllers\TaskController;
 use App\Http\Controllers\TaskDependencyController;
@@ -581,6 +586,220 @@ Route::middleware(['auth', 'password.current'])->group(function () {
             ->middleware('permission:transmittal.acknowledge')->name('transmittals.acknowledge');
         Route::post('transmittals/{transmittal}/cancel', [TransmittalController::class, 'cancel'])
             ->middleware('permission:transmittal.manage')->name('transmittals.cancel');
+    });
+
+    // --- deliverables --------------------------------------------------------------------------
+    //
+    // The engineering registers all follow the same shape, and the shape is deliberate: `view` opens
+    // the register, `create`/`edit`/`delete` do the obvious, and every LIFECYCLE act — issuing,
+    // answering, reviewing, deciding — sits behind its own permission. That separation is the whole
+    // point. A graduate engineer who may raise and edit an RFI is not thereby a person who may
+    // answer one on the company's behalf, and one `rfi.edit` covering both would make the register
+    // useless as a record of who committed the organization to what (§10, §59).
+    //
+    // Every route here is a FIRST filter only. The controller re-authorizes the bound record against
+    // its policy, so swapping the id in the URL for one in another project — or another tenant —
+    // fails at the policy even though the middleware has already passed (§84, §94).
+
+    Route::middleware('permission:deliverable.view')->group(function () {
+        Route::get('deliverables', [DeliverableController::class, 'index'])->name('deliverables.index');
+        Route::get('deliverables/{deliverable}', [DeliverableController::class, 'show'])
+            ->whereNumber('deliverable')->name('deliverables.show');
+    });
+
+    Route::get('deliverables/create', [DeliverableController::class, 'create'])
+        ->middleware('permission:deliverable.create')->name('deliverables.create');
+    Route::post('deliverables', [DeliverableController::class, 'store'])
+        ->middleware('permission:deliverable.create')->name('deliverables.store');
+
+    Route::whereNumber('deliverable')->group(function () {
+        Route::get('deliverables/{deliverable}/edit', [DeliverableController::class, 'edit'])
+            ->middleware('permission:deliverable.edit')->name('deliverables.edit');
+        Route::put('deliverables/{deliverable}', [DeliverableController::class, 'update'])
+            ->middleware('permission:deliverable.edit')->name('deliverables.update');
+        Route::delete('deliverables/{deliverable}', [DeliverableController::class, 'destroy'])
+            ->middleware('permission:deliverable.delete')->name('deliverables.destroy');
+
+        // Progress is reported by the person doing the work, so it rides on `edit` rather than on a
+        // heavier authority. What stops it being abused is reach, not the verb: the policy still
+        // asks whether this actor may touch THIS deliverable.
+        Route::post('deliverables/{deliverable}/progress', [DeliverableController::class, 'reportProgress'])
+            ->middleware('permission:deliverable.edit')->name('deliverables.progress');
+
+        // Issuing is the claim that the work is finished and has left the building. It is behind
+        // `review`, because "I have done it" and "it is fit to go out" are different statements and
+        // frequently different people.
+        Route::post('deliverables/{deliverable}/issue', [DeliverableController::class, 'issue'])
+            ->middleware('permission:deliverable.review')->name('deliverables.issue');
+
+        Route::post('deliverables/{deliverable}/document', [DeliverableController::class, 'attachDocument'])
+            ->middleware('permission:deliverable.edit')->name('deliverables.document');
+        Route::post('deliverables/{deliverable}/transition', [DeliverableController::class, 'transition'])
+            ->middleware('permission:deliverable.edit')->name('deliverables.transition');
+    });
+
+    // --- drawings ------------------------------------------------------------------------------
+
+    Route::middleware('permission:drawing.view')->group(function () {
+        Route::get('drawings', [DrawingController::class, 'index'])->name('drawings.index');
+        Route::get('drawings/{drawing}', [DrawingController::class, 'show'])
+            ->whereNumber('drawing')->name('drawings.show');
+    });
+
+    Route::get('drawings/create', [DrawingController::class, 'create'])
+        ->middleware('permission:drawing.create')->name('drawings.create');
+    Route::post('drawings', [DrawingController::class, 'store'])
+        ->middleware('permission:drawing.create')->name('drawings.store');
+
+    Route::whereNumber('drawing')->group(function () {
+        Route::get('drawings/{drawing}/edit', [DrawingController::class, 'edit'])
+            ->middleware('permission:drawing.edit')->name('drawings.edit');
+        Route::put('drawings/{drawing}', [DrawingController::class, 'update'])
+            ->middleware('permission:drawing.edit')->name('drawings.update');
+        Route::delete('drawings/{drawing}', [DrawingController::class, 'destroy'])
+            ->middleware('permission:drawing.delete')->name('drawings.destroy');
+
+        Route::post('drawings/{drawing}/revise', [DrawingController::class, 'revise'])
+            ->middleware('permission:drawing.edit')->name('drawings.revise');
+        Route::post('drawings/{drawing}/document', [DrawingController::class, 'attachDocument'])
+            ->middleware('permission:drawing.edit')->name('drawings.document');
+        Route::post('drawings/{drawing}/transition', [DrawingController::class, 'transition'])
+            ->middleware('permission:drawing.edit')->name('drawings.transition');
+
+        // Opening the file needs `drawing.download` here AND the document's own `view` inside the
+        // controller. Neither check is redundant: this one says the register may hand out files at
+        // all, the other says this actor may see THIS file. Dropping the second would turn the
+        // drawing register into a way around document confidentiality (§67).
+        Route::get('drawings/{drawing}/file', [DrawingController::class, 'openFile'])
+            ->middleware('permission:drawing.download')->name('drawings.file');
+    });
+
+    // --- RFIs and technical queries -------------------------------------------------------------
+
+    Route::middleware('permission:rfi.view')->group(function () {
+        Route::get('rfis', [RfiController::class, 'index'])->name('rfis.index');
+        Route::get('rfis/{rfi}', [RfiController::class, 'show'])
+            ->whereNumber('rfi')->name('rfis.show');
+    });
+
+    Route::get('rfis/create', [RfiController::class, 'create'])
+        ->middleware('permission:rfi.create')->name('rfis.create');
+    Route::post('rfis', [RfiController::class, 'store'])
+        ->middleware('permission:rfi.create')->name('rfis.store');
+
+    Route::whereNumber('rfi')->group(function () {
+        Route::get('rfis/{rfi}/edit', [RfiController::class, 'edit'])
+            ->middleware('permission:rfi.edit')->name('rfis.edit');
+        Route::put('rfis/{rfi}', [RfiController::class, 'update'])
+            ->middleware('permission:rfi.edit')->name('rfis.update');
+        Route::delete('rfis/{rfi}', [RfiController::class, 'destroy'])
+            ->middleware('permission:rfi.delete')->name('rfis.destroy');
+
+        Route::post('rfis/{rfi}/send', [RfiController::class, 'send'])
+            ->middleware('permission:rfi.submit')->name('rfis.send');
+
+        // Answering is not editing, and this is the line that says so. `rfi.respond` is held by the
+        // people qualified to state the organization's technical position; `rfi.edit` is held by
+        // anybody who can fix a typo in the question.
+        Route::post('rfis/{rfi}/respond', [RfiController::class, 'respond'])
+            ->middleware('permission:rfi.respond')->name('rfis.respond');
+
+        // Rewriting an answer already given is the heaviest act in this register, so it sits behind
+        // the heaviest permission it has and demands a written reason (§59).
+        Route::post('rfis/{rfi}/amend', [RfiController::class, 'amend'])
+            ->middleware('permission:rfi.close')->name('rfis.amend');
+        Route::post('rfis/{rfi}/close', [RfiController::class, 'close'])
+            ->middleware('permission:rfi.close')->name('rfis.close');
+
+        Route::post('rfis/{rfi}/transition', [RfiController::class, 'transition'])
+            ->middleware('permission:rfi.edit')->name('rfis.transition');
+    });
+
+    // --- submittals ----------------------------------------------------------------------------
+
+    Route::middleware('permission:submittal.view')->group(function () {
+        Route::get('submittals', [SubmittalController::class, 'index'])->name('submittals.index');
+        Route::get('submittals/{submittal}', [SubmittalController::class, 'show'])
+            ->whereNumber('submittal')->name('submittals.show');
+    });
+
+    Route::get('submittals/create', [SubmittalController::class, 'create'])
+        ->middleware('permission:submittal.create')->name('submittals.create');
+    Route::post('submittals', [SubmittalController::class, 'store'])
+        ->middleware('permission:submittal.create')->name('submittals.store');
+
+    Route::whereNumber(['submittal', 'item'])->group(function () {
+        Route::get('submittals/{submittal}/edit', [SubmittalController::class, 'edit'])
+            ->middleware('permission:submittal.edit')->name('submittals.edit');
+        Route::put('submittals/{submittal}', [SubmittalController::class, 'update'])
+            ->middleware('permission:submittal.edit')->name('submittals.update');
+        Route::delete('submittals/{submittal}', [SubmittalController::class, 'destroy'])
+            ->middleware('permission:submittal.delete')->name('submittals.destroy');
+
+        // The picker lists documents through `document.view`, so it can never enumerate anything the
+        // actor could not already open by navigating to it (§61).
+        Route::get('submittals/{submittal}/picker', [SubmittalController::class, 'documentPicker'])
+            ->middleware('permission:submittal.edit')->name('submittals.picker');
+        Route::post('submittals/{submittal}/items', [SubmittalController::class, 'addItem'])
+            ->middleware('permission:submittal.edit')->name('submittals.items.store');
+        Route::delete('submittals/{submittal}/items/{item}', [SubmittalController::class, 'removeItem'])
+            ->middleware('permission:submittal.edit')->name('submittals.items.destroy');
+
+        // Coding a line is the reviewer's act, not the submitter's: "Approved as noted" against one
+        // item of a package is a technical decision, so it takes `submittal.review` even though the
+        // thing being written is a column on a child row.
+        Route::post('submittals/{submittal}/items/{item}/code', [SubmittalController::class, 'codeItem'])
+            ->middleware('permission:submittal.review')->name('submittals.items.code');
+
+        Route::post('submittals/{submittal}/submit', [SubmittalController::class, 'submit'])
+            ->middleware('permission:submittal.submit')->name('submittals.submit');
+        Route::post('submittals/{submittal}/review', [SubmittalController::class, 'review'])
+            ->middleware('permission:submittal.review')->name('submittals.review');
+
+        // A resubmittal is a NEW record that remembers its parent, so it needs the authority to
+        // create one — plus, in the policy, the right to see what is being resubmitted.
+        Route::post('submittals/{submittal}/resubmit', [SubmittalController::class, 'resubmit'])
+            ->middleware('permission:submittal.create')->name('submittals.resubmit');
+
+        Route::post('submittals/{submittal}/transition', [SubmittalController::class, 'transition'])
+            ->middleware('permission:submittal.edit')->name('submittals.transition');
+    });
+
+    // --- change requests -----------------------------------------------------------------------
+
+    Route::middleware('permission:change_request.view')->group(function () {
+        Route::get('change-requests', [ChangeRequestController::class, 'index'])
+            ->name('change-requests.index');
+        Route::get('change-requests/{change_request}', [ChangeRequestController::class, 'show'])
+            ->whereNumber('change_request')->name('change-requests.show');
+    });
+
+    Route::get('change-requests/create', [ChangeRequestController::class, 'create'])
+        ->middleware('permission:change_request.create')->name('change-requests.create');
+    Route::post('change-requests', [ChangeRequestController::class, 'store'])
+        ->middleware('permission:change_request.create')->name('change-requests.store');
+
+    Route::whereNumber('change_request')->group(function () {
+        Route::get('change-requests/{change_request}/edit', [ChangeRequestController::class, 'edit'])
+            ->middleware('permission:change_request.edit')->name('change-requests.edit');
+        Route::put('change-requests/{change_request}', [ChangeRequestController::class, 'update'])
+            ->middleware('permission:change_request.edit')->name('change-requests.update');
+        Route::delete('change-requests/{change_request}', [ChangeRequestController::class, 'destroy'])
+            ->middleware('permission:change_request.delete')->name('change-requests.destroy');
+
+        Route::post('change-requests/{change_request}/submit', [ChangeRequestController::class, 'submit'])
+            ->middleware('permission:change_request.submit')->name('change-requests.submit');
+
+        // The one route in the engineering registers with separation of duties behind it. The
+        // middleware asks whether this person may approve changes at all; ChangeRequestPolicy::decide
+        // then refuses when they are the author, because nobody approves their own money (§10).
+        Route::post('change-requests/{change_request}/decide', [ChangeRequestController::class, 'decide'])
+            ->middleware('permission:change_request.approve')->name('change-requests.decide');
+
+        Route::post('change-requests/{change_request}/close', [ChangeRequestController::class, 'close'])
+            ->middleware('permission:change_request.review')->name('change-requests.close');
+        Route::post('change-requests/{change_request}/transition', [ChangeRequestController::class, 'transition'])
+            ->middleware('permission:change_request.edit')->name('change-requests.transition');
     });
 
     // --- approvals -----------------------------------------------------------------------------

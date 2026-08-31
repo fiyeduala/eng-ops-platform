@@ -139,6 +139,30 @@ final class NotificationCatalogue
             'Documents were formally issued outside the company on a transmittal you are named on.',
             'normal', false, [true, true, false],
         ],
+
+        // --- engineering ------------------------------------------------------------------------
+        //
+        // All three are the same shape: somebody has been waiting for an answer and the answer has
+        // arrived. All three are mandatory, and the test in the class docblock is what makes them
+        // so — an engineer who muted "your query was answered" and then built to a superseded
+        // assumption for a fortnight would fairly say the system never told them. None is urgent:
+        // these arrive during a working day and eight hours does not change the outcome, whereas
+        // an approval sitting unseen does.
+        'rfi.answered' => [
+            'rfi', 'Engineering', 'A query you raised was answered',
+            'Somebody answered a technical query or RFI you raised or are following.',
+            'high', true, [true, true, false],
+        ],
+        'submittal.reviewed' => [
+            'submittal', 'Engineering', 'A package you submitted came back',
+            'A submittal you sent for review has been coded.',
+            'high', true, [true, true, false],
+        ],
+        'change_request.decided' => [
+            'change_request', 'Engineering', 'A change request was decided',
+            'A change to scope on your project was approved, rejected, deferred or withdrawn.',
+            'high', true, [true, true, false],
+        ],
     ];
 
     /**

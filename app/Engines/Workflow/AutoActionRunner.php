@@ -9,12 +9,14 @@ use App\Engines\Configuration\StatusMachine;
 use App\Engines\Notification\Audience;
 use App\Engines\Notification\NotificationDispatcher;
 use App\Engines\Notification\NotificationMessage;
+use App\Engines\Workflow\Contracts\SpawnsFromRecord;
 use App\Models\Status;
 use App\Models\Task;
 use App\Models\User;
 use App\Models\WorkflowStage;
 use App\Models\WorkflowStageInstance;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -53,6 +55,7 @@ class AutoActionRunner
     public const VERBS = [
         'set_status' => 'Move the record to a status',
         'create_task' => 'Raise a task',
+        'create_record' => 'Open a linked record',
         'notify' => 'Tell somebody',
     ];
 
@@ -92,6 +95,7 @@ class AutoActionRunner
                 match ($verb) {
                     'set_status' => $this->setStatus($action, $subject, $actor),
                     'create_task' => $this->createTask($action, $subject, $stage, $stageInstance, $actor),
+                    'create_record' => $this->createRecord($action, $subject, $stage, $actor),
                     'notify' => $this->notify($action, $subject, $stage, $stageInstance, $actor),
                 };
             } catch (\Throwable $e) {
@@ -164,6 +168,15 @@ class AutoActionRunner
             'assignee_id' => $assigneeId,
             'project_id' => $subject->getAttribute('project_id'),
             'org_unit_id' => $subject->getAttribute('org_unit_id'),
+
+            // What the task is ABOUT. `tasks.linked` has existed since Phase 2 for exactly this,
+            // and leaving it null was a real gap: a task reading "Action arising from HSE Review"
+            // with no way back to the incident is a dead end on somebody's list. It carries no
+            // authorization meaning — reach over the task is decided by the task's own columns —
+            // so pointing it at a confidential record discloses nothing but the link.
+            'linked_type' => $subject->getMorphClass(),
+            'linked_id' => $subject->getKey(),
+
             'due_on' => isset($action['due_in_days']) && is_numeric($action['due_in_days'])
                 ? now()->addDays((int) $action['due_in_days'])->toDateString()
                 : null,
@@ -185,6 +198,69 @@ class AutoActionRunner
             'task_raised',
             'A task was raised automatically: '.$task->title,
             ['task_id' => $task->getKey(), 'stage' => $stage->name],
+            $actor,
+        );
+    }
+
+    /**
+     * Open a record of another kind, arising from this one.
+     *
+     * This is the verb behind "an incident spawns an investigation and a corrective action" — and
+     * the reason it is a verb rather than an HSE listener is that a company whose procedure says a
+     * near-miss needs no investigation, or whose NCRs open corrective actions at the disposition
+     * stage instead of the review stage, must be able to say so on the builder screen (§32, §73).
+     *
+     * THE ENGINE STILL NAMES NO MODULE. `record` is a morph key, resolved through the same map the
+     * database stores, and the class must declare itself openable by implementing SpawnsFromRecord.
+     * A key naming a class that does not — or does not exist yet, in a phase that has not landed —
+     * raises, is caught by the caller, and lands on the source record's timeline where the person
+     * who configured it will see it.
+     *
+     * TWO THINGS THE ENGINE REFUSES OUTRIGHT, rather than trusting configuration to be sensible:
+     * a record may not spawn its own kind, and it may not spawn the kind it was itself spawned
+     * from. Both are how a mis-drawn pair of routes becomes an unbounded chain of records at three
+     * in the morning; the module's own idempotence check (see the interface) handles the ordinary
+     * case of a stage that is simply re-entered.
+     *
+     * @param  array<string,mixed>  $action
+     */
+    private function createRecord(array $action, Model $subject, WorkflowStage $stage, User $actor): void
+    {
+        $key = (string) ($action['record'] ?? '');
+
+        if ($key === '') {
+            throw new \DomainException('A create_record action named no record type.');
+        }
+
+        $class = Relation::getMorphedModel($key);
+
+        if ($class === null || ! class_exists($class)) {
+            throw new \DomainException('No record type "'.$key.'" exists.');
+        }
+
+        if (! is_subclass_of($class, SpawnsFromRecord::class)) {
+            throw new \DomainException(class_basename($class).' cannot be opened from another record.');
+        }
+
+        if ($subject instanceof $class) {
+            throw new \DomainException('A '.$key.' cannot open another '.$key.'.');
+        }
+
+        /** @var class-string<SpawnsFromRecord> $class */
+        $created = $class::spawnFrom($subject, $action, $this->resolveOne($action, $stage, $subject), $actor);
+
+        if ($created === null) {
+            // The module decided one was not wanted — already open, or not applicable under the
+            // company's rules. A silent, correct outcome; see the interface docblock.
+            return;
+        }
+
+        $this->activity->record(
+            $subject,
+            'record_opened',
+            $class::spawnLabel().' '.($created->getAttribute('number') ?? '#'.$created->getKey())
+                .' was opened automatically at the "'.$stage->name.'" stage.',
+            ['record_type' => $key, 'record_id' => $created->getKey(), 'stage' => $stage->name],
             $actor,
         );
     }

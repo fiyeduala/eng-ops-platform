@@ -24,11 +24,15 @@ use App\Events\MeetingMinutesCirculated;
 use App\Events\MeetingRescheduled;
 use App\Events\MemoIssued;
 use App\Events\TaskAssigned;
+use App\Events\ChangeRequestDecided;
+use App\Events\RfiAnswered;
+use App\Events\SubmittalReviewed;
 use App\Events\TransmittalIssued;
 use App\Events\WorkflowStalled;
 use App\Listeners\NotifyAnnouncementAudience;
 use App\Listeners\NotifyApprovalAssignees;
 use App\Listeners\NotifyApprovalOutcome;
+use App\Listeners\NotifyChangeRequestDecided;
 use App\Listeners\NotifyDocumentApproved;
 use App\Listeners\NotifyDocumentRevisionRequested;
 use App\Listeners\NotifyMeetingCancelled;
@@ -36,6 +40,8 @@ use App\Listeners\NotifyMeetingMinutes;
 use App\Listeners\NotifyMeetingParticipants;
 use App\Listeners\NotifyMeetingRescheduled;
 use App\Listeners\NotifyMemoRecipients;
+use App\Listeners\NotifyRfiAnswered;
+use App\Listeners\NotifySubmittalReviewed;
 use App\Listeners\NotifyTaskAssignee;
 use App\Listeners\NotifyTransmittalIssued;
 use App\Listeners\NotifyWorkflowStalled;
@@ -44,9 +50,12 @@ use App\Models\ActivityLog;
 use App\Models\Announcement;
 use App\Models\Approval;
 use App\Models\AuditLog;
+use App\Models\ChangeRequest;
+use App\Models\Deliverable;
 use App\Models\Document;
 use App\Models\DocumentCategory;
 use App\Models\DocumentVersion;
+use App\Models\Drawing;
 use App\Models\Employee;
 use App\Models\Follower;
 use App\Models\Location;
@@ -68,11 +77,14 @@ use App\Models\ProjectMember;
 use App\Models\ProjectRole;
 use App\Models\ProjectType;
 use App\Models\RecordPermission;
+use App\Models\Rfi;
 use App\Models\Role;
 use App\Models\Setting;
 use App\Models\Signature;
 use App\Models\Status;
 use App\Models\StatusTransition;
+use App\Models\Submittal;
+use App\Models\SubmittalItem;
 use App\Models\Task;
 use App\Models\TaskChecklistItem;
 use App\Models\TaskDependency;
@@ -88,9 +100,12 @@ use App\Models\WorkflowStageInstance;
 use App\Policies\AnnouncementPolicy;
 use App\Policies\ApprovalPolicy;
 use App\Policies\AuditLogPolicy;
+use App\Policies\ChangeRequestPolicy;
+use App\Policies\DeliverablePolicy;
 use App\Policies\DocumentCategoryPolicy;
 use App\Policies\DocumentPolicy;
 use App\Policies\DocumentVersionPolicy;
+use App\Policies\DrawingPolicy;
 use App\Policies\EmployeePolicy;
 use App\Policies\FollowerPolicy;
 use App\Policies\LocationPolicy;
@@ -110,11 +125,14 @@ use App\Policies\ProjectMemberPolicy;
 use App\Policies\ProjectPolicy;
 use App\Policies\ProjectRolePolicy;
 use App\Policies\ProjectTypePolicy;
+use App\Policies\RfiPolicy;
 use App\Policies\RolePolicy;
 use App\Policies\SettingPolicy;
 use App\Policies\SignaturePolicy;
 use App\Policies\StatusPolicy;
 use App\Policies\StatusTransitionPolicy;
+use App\Policies\SubmittalItemPolicy;
+use App\Policies\SubmittalPolicy;
 use App\Policies\TaskChecklistItemPolicy;
 use App\Policies\TaskDependencyPolicy;
 use App\Policies\TaskPolicy;
@@ -259,6 +277,18 @@ class AppServiceProvider extends ServiceProvider
             'transmittal' => Transmittal::class,
             'transmittal_item' => TransmittalItem::class,
             'template' => Template::class,
+
+            // --- Phase 4: engineering delivery ---------------------------------------
+            // These keys are not decoration. They are what a workflow definition stores in
+            // `entity_type`, what an auto-action stores in `record`, and what an activity entry
+            // stores in its subject columns — so renaming one silently breaks every route and
+            // every timeline that already referenced it.
+            'deliverable' => Deliverable::class,
+            'drawing' => Drawing::class,
+            'rfi' => Rfi::class,
+            'submittal' => Submittal::class,
+            'submittal_item' => SubmittalItem::class,
+            'change_request' => ChangeRequest::class,
         ]);
     }
 
@@ -356,6 +386,18 @@ class AppServiceProvider extends ServiceProvider
             Transmittal::class => TransmittalPolicy::class,
             TransmittalItem::class => TransmittalItemPolicy::class,
             Template::class => TemplatePolicy::class,
+
+            // --- Phase 4: engineering delivery ---------------------------------------
+            // Five registers governed by five permission modules the catalogue already declares.
+            // DrawingPolicy is the one worth reading: a register line points at a document, and
+            // opening that document asks the DOCUMENT's policy as well, so the register cannot be
+            // used as a way round document confidentiality.
+            Deliverable::class => DeliverablePolicy::class,
+            Drawing::class => DrawingPolicy::class,
+            Rfi::class => RfiPolicy::class,
+            Submittal::class => SubmittalPolicy::class,
+            SubmittalItem::class => SubmittalItemPolicy::class,
+            ChangeRequest::class => ChangeRequestPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {
@@ -460,6 +502,21 @@ class AppServiceProvider extends ServiceProvider
             // entirely, and has no account for the access engine to reason about.
             TransmittalIssued::class => [
                 NotifyTransmittalIssued::class,
+            ],
+
+            // --- engineering ---------------------------------------------------------
+            // Three moments, one shape: somebody has been waiting and the answer arrived.
+            // Nothing is announced when a query is raised or a package is sent, because the
+            // person on the other end of those is very often outside this system entirely —
+            // the same reason a transmittal notifies only the issuing side.
+            RfiAnswered::class => [
+                NotifyRfiAnswered::class,
+            ],
+            SubmittalReviewed::class => [
+                NotifySubmittalReviewed::class,
+            ],
+            ChangeRequestDecided::class => [
+                NotifyChangeRequestDecided::class,
             ],
         ];
 
