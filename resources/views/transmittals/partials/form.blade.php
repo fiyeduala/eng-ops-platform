@@ -61,11 +61,17 @@
         </div>
 
         <div class="space-y-5 p-5">
-            <x-field label="Organisation or person" name="to_name" required
-                     help="Type it as it should appear on the cover sheet. There is no need for them to exist as a record here.">
-                <x-input name="to_name" :value="$transmittal->to_name" required maxlength="200"
-                         placeholder="e.g. Lagos State Ministry of Works"/>
-            </x-field>
+            @include("partials.party-picker", [
+                "typeName" => "to_party_type",
+                "idName" => "to_party_id",
+                "nameName" => "to_name",
+                "label" => "Organisation or person",
+                "record" => $transmittal,
+                "required" => true,
+                "placeholder" => "e.g. Lagos State Ministry of Works",
+                "units" => $units,
+                "help" => "Type it as it should appear on the cover sheet — there is no need for them to exist as a record here. The link below is optional and does not change what is printed.",
+            ])
 
             <div class="grid gap-5 sm:grid-cols-2">
                 <x-field label="For the attention of" name="to_attention"

@@ -96,7 +96,11 @@ final class PermissionCatalogue
 
             // ------------------------------------------------------------- commercial
             'client' => ['Commercial', 'Clients', [...self::CRUD, 'manage']],
-            'vendor' => ['Commercial', 'Vendors', [...self::CRUD, 'manage', 'evaluate', 'blacklist']],
+            // `bank` is separate from `edit` because payment redirection fraud is a quiet change
+            // to an account number by somebody who legitimately holds `edit`. Reading and writing
+            // the bank block are the SAME permission on purpose: splitting them would produce the
+            // arrangement where somebody may replace a number they were never allowed to check.
+            'vendor' => ['Commercial', 'Vendors', [...self::CRUD, 'manage', 'evaluate', 'blacklist', 'bank']],
             'contract' => ['Commercial', 'Contracts', [...self::CRUD, 'manage', 'approve', 'view_confidential']],
 
             // ------------------------------------------------------------- procurement
@@ -196,6 +200,9 @@ final class PermissionCatalogue
             $module === 'user' && in_array($action, ['impersonate', 'reset_password', 'manage'], true),
             $module === 'setting' && $action === 'manage',
             $module === 'employee' && $action === 'view_confidential',
+            // Where a supplier's money goes. The single most valuable permission in the platform to
+            // an attacker, and the one an administrator is most likely to grant without thinking.
+            $module === 'vendor' && $action === 'bank',
             $module === 'performance' && $action === 'view_confidential' => true,
             default => false,
         };
@@ -221,6 +228,8 @@ final class PermissionCatalogue
             'manage' => 'Fully manage',
             'record_minutes' => 'Record minutes for',
             'reset_password' => 'Reset passwords for',
+            'bank' => 'View and change bank details for',
+            'blacklist' => 'Blacklist',
             default => ucfirst(str_replace('_', ' ', $action)),
         };
 

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use App\Models\Client;
+use App\Models\Contract;
 use App\Models\CorrectiveAction;
 use App\Models\Deliverable;
 use App\Models\Drawing;
@@ -20,6 +22,7 @@ use App\Models\RiskAssessment;
 use App\Models\Submittal;
 use App\Models\TrainingCourse;
 use App\Models\TrainingRecord;
+use App\Models\Vendor;
 
 /**
  * How each configurable setting is presented and validated (§72, §86).
@@ -193,6 +196,32 @@ final class SettingsCatalogue
                 ],
             ],
 
+            /*
+             * The commercial vocabulary.
+             *
+             * Its own group for the reason the quality group is its own group: the person who
+             * renames a vendor category is in procurement and will not go looking for it behind
+             * eighteen safety settings.
+             *
+             * `vendor.prequalification_warning_days` is the one number here that DOES something
+             * rather than merely naming something — it is the window the vendor register and the
+             * expiry watch open on, and the reason it is configurable is that a company reassessing
+             * annually and a company reassessing every three years want different warnings.
+             */
+            'commercial' => [
+                'label' => 'Commercial registers',
+                'description' => 'The vocabulary your vendor, client and contract registers use. Separate each entry with a comma.',
+                'settings' => [
+                    'vendor.types' => ['label' => 'Vendor types', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'The kind of relationship, not what they sell. Leave blank to use: '.implode(', ', Vendor::DEFAULT_TYPES)],
+                    'vendor.categories' => ['label' => 'Vendor categories', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:900'], 'help' => 'What they supply, in your words. Leave blank to use: '.implode(', ', Vendor::DEFAULT_CATEGORIES)],
+                    'vendor.prequalification_warning_days' => ['label' => 'Warn about expiring prequalifications', 'type' => 'integer', 'rules' => ['required', 'integer', 'between:7,365'], 'help' => 'Days ahead. This is the window the vendor register opens on — a prequalification that lapses unnoticed stops a purchase order on the morning it is needed.'],
+                    'client.types' => ['label' => 'Client types', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Leave blank to use: '.implode(', ', Client::DEFAULT_TYPES)],
+                    'client.industries' => ['label' => 'Client industries', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:900'], 'help' => 'Leave blank to use: '.implode(', ', Client::DEFAULT_INDUSTRIES)],
+                    'contract.types' => ['label' => 'Contract types', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'How the money is measured, which is the only classification that matters commercially. Leave blank to use: '.implode(', ', Contract::DEFAULT_TYPES)],
+                    'contract.default_retention_percent' => ['label' => 'Usual retention', 'type' => 'string', 'rules' => ['nullable', 'numeric', 'between:0,50'], 'help' => 'Percent, used only to suggest a figure on a new contract. The contract governs, not this setting.'],
+                    'contract.expiry_warning_days' => ['label' => 'Warn about expiring contracts', 'type' => 'integer', 'rules' => ['required', 'integer', 'between:7,365'], 'help' => 'Days ahead. Renewal negotiations start long before the end date, so this is usually set wider than it feels.'],
+                ],
+            ],
             'notify' => [
                 'label' => 'Notifications',
                 'description' => 'How and when people are told that something needs them.',

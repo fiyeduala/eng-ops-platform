@@ -153,6 +153,17 @@ final class RoleTemplates
                     'project.view_financials' => 'organization',
                     'project.view_confidential' => 'organization',
                     'contract.view_confidential' => 'organization',
+                    // THE ONE BUSINESS REGISTER THE MD WRITES TO, and it earns the exception.
+                    // In a company of eight there is no finance manager and no procurement
+                    // manager — the two templates that otherwise carry these — and the person
+                    // who signs the contract is the person who runs the company. Without this
+                    // the contract register is unreachable for a whole size of organization,
+                    // which is the opposite of §73. Approval authority is unchanged: `*.approve`
+                    // above already carried it, and a bigger company simply grants finance the
+                    // same keys and leaves the MD approving rather than drafting.
+                    'contract.create' => 'organization',
+                    'contract.edit' => 'organization',
+                    'contract.manage' => 'organization',
                     'hse_incident.view_confidential' => 'organization',
                     'dashboard.view_executive' => 'organization',
                     'kpi.view' => 'organization',
@@ -217,6 +228,14 @@ final class RoleTemplates
                     'document.approve' => 'organization',
                     'hse_incident.view' => 'organization',
                     'corrective_action.*' => 'organization',
+                    // SOMEBODY HAS TO BE ABLE TO OPEN A CLIENT ACCOUNT. Every other template
+                    // reads the client register and none of them may write to it, which leaves
+                    // a register that can only ever be populated by the system administrator —
+                    // the exact shape of workaround §90 exists to prevent. Operations owns the
+                    // relationship, so operations owns the record.
+                    'client.*' => 'organization',
+                    'contract.view' => 'organization',
+                    'contract.view_confidential' => 'organization',
                     'purchase_request.approve' => 'organization',
                     'material_request.approve' => 'organization',
                     'employee.view' => 'organization',
@@ -270,6 +289,10 @@ final class RoleTemplates
                     'project.manage' => 'project',
                     'project_member.assign' => 'project',
                     'project_member.view' => 'project',
+                    // Who the job is for, and the contract it runs under. Both read-only: the
+                    // person running the work is not the person who agrees its terms.
+                    'client.view' => 'organization',
+                    'contract.view' => 'project',
                     // `view` alongside `manage`, here and in every role below that administers
                     // tasks it does not personally hold. There is no implication rule — `manage`
                     // does not confer `view`, deliberately, since the two answer different
@@ -352,6 +375,12 @@ final class RoleTemplates
                     'drawing.*' => 'department',
                     'submittal.*' => 'department',
                     'rfi.*' => 'department',
+                    // Read-only, and company-wide rather than departmental. An RFI is addressed
+                    // to a client or a vendor, so the party picker on it is unusable without
+                    // this — and a counterparty register filtered to one department would hide
+                    // most of the companies the department actually writes to.
+                    'client.view' => 'organization',
+                    'vendor.view' => 'organization',
                     'change_request.review' => 'department',
                     'document.approve' => 'department',
                     'document.view' => 'department',
@@ -552,6 +581,11 @@ final class RoleTemplates
                 'grants' => [
                     'document.*' => 'organization',
                     'transmittal.*' => 'organization',
+                    // Same reason as the engineering manager above: a transmittal is issued to
+                    // somebody, and the register of who that can be is read-only reference data
+                    // to the person issuing it.
+                    'client.view' => 'organization',
+                    'vendor.view' => 'organization',
                     'numbering.*' => 'organization',
                     'template.manage' => 'organization',
                     'template.view' => 'organization',
@@ -624,8 +658,23 @@ final class RoleTemplates
                     'expense.*' => 'organization',
                     'income.*' => 'organization',
                     'payment.*' => 'organization',
+                    // Finance registers the contract, because finance is who tracks what it is
+                    // worth, what is retained against it and when the retention falls due.
+                    'contract.create' => 'organization',
+                    'contract.edit' => 'organization',
+                    // `manage` is what records a contract as EXECUTED and what moves the
+                    // retention. Approval is somebody else's — see executive-director — but
+                    // filing the signed original and holding the money against it is finance's,
+                    // and without this the contract graph has an approved state nobody on the
+                    // default templates can move out of.
+                    'contract.manage' => 'organization',
                     'contract.view' => 'organization',
                     'contract.view_confidential' => 'organization',
+                    'contract.export' => 'organization',
+                    // The account number is a payment instrument, not a contact detail, and it
+                    // is masked for everybody without this. The people who pay suppliers are
+                    // the people who need to read it (§67).
+                    'vendor.bank' => 'organization',
                     'purchase_order.view' => 'organization',
                     'purchase_order.approve' => 'organization',
                     'purchase_request.view' => 'organization',
@@ -674,7 +723,15 @@ final class RoleTemplates
                     'purchase_order.*' => 'organization',
                     'goods_receipt.*' => 'organization',
                     'vendor.*' => 'organization',
+                    // A subcontract IS a contract — the same register, held in the other
+                    // direction. Procurement raises those; it reads the client-side ones
+                    // because a back-to-back subcontract has to match the head contract.
+                    'contract.create' => 'organization',
+                    'contract.edit' => 'organization',
+                    'contract.manage' => 'organization',
                     'contract.view' => 'organization',
+                    'contract.view_confidential' => 'organization',
+                    'client.view' => 'organization',
                     'material_request.view' => 'organization',
                     'inventory_item.view' => 'organization',
                     'budget.view' => 'organization',
@@ -703,6 +760,13 @@ final class RoleTemplates
                     'purchase_order.submit' => 'department',
                     'vendor.view' => 'organization',
                     'vendor.create' => 'organization',
+                    // CREATE WITHOUT EDIT IS A FROZEN REGISTER. The officer registers the supplier,
+                    // chases the prequalification pack and submits it for assessment — all of which
+                    // is `vendor.edit` — and would otherwise be unable to correct so much as a
+                    // misspelt address on a row they wrote themselves. What stays out is
+                    // `vendor.manage`: approving, suspending and blacklisting belong to the manager,
+                    // so the person who brings a supplier in is never the person who passes them.
+                    'vendor.edit' => 'organization',
                     'goods_receipt.view' => 'department',
                     'inventory_item.view' => 'organization',
                 ],

@@ -69,6 +69,9 @@ use App\Models\Announcement;
 use App\Models\Approval;
 use App\Models\AuditLog;
 use App\Models\ChangeRequest;
+use App\Models\Client;
+use App\Models\ClientContact;
+use App\Models\Contract;
 use App\Models\CorrectiveAction;
 use App\Models\Deliverable;
 use App\Models\Document;
@@ -129,6 +132,8 @@ use App\Models\TrainingRecord;
 use App\Models\Transmittal;
 use App\Models\TransmittalItem;
 use App\Models\User;
+use App\Models\Vendor;
+use App\Models\VendorContact;
 use App\Models\Workflow;
 use App\Models\WorkflowInstance;
 use App\Models\WorkflowStage;
@@ -138,6 +143,9 @@ use App\Policies\AnnouncementPolicy;
 use App\Policies\ApprovalPolicy;
 use App\Policies\AuditLogPolicy;
 use App\Policies\ChangeRequestPolicy;
+use App\Policies\ClientContactPolicy;
+use App\Policies\ClientPolicy;
+use App\Policies\ContractPolicy;
 use App\Policies\CorrectiveActionPolicy;
 use App\Policies\DeliverablePolicy;
 use App\Policies\DocumentCategoryPolicy;
@@ -196,6 +204,8 @@ use App\Policies\TrainingRecordPolicy;
 use App\Policies\TransmittalItemPolicy;
 use App\Policies\TransmittalPolicy;
 use App\Policies\UserPolicy;
+use App\Policies\VendorContactPolicy;
+use App\Policies\VendorPolicy;
 use App\Policies\WorkflowInstancePolicy;
 use App\Policies\WorkflowPolicy;
 use App\Policies\WorkflowStageConditionPolicy;
@@ -371,6 +381,17 @@ class AppServiceProvider extends ServiceProvider
             'quality_inspection' => QualityInspection::class,
             'quality_inspection_item' => QualityInspectionItem::class,
             'ncr' => Ncr::class,
+
+            // --- Phase 5: the commercial foundation -----------------------------------
+            // `vendor` and `client` are the keys Phase 4 wrote its `party` morph against before
+            // either table existed. Every RFI, submittal and transmittal raised since then stores
+            // a NULL party_type and a typed party_name; from here on a user can pick a real record
+            // instead, and nothing already written has to move (§90).
+            'vendor' => Vendor::class,
+            'vendor_contact' => VendorContact::class,
+            'client' => Client::class,
+            'client_contact' => ClientContact::class,
+            'contract' => Contract::class,
         ]);
     }
 
@@ -508,6 +529,20 @@ class AppServiceProvider extends ServiceProvider
             QualityInspection::class => QualityInspectionPolicy::class,
             QualityInspectionItem::class => QualityInspectionItemPolicy::class,
             Ncr::class => NcrPolicy::class,
+
+            // --- Phase 5: the commercial foundation -----------------------------------
+            // VendorPolicy carries two abilities the base class cannot express: `viewBankDetails`,
+            // because where a supplier's money goes is a different question from who the supplier
+            // is (payment redirection fraud is a quiet edit by somebody who legitimately holds
+            // vendor.edit), and `blacklist`, because barring a company from every future order is
+            // a commercial decision rather than a field change. The two contact policies delegate
+            // to their parents for the same reason the task children do: a contact must never be
+            // readable by somebody the vendor or client is not.
+            Vendor::class => VendorPolicy::class,
+            VendorContact::class => VendorContactPolicy::class,
+            Client::class => ClientPolicy::class,
+            ClientContact::class => ClientContactPolicy::class,
+            Contract::class => ContractPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {

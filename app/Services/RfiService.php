@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Events\RfiAnswered;
 use App\Models\Rfi;
 use App\Models\User;
+use App\Services\Concerns\ResolvesParties;
 use App\Support\Enums\RfiKind;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
@@ -32,6 +33,8 @@ use Illuminate\Support\Facades\DB;
  */
 class RfiService extends RegisterService
 {
+    use ResolvesParties;
+
     protected function entityType(): string
     {
         return 'rfi';
@@ -42,10 +45,41 @@ class RfiService extends RegisterService
         return Rfi::class;
     }
 
-    /** @return array<int,string> */
+    /**
+     * The morph pair joins the protected list for the reason ContractService gives: two integers
+     * from a form must never reach a foreign key through `fill()`.
+     *
+     * @return array<int,string>
+     */
     protected function protectedAttributes(): array
     {
-        return ['status_id', 'answer', 'answered_by', 'answered_at'];
+        return ['status_id', 'answer', 'answered_by', 'answered_at', 'party_type', 'party_id'];
+    }
+
+    /**
+     * Point the query at a real client or vendor when the form named one.
+     *
+     * PHASE 4 LEFT THIS DELIBERATELY EMPTY — see the Rfi class docblock. Every query raised before
+     * today carries a typed `party_name` and a null morph, and nothing about them changes: the
+     * name is still what the register displays, and the link is an addition on top of it. That is
+     * the §90 payoff in its smallest form — "show me every open query against Kestrel Energy"
+     * becomes a real question rather than a text search over however people spelled it.
+     *
+     * @param  array<string,mixed>  $attributes
+     */
+    protected function beforeCreate(Model $record, array $attributes, User $actor): void
+    {
+        /** @var Rfi $record */
+        $this->nameParty($record, $this->resolveParty($record, $attributes), 'party_name', $attributes);
+    }
+
+    /** @param  array<string,mixed>  $attributes */
+    public function update(Model $record, array $attributes, User $actor): Model
+    {
+        /** @var Rfi $record */
+        $this->nameParty($record, $this->resolveParty($record, $attributes), 'party_name', $attributes);
+
+        return parent::update($record, $attributes, $actor);
     }
 
     protected function creationNarrative(Model $record, User $actor): string

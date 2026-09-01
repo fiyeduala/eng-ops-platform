@@ -263,7 +263,9 @@
                 <dl class="space-y-3 p-5 text-sm">
                     <div>
                         <dt class="text-xs uppercase tracking-wide text-[var(--text-muted)]">Organisation</dt>
-                        <dd class="mt-0.5 text-[var(--text-strong)]">{{ $transmittal->to_name }}</dd>
+                        <dd class="mt-0.5 text-[var(--text-strong)]">
+                            @include("partials.party-link", ["party" => $transmittal->toParty, "name" => $transmittal->to_name])
+                        </dd>
                     </div>
 
                     @if ($transmittal->to_attention)

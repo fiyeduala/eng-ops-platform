@@ -50,6 +50,13 @@ trait RegisterRecord
 {
     use Auditable, BelongsToOrganization, HasActivity, HasFactory, HasWorkflow, Scopeable, SoftDeletes;
 
+    /**
+     * Column listings, keyed by table. See registerColumnListing().
+     *
+     * @var array<string,array<string,int>>
+     */
+    private static array $registerColumnCache = [];
+
     // ------------------------------------------------------------------ relationships
 
     public function project(): BelongsTo
@@ -126,10 +133,41 @@ trait RegisterRecord
      */
     public function workflowConditionFields(): array
     {
-        return array_values(array_unique(array_merge(
+        $fields = array_values(array_unique(array_merge(
             ['status_id', 'confidentiality', 'org_unit_id', 'project_id', 'discipline_id'],
             $this->registerConditionFields(),
         )));
+
+        $columns = $this->registerColumnListing();
+
+        // Filtered against the table, because the spine is not universal. Phase 5 brings the first
+        // registers that are not attached to a project at all — a vendor and a client belong to the
+        // company, not to a job — and an unfiltered list would offer "Project" in the condition
+        // builder for a column that does not exist, then evaluate it as null for every vendor
+        // forever. A condition that silently never matches is worse than one that cannot be built.
+        // Dotted paths are relation walks and are left to the evaluator to resolve.
+        return array_values(array_filter(
+            $fields,
+            fn (string $field): bool => str_contains($field, '.') || isset($columns[$field]),
+        ));
+    }
+
+    /**
+     * This table's columns, as a lookup, read once per table per request.
+     *
+     * @return array<string,int>
+     */
+    protected function registerColumnListing(): array
+    {
+        $table = $this->getTable();
+
+        if (! isset(self::$registerColumnCache[$table])) {
+            self::$registerColumnCache[$table] = array_flip(
+                $this->getConnection()->getSchemaBuilder()->getColumnListing($table)
+            );
+        }
+
+        return self::$registerColumnCache[$table];
     }
 
     /**

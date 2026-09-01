@@ -558,6 +558,104 @@ final class StatusCatalogue
                     ['draft', 'withdrawn', 'Withdraw', 'ncr.edit', true],
                 ],
             ],
+
+            /*
+             * --- Phase 5: the commercial foundation ----------------------------------
+             *
+             * A VENDOR'S STATUS IS ITS PREQUALIFICATION POSITION, and nothing else. "Blacklisted"
+             * appears here as well as in its own column because a buyer scanning the register reads
+             * the status chip, not a boolean three columns to the right — but the column is what
+             * procurement actually checks, and the two are kept in step by VendorService.
+             *
+             * `provisional` exists because most companies have a category of supplier they will use
+             * once, under supervision, before committing to a full prequalification. Without it
+             * they would either approve people they have not assessed or refuse work they have
+             * already promised — which is how a prequalification process gets quietly abandoned.
+             */
+            'vendor' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'under_review' => ['label' => 'Under review', 'color' => 'brand'],
+                    'provisional' => ['label' => 'Provisionally approved', 'color' => 'warning'],
+                    'approved' => ['label' => 'Approved', 'color' => 'success'],
+                    'suspended' => ['label' => 'Suspended', 'color' => 'warning'],
+                    'blacklisted' => ['label' => 'Blacklisted', 'color' => 'danger'],
+                    'archived' => ['label' => 'Archived', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['draft', 'under_review', 'Submit for prequalification', 'vendor.edit'],
+                    ['under_review', 'provisional', 'Approve provisionally', 'vendor.manage'],
+                    ['under_review', 'approved', 'Approve', 'vendor.manage'],
+                    ['provisional', 'approved', 'Approve fully', 'vendor.manage'],
+                    ['under_review', 'draft', 'Return for more information', 'vendor.manage', true],
+                    ['approved', 'suspended', 'Suspend', 'vendor.manage', true],
+                    ['provisional', 'suspended', 'Suspend', 'vendor.manage', true],
+                    ['suspended', 'approved', 'Reinstate', 'vendor.manage', true],
+                    // Blacklisting is reached through VendorService, which demands a reason and
+                    // stamps the column procurement reads. It is listed here so the chip has
+                    // somewhere to be, not as a route somebody clicks past.
+                    ['archived', 'under_review', 'Bring back onto the register', 'vendor.manage', true],
+                    [null, 'archived', 'Archive', 'vendor.manage', true],
+                ],
+            ],
+
+            /*
+             * A CLIENT HAS ALMOST NO PROCESS, and pretending otherwise would be theatre. Most
+             * companies distinguish a prospect from a live account and an account they have stopped
+             * trading with; anything finer than that belongs in a CRM.
+             */
+            'client' => [
+                'statuses' => [
+                    'prospect' => ['label' => 'Prospect', 'color' => 'neutral', 'initial' => true],
+                    'active' => ['label' => 'Active', 'color' => 'success'],
+                    'dormant' => ['label' => 'Dormant', 'color' => 'warning'],
+                    'closed' => ['label' => 'Closed', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['prospect', 'active', 'Mark as active', 'client.edit'],
+                    ['active', 'dormant', 'Mark as dormant', 'client.edit'],
+                    ['dormant', 'active', 'Reactivate', 'client.edit'],
+                    [null, 'closed', 'Close the account', 'client.manage', true],
+                    ['closed', 'active', 'Reopen the account', 'client.manage', true],
+                ],
+            ],
+
+            /*
+             * `expired` IS NOT A STATUS ANYBODY SETS. A contract passes its end date whether or not
+             * somebody remembers to click something, so expiry is read from `ends_on` — see
+             * Contract::hasExpired(). What the graph records instead is the position in the
+             * lifecycle a person is responsible for: drafted, out for signature, live, suspended,
+             * completed, terminated.
+             *
+             * TERMINATION IS SEPARATE FROM COMPLETION and both are terminal. "The job finished" and
+             * "we stopped it" are the same row in a badly designed register and completely
+             * different conversations in a real one.
+             */
+            'contract' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'in_review' => ['label' => 'In review', 'color' => 'brand'],
+                    'awaiting_signature' => ['label' => 'Awaiting signature', 'color' => 'warning'],
+                    'active' => ['label' => 'Active', 'color' => 'success'],
+                    'suspended' => ['label' => 'Suspended', 'color' => 'warning'],
+                    'completed' => ['label' => 'Completed', 'color' => 'success', 'terminal' => true],
+                    'terminated' => ['label' => 'Terminated', 'color' => 'danger', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['draft', 'in_review', 'Send for review', 'contract.edit'],
+                    ['in_review', 'draft', 'Return for amendment', 'contract.approve', true],
+                    ['in_review', 'awaiting_signature', 'Approve for signature', 'contract.approve'],
+                    ['awaiting_signature', 'active', 'Record as executed', 'contract.manage'],
+                    ['active', 'suspended', 'Suspend', 'contract.manage', true],
+                    ['suspended', 'active', 'Resume', 'contract.manage', true],
+                    ['active', 'completed', 'Complete', 'contract.manage'],
+                    // Reopening a completed contract rewrites what every commercial report said
+                    // last month, so it takes the narrowest permission and demands a reason.
+                    ['completed', 'active', 'Reopen', 'contract.manage', true],
+                    ['active', 'terminated', 'Terminate', 'contract.manage', true],
+                    ['suspended', 'terminated', 'Terminate', 'contract.manage', true],
+                ],
+            ],
         ];
     }
 

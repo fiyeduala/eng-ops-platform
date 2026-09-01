@@ -250,7 +250,9 @@
                         </span>
                     </x-register.fact>
 
-                    <x-register.fact label="Party" :value="$rfi->party_name"/>
+                    <x-register.fact label="Party">
+                        @include("partials.party-link", ["party" => $rfi->party, "name" => $rfi->party_name])
+                    </x-register.fact>
 
                     <x-register.fact label="Status">
                         @if ($rfi->status)

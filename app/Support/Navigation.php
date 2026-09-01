@@ -208,6 +208,20 @@ class Navigation
                 ],
             ],
             [
+                // Commercial. Clients before vendors because most people arrive here from a project
+                // and the project has a client; contracts last because you reach one through the
+                // party it is with far more often than you go looking for it by number.
+                'label' => 'Commercial',
+                'items' => [
+                    ['label' => 'Clients', 'route' => 'clients.index', 'icon' => 'briefcase',
+                        'permission' => 'client.view', 'active' => 'clients.*'],
+                    ['label' => 'Vendors', 'route' => 'vendors.index', 'icon' => 'building',
+                        'permission' => 'vendor.view', 'active' => 'vendors.*'],
+                    ['label' => 'Contracts', 'route' => 'contracts.index', 'icon' => 'gavel',
+                        'permission' => 'contract.view', 'active' => 'contracts.*'],
+                ],
+            ],
+            [
                 'label' => 'Administration',
                 'items' => [
                     ['label' => 'User accounts', 'route' => 'users.index', 'icon' => 'key',

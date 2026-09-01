@@ -143,7 +143,7 @@ class SubmittalController extends RegisterController
         $user = $request->user();
 
         $submittal->loadMissing([
-            'status', 'project', 'discipline', 'orgUnit',
+            'status', 'project', 'discipline', 'orgUnit', 'party',
             'submitter:id,name', 'reviewer:id,name', 'creator:id,name',
             'resubmittalOf:id,number,title',
             'items.documentVersion.document:id,number,title,confidentiality',
@@ -200,7 +200,11 @@ class SubmittalController extends RegisterController
 
         $this->assertPlacementIsReachable($data);
 
-        $submittal = $this->submittals->create($data, $request->user());
+        try {
+            $submittal = $this->submittals->create($data, $request->user());
+        } catch (\DomainException $e) {
+            return back()->withInput()->withErrors(['party_id' => $e->getMessage()]);
+        }
 
         return redirect($this->showRoute($submittal))
             ->with('status', $submittal->displayName().' has been drafted. Add the package contents, then submit it.');
@@ -224,7 +228,11 @@ class SubmittalController extends RegisterController
 
         $this->assertPlacementIsReachable($data);
 
-        $this->submittals->update($submittal, $data, $request->user());
+        try {
+            $this->submittals->update($submittal, $data, $request->user());
+        } catch (\DomainException $e) {
+            return back()->withInput()->withErrors(['party_id' => $e->getMessage()]);
+        }
 
         return redirect($this->showRoute($submittal))
             ->with('status', $submittal->displayName().' has been updated.');
@@ -454,6 +462,7 @@ class SubmittalController extends RegisterController
     {
         return [
             ...$this->placementOptions($request->user()),
+            ...$this->partyOptions($request->user()),
             'types' => $this->typeOptions(),
             'nextNumber' => $this->numbers->preview('submittal'),
         ];

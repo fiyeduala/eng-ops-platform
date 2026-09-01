@@ -54,11 +54,14 @@
         </div>
 
         <div class="space-y-5 p-5">
-            <x-field label="Reviewing party" name="party_name"
-                     help="Free text, because the reviewer is nearly always somebody this platform has never heard of — a consultant, an authority, one named engineer at the client.">
-                <x-input name="party_name" :value="$submittal->party_name" maxlength="200"
-                         placeholder="e.g. Meridian Consulting Engineers"/>
-            </x-field>
+            @include("partials.party-picker", [
+                "typeName" => "party_type",
+                "idName" => "party_id",
+                "nameName" => "party_name",
+                "label" => "Reviewing party",
+                "record" => $submittal,
+                "help" => "Type the name — the reviewer is often somebody this platform has never heard of, a consultant or one named engineer at the client. Link it to a register when there is a record to link to.",
+            ])
 
             <div class="grid gap-5 sm:grid-cols-2">
                 <x-field label="Project" name="project_id">

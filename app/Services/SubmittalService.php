@@ -9,6 +9,7 @@ use App\Models\DocumentVersion;
 use App\Models\Submittal;
 use App\Models\SubmittalItem;
 use App\Models\User;
+use App\Services\Concerns\ResolvesParties;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 
@@ -28,6 +29,8 @@ use Illuminate\Support\Facades\DB;
  */
 class SubmittalService extends RegisterService
 {
+    use ResolvesParties;
+
     protected function entityType(): string
     {
         return 'submittal';
@@ -41,7 +44,37 @@ class SubmittalService extends RegisterService
     /** @return array<int,string> */
     protected function protectedAttributes(): array
     {
-        return ['status_id', 'review_code', 'review_comment', 'reviewed_by', 'reviewed_at', 'resubmittal_of_id'];
+        return [
+            'status_id', 'review_code', 'review_comment', 'reviewed_by', 'reviewed_at',
+            'resubmittal_of_id',
+            // Two integers from a form must never reach a foreign key through fill(). See
+            // ResolvesParties, and ContractService for the failure it exists to prevent.
+            'party_type', 'party_id',
+        ];
+    }
+
+    /**
+     * The reviewing party, linked to a real record when the form named one.
+     *
+     * A submittal is reviewed by the client's engineer far more often than by anybody else, and
+     * "what is sitting with Kestrel" is the question this register is asked every week. Until now
+     * it could only be answered by matching however each document controller spelled the name.
+     *
+     * @param  array<string,mixed>  $attributes
+     */
+    protected function beforeCreate(Model $record, array $attributes, User $actor): void
+    {
+        /** @var Submittal $record */
+        $this->nameParty($record, $this->resolveParty($record, $attributes), 'party_name', $attributes);
+    }
+
+    /** @param  array<string,mixed>  $attributes */
+    public function update(Model $record, array $attributes, User $actor): Model
+    {
+        /** @var Submittal $record */
+        $this->nameParty($record, $this->resolveParty($record, $attributes), 'party_name', $attributes);
+
+        return parent::update($record, $attributes, $actor);
     }
 
     protected function creationNarrative(Model $record, User $actor): string

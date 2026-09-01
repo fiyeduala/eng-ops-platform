@@ -141,7 +141,7 @@ class RfiController extends RegisterController
         $user = $request->user();
 
         $rfi->loadMissing([
-            'status', 'project', 'discipline', 'orgUnit',
+            'status', 'project', 'discipline', 'orgUnit', 'party',
             'raiser:id,name', 'answerer:id,name', 'creator:id,name',
         ]);
 
@@ -191,7 +191,11 @@ class RfiController extends RegisterController
 
         $this->assertPlacementIsReachable($data);
 
-        $rfi = $this->rfis->create($data, $request->user());
+        try {
+            $rfi = $this->rfis->create($data, $request->user());
+        } catch (\DomainException $e) {
+            return back()->withInput()->withErrors(['party_id' => $e->getMessage()]);
+        }
 
         return redirect($this->showRoute($rfi))
             ->with('status', $rfi->displayName().' has been raised.');
@@ -225,7 +229,11 @@ class RfiController extends RegisterController
 
         $this->assertPlacementIsReachable($data);
 
-        $this->rfis->update($rfi, $data, $request->user());
+        try {
+            $this->rfis->update($rfi, $data, $request->user());
+        } catch (\DomainException $e) {
+            return back()->withInput()->withErrors(['party_id' => $e->getMessage()]);
+        }
 
         return redirect($this->showRoute($rfi))
             ->with('status', $rfi->displayName().' has been updated.');
@@ -348,6 +356,7 @@ class RfiController extends RegisterController
     {
         return [
             ...$this->placementOptions($request->user()),
+            ...$this->partyOptions($request->user()),
             'kinds' => RfiKind::options(),
             'directions' => RfiDirection::options(),
         ];

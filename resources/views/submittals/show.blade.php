@@ -319,7 +319,9 @@
                     <x-register.fact label="Type" :value="$typeLabel"/>
                     <x-register.fact label="Revision" :value="$submittal->revision"/>
                     <x-register.fact label="Attempt" :value="$attemptNumber"/>
-                    <x-register.fact label="Reviewing party" :value="$submittal->party_name"/>
+                    <x-register.fact label="Reviewing party">
+                        @include("partials.party-link", ["party" => $submittal->party, "name" => $submittal->party_name])
+                    </x-register.fact>
                     <x-register.fact label="Project" :value="$submittal->project?->displayName()"/>
                     <x-register.fact label="Discipline" :value="$submittal->discipline?->name"/>
                     <x-register.fact label="Department" :value="$submittal->orgUnit?->name"/>

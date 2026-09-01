@@ -10,6 +10,9 @@ use App\Http\Controllers\Auth\PasswordController;
 use App\Http\Controllers\Auth\PasswordResetController;
 use App\Http\Controllers\CalendarController;
 use App\Http\Controllers\ChangeRequestController;
+use App\Http\Controllers\ClientContactController;
+use App\Http\Controllers\ClientController;
+use App\Http\Controllers\ContractController;
 use App\Http\Controllers\CorrectiveActionController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DeliverableController;
@@ -51,6 +54,8 @@ use App\Http\Controllers\TrainingCourseController;
 use App\Http\Controllers\TrainingRecordController;
 use App\Http\Controllers\TransmittalController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\VendorContactController;
+use App\Http\Controllers\VendorController;
 use App\Http\Controllers\WorkflowController;
 use App\Http\Controllers\WorkflowStageController;
 use Illuminate\Support\Facades\Route;
@@ -1370,6 +1375,142 @@ Route::middleware(['auth', 'password.current'])->group(function () {
 
         Route::post('ncrs/{ncr}/actions', [CorrectiveActionController::class, 'storeForNcr'])
             ->middleware('permission:corrective_action.create')->name('ncrs.actions.store');
+    });
+
+    // --- clients -------------------------------------------------------------------------------
+
+    Route::middleware('permission:client.view')->group(function () {
+        Route::get('clients', [ClientController::class, 'index'])->name('clients.index');
+        Route::get('clients/{client}', [ClientController::class, 'show'])
+            ->whereNumber('client')->name('clients.show');
+    });
+
+    Route::get('clients/create', [ClientController::class, 'create'])
+        ->middleware('permission:client.create')->name('clients.create');
+    Route::post('clients', [ClientController::class, 'store'])
+        ->middleware('permission:client.create')->name('clients.store');
+
+    Route::whereNumber('client')->group(function () {
+        Route::get('clients/{client}/edit', [ClientController::class, 'edit'])
+            ->middleware('permission:client.edit')->name('clients.edit');
+        Route::put('clients/{client}', [ClientController::class, 'update'])
+            ->middleware('permission:client.edit')->name('clients.update');
+        Route::delete('clients/{client}', [ClientController::class, 'destroy'])
+            ->middleware('permission:client.delete')->name('clients.destroy');
+
+        Route::post('clients/{client}/transition', [ClientController::class, 'transition'])
+            ->middleware('permission:client.edit')->name('clients.transition');
+
+        // Naming the relationship owner GRANTS VISIBILITY — `relationship_owner_id` is what the
+        // `assigned` access scope reads — so it is separated from `client.edit` in the same way
+        // and for the same reason role assignment is separated from editing a user (§10, §84).
+        Route::post('clients/{client}/owner', [ClientController::class, 'assignOwner'])
+            ->middleware('permission:client.manage')->name('clients.owner.assign');
+
+        Route::post('clients/{client}/contacts', [ClientContactController::class, 'store'])
+            ->middleware('permission:client.edit')->name('clients.contacts.store');
+    });
+
+    Route::whereNumber('contact')->group(function () {
+        Route::put('client-contacts/{contact}', [ClientContactController::class, 'update'])
+            ->middleware('permission:client.edit')->name('client-contacts.update');
+        Route::delete('client-contacts/{contact}', [ClientContactController::class, 'destroy'])
+            ->middleware('permission:client.edit')->name('client-contacts.destroy');
+    });
+
+    // --- vendors -------------------------------------------------------------------------------
+
+    Route::middleware('permission:vendor.view')->group(function () {
+        Route::get('vendors', [VendorController::class, 'index'])->name('vendors.index');
+        Route::get('vendors/{vendor}', [VendorController::class, 'show'])
+            ->whereNumber('vendor')->name('vendors.show');
+    });
+
+    Route::get('vendors/create', [VendorController::class, 'create'])
+        ->middleware('permission:vendor.create')->name('vendors.create');
+    Route::post('vendors', [VendorController::class, 'store'])
+        ->middleware('permission:vendor.create')->name('vendors.store');
+
+    Route::whereNumber('vendor')->group(function () {
+        Route::get('vendors/{vendor}/edit', [VendorController::class, 'edit'])
+            ->middleware('permission:vendor.edit')->name('vendors.edit');
+        Route::put('vendors/{vendor}', [VendorController::class, 'update'])
+            ->middleware('permission:vendor.edit')->name('vendors.update');
+        Route::delete('vendors/{vendor}', [VendorController::class, 'destroy'])
+            ->middleware('permission:vendor.delete')->name('vendors.destroy');
+
+        Route::post('vendors/{vendor}/transition', [VendorController::class, 'transition'])
+            ->middleware('permission:vendor.edit')->name('vendors.transition');
+
+        // THE FRAUD SURFACE. `vendor.bank` guards the GET as well as the PUT, because serving the
+        // form pre-filled hands over the account number the permission exists to protect — and the
+        // permission covers reading for the same reason. Invoice-redirection fraud does not need
+        // write access to be profitable; it needs somebody's real details and a plausible email.
+        Route::get('vendors/{vendor}/bank', [VendorController::class, 'editBankDetails'])
+            ->middleware('permission:vendor.bank')->name('vendors.bank.edit');
+        Route::put('vendors/{vendor}/bank', [VendorController::class, 'updateBankDetails'])
+            ->middleware('permission:vendor.bank')->name('vendors.bank.update');
+
+        // Barring a company from work, and letting it back. Both demand a reason, both are
+        // recorded, and neither is reachable through the ordinary edit form.
+        Route::post('vendors/{vendor}/blacklist', [VendorController::class, 'blacklist'])
+            ->middleware('permission:vendor.blacklist')->name('vendors.blacklist');
+        Route::delete('vendors/{vendor}/blacklist', [VendorController::class, 'liftBlacklist'])
+            ->middleware('permission:vendor.blacklist')->name('vendors.blacklist.lift');
+
+        // Filing the assessment is clerical; ACCEPTING it is the status transition above, gated on
+        // vendor.manage. A coordinator files the certificate, a manager approves the supplier.
+        Route::post('vendors/{vendor}/prequalification', [VendorController::class, 'prequalify'])
+            ->middleware('permission:vendor.manage')->name('vendors.prequalify');
+
+        Route::post('vendors/{vendor}/evaluations', [VendorController::class, 'evaluate'])
+            ->middleware('permission:vendor.evaluate')->name('vendors.evaluate');
+
+        Route::post('vendors/{vendor}/contacts', [VendorContactController::class, 'store'])
+            ->middleware('permission:vendor.edit')->name('vendors.contacts.store');
+    });
+
+    Route::whereNumber('contact')->group(function () {
+        Route::put('vendor-contacts/{contact}', [VendorContactController::class, 'update'])
+            ->middleware('permission:vendor.edit')->name('vendor-contacts.update');
+        Route::delete('vendor-contacts/{contact}', [VendorContactController::class, 'destroy'])
+            ->middleware('permission:vendor.edit')->name('vendor-contacts.destroy');
+    });
+
+    // --- contracts -----------------------------------------------------------------------------
+    //
+    // One register for both directions. `permission:contract.view` reaches the pages; the policy
+    // then decides each record, and ContractPolicy::viewFinancials() decides separately whether the
+    // reader sees the value. A contract defaults to CONFIDENTIAL, so route middleware here is the
+    // outermost of three filters rather than the meaningful one (§6, §84).
+
+    Route::middleware('permission:contract.view')->group(function () {
+        Route::get('contracts', [ContractController::class, 'index'])->name('contracts.index');
+        Route::get('contracts/{contract}', [ContractController::class, 'show'])
+            ->whereNumber('contract')->name('contracts.show');
+    });
+
+    Route::get('contracts/create', [ContractController::class, 'create'])
+        ->middleware('permission:contract.create')->name('contracts.create');
+    Route::post('contracts', [ContractController::class, 'store'])
+        ->middleware('permission:contract.create')->name('contracts.store');
+
+    Route::whereNumber('contract')->group(function () {
+        Route::get('contracts/{contract}/edit', [ContractController::class, 'edit'])
+            ->middleware('permission:contract.edit')->name('contracts.edit');
+        Route::put('contracts/{contract}', [ContractController::class, 'update'])
+            ->middleware('permission:contract.edit')->name('contracts.update');
+        Route::delete('contracts/{contract}', [ContractController::class, 'destroy'])
+            ->middleware('permission:contract.delete')->name('contracts.destroy');
+
+        Route::post('contracts/{contract}/transition', [ContractController::class, 'transition'])
+            ->middleware('permission:contract.edit')->name('contracts.transition');
+
+        // Retention is money held back from somebody who has already done the work. Moving it takes
+        // `contract.manage`, not `contract.edit`, because the balance is what a subcontractor will
+        // eventually be paid — and the service refuses to release more than is held.
+        Route::post('contracts/{contract}/retention', [ContractController::class, 'moveRetention'])
+            ->middleware('permission:contract.manage')->name('contracts.retention.move');
     });
 
     // --- approvals -----------------------------------------------------------------------------

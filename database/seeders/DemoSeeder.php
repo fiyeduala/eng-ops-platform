@@ -12,6 +12,8 @@ use App\Engines\Organization\OrganizationProvisioner;
 use App\Engines\Organization\OrgUnitService;
 use App\Engines\Workflow\WorkflowEngine;
 use App\Models\Announcement;
+use App\Models\Client;
+use App\Models\Contract;
 use App\Models\Document;
 use App\Models\DocumentCategory;
 use App\Models\DocumentVersion;
@@ -26,17 +28,22 @@ use App\Models\Position;
 use App\Models\Project;
 use App\Models\ProjectRole;
 use App\Models\ProjectType;
+use App\Models\Rfi;
 use App\Models\Role;
 use App\Models\Status;
+use App\Models\Submittal;
 use App\Models\Task;
 use App\Models\TrainingCourse;
 use App\Models\Transmittal;
 use App\Models\User;
+use App\Models\Vendor;
 use App\Models\Workflow;
 use App\Models\WorkflowStage;
 use App\Models\WorkflowStageInstance;
 use App\Services\AnnouncementService;
 use App\Services\ChangeRequestService;
+use App\Services\ClientService;
+use App\Services\ContractService;
 use App\Services\CorrectiveActionService;
 use App\Services\DeliverableService;
 use App\Services\DocumentService;
@@ -63,6 +70,7 @@ use App\Services\TemplateService;
 use App\Services\ToolboxTalkService;
 use App\Services\TrainingRecordService;
 use App\Services\TransmittalService;
+use App\Services\VendorService;
 use App\Services\WorkflowDefinitionService;
 use App\Support\Enums\ChangeDisposition;
 use App\Support\Enums\Decision;
@@ -188,6 +196,12 @@ class DemoSeeder extends Seeder
         $this->seedMeridianQuality($meridian);
         $this->seedKestrelHse($kestrel);
 
+        // Commercial last of the registers, because it is the one that reaches back: it creates the
+        // clients and contracts the earlier chapters have been naming in free text, then points the
+        // projects and the correspondence at them. Running it earlier would leave nothing to link.
+        $this->seedMeridianCommercial($meridian);
+        $this->seedKestrelCommercial($kestrel);
+
         // The rows above were written straight to the database, so nothing observed them happening.
         // A demo whose record timelines are all blank teaches the wrong lesson about Engine 4 — the
         // timeline is meant to be the first thing you see on a record, and an empty one looks like
@@ -199,7 +213,7 @@ class DemoSeeder extends Seeder
         $this->command?->info('Demo organizations created:');
         $this->command?->table(
             ['Organization', 'Structure', 'Units', 'People', 'Projects', 'Tasks', 'Memos/notices/meetings',
-                'Docs/awaiting/issued', 'Sign in with'],
+                'Docs/awaiting/issued', 'Clients/vendors/contracts', 'Sign in with'],
             [
                 ['Meridian Engineering & Infrastructure', '4-level (division→team)',
                     ...$this->tally($meridian), 'a.okonkwo@meridian-eng.example'],
@@ -223,7 +237,7 @@ class DemoSeeder extends Seeder
      * behaving correctly; a seeder summary that reported real numbers from nowhere would mean
      * the isolation guarantee had a hole in it.
      *
-     * @return array{0:int,1:int,2:int,3:int,4:string,5:string}
+     * @return array{0:int,1:int,2:int,3:int,4:string,5:string,6:string}
      */
     private function tally(Organization $organization): array
     {
@@ -246,6 +260,12 @@ class DemoSeeder extends Seeder
                 // counting it here would promise the evaluator an approval that is not there.
                 WorkflowStageInstance::query()->where('status', WorkflowStageInstance::STATUS_PENDING)->count(),
                 Transmittal::query()->whereNotNull('issued_at')->count(),
+            ),
+            sprintf(
+                '%d / %d / %d',
+                Client::query()->count(),
+                Vendor::query()->count(),
+                Contract::query()->count(),
             ),
         ]);
     }
@@ -2576,7 +2596,7 @@ class DemoSeeder extends Seeder
                 'project_id' => $dte->id,
                 'discipline_id' => $unit['ENG-MP']->id,
                 'org_unit_id' => $unit['ENG']->id,
-                'party_name' => 'Rivers Petroleum Development Company',
+                'party_name' => 'Riverine Petroleum Development Company',
                 'raised_by' => $pipingEngineer->id,
                 'raised_on' => now()->subDays(19)->toDateString(),
                 'required_by' => now()->subDays(5)->toDateString(),
@@ -2645,7 +2665,7 @@ class DemoSeeder extends Seeder
                 'project_id' => $dte->id,
                 'discipline_id' => $unit['ENG-MP']->id,
                 'org_unit_id' => $unit['ENG']->id,
-                'party_name' => 'Rivers Petroleum Development Company',
+                'party_name' => 'Riverine Petroleum Development Company',
                 'required_by' => now()->subDays(9)->toDateString(),
             ], $documentController);
 
@@ -2685,7 +2705,7 @@ class DemoSeeder extends Seeder
                 'project_id' => $dte->id,
                 'discipline_id' => $unit['ENG-MP']->id,
                 'org_unit_id' => $unit['ENG']->id,
-                'party_name' => 'Rivers Petroleum Development Company',
+                'party_name' => 'Riverine Petroleum Development Company',
                 'required_by' => now()->addDays(6)->toDateString(),
             ], $documentController);
 
@@ -2926,7 +2946,7 @@ class DemoSeeder extends Seeder
                 'category' => 'Technical',
                 'validity_months' => 12,
                 'is_mandatory' => true,
-                'provider' => 'Rivers Petroleum Development Company',
+                'provider' => 'Riverine Petroleum Development Company',
                 'duration_hours' => 4,
                 'sort_order' => 5,
             ]);
@@ -4105,6 +4125,764 @@ class DemoSeeder extends Seeder
                 'notes' => 'Renewal booked. Not to operate a MEWP after the expiry date.',
             ], $complianceHead);
         });
+    }
+
+    // ================================================================= who they trade with
+
+    /*
+     * COMMERCIAL IS WHERE THE DEMO STOPS BEING A COLLECTION OF REGISTERS (§90).
+     *
+     * Up to here the two companies had clients and contracts as TYPED TEXT — `client_name` on a
+     * project, `contract_reference` beside it, a party name on every RFI and transmittal. That is
+     * genuinely how the earlier phases had to work, and it is also exactly what an unconnected
+     * system looks like: three spellings of the same company across three screens and no way to
+     * ask what is outstanding with any of them.
+     *
+     * These two chapters promote those strings to records and then POINT THE OLD ROWS AT THEM, so
+     * the demo shows the join rather than describing it. Opening Riverine Petroleum lists the job
+     * and the contract with the retention held against it, and every RFI, submittal and transmittal
+     * that named them now opens the client from the correspondence — a round trip that did not
+     * exist in either direction an hour ago.
+     *
+     * THE TWO COMPANIES ARE DELIBERATELY UNALIKE HERE TOO (§73). Meridian runs a full
+     * prequalification process — approvals, expiry dates, ratings, one blacklisting — and its
+     * register carries a supplier in nearly every state the status graph has. Kestrel runs no
+     * prequalification at all: two suppliers, both usable, neither ever assessed. Both companies
+     * work on the same code because `Vendor::canBeUsed()` defaults permissive and lets the
+     * assessment mean something only where somebody actually does it.
+     *
+     * PERMISSIONS ARE REAL HERE. StatusMachine::transition() checks the actor, so every move below
+     * is made by somebody whose ROLE TEMPLATE grants it — the procurement officer registers a
+     * supplier and cannot approve one, the procurement manager approves, the managing director
+     * approves contracts for signature and finance records them as executed. If a default template
+     * ever loses one of those grants this seeder fails loudly, rather than quietly producing a
+     * register nobody could have produced by hand.
+     */
+    private function seedMeridianCommercial(Organization $organization): void
+    {
+        $this->context->within($organization, function () {
+            $this->bootDelivery();
+
+            $vendors = app(VendorService::class);
+            $clients = app(ClientService::class);
+            $contracts = app(ContractService::class);
+
+            $staff = $this->staff();
+            $unit = $this->unitsByCode();
+            $job = Project::query()->get()->keyBy('code');
+
+            $md = $this->accountOf($staff, 'MEI-0001');             // Adaeze Okonkwo
+            $ops = $this->accountOf($staff, 'MEI-0003');            // Chinedu Balogun
+            $engManager = $this->accountOf($staff, 'MEI-0004');     // Farida Yusuf
+            $projectManager = $this->accountOf($staff, 'MEI-0011'); // Daniel Mbeki
+            $qaManager = $this->accountOf($staff, 'MEI-0015');      // Yemi Bakare
+            $finance = $this->accountOf($staff, 'MEI-0018');        // Victor Anyanwu
+            $prcManager = $this->accountOf($staff, 'MEI-0019');     // Bisi Adeleke
+            $prcOfficer = $this->accountOf($staff, 'MEI-0020');     // Uche Nnamdi
+
+            // ------------------------------------------------------------------- clients
+            // Note who opens the account: operations, not procurement. The client register and the
+            // vendor register are owned by different parts of the company, and the role templates
+            // say so rather than leaving both to whoever happens to be an administrator.
+            $riverine = $clients->create([
+                'name' => 'Riverine Petroleum Development Company',
+                'legal_name' => 'Riverine Petroleum Development Company Limited',
+                'code' => 'RPDC',
+                'industry' => 'Oil & gas — upstream',
+                'client_type' => 'operator',
+                'registration_no' => 'RC 418772',
+                'tax_id' => 'TIN 10294857-0001',
+                'email' => 'contracts@rpdc.example',
+                'phone' => '+234 1 271 4400',
+                'website' => 'https://rpdc.example',
+                'address' => "Plot 4, Riverine House\nTrans-Amadi Industrial Layout",
+                'city' => 'Port Harcourt',
+                'state' => 'Rivers',
+                'country' => 'Nigeria',
+                'payment_terms_days' => 45,
+                'credit_limit' => 2500000000,
+                'org_unit_id' => $unit['OPS']->id,
+                'notes' => 'Their contracts department insists on the contract number appearing on '
+                    .'every transmittal cover sheet. Two packages live at present.',
+            ], $ops);
+
+            $this->moveCommercial($riverine, 'client', 'active', $ops,
+                'Delta Terminal contract executed. Account live.');
+
+            $clients->assignOwner($riverine, $ops, $ops);
+
+            $clients->addContact($riverine, [
+                'name' => 'Ijeoma Chukwu',
+                'position' => 'Contracts Manager',
+                'email' => 'i.chukwu@rpdc.example',
+                'phone' => '+234 803 411 2288',
+                'is_primary' => true,
+                'notes' => 'All contractual correspondence. Copies the project engineer on technical '
+                    .'queries but will not answer them herself.',
+            ], $ops);
+
+            $clients->addContact($riverine, [
+                'name' => 'Femi Ogundipe',
+                'position' => 'Company Site Representative, Delta Terminal',
+                'email' => 'f.ogundipe@rpdc.example',
+                'phone' => '+234 802 664 9137',
+                'notes' => 'On site four days a week. Signs daily records and witness points.',
+            ], $projectManager);
+
+            // The consultancy client. The job finished; the account has not closed, because the
+            // repair strategy that survey produced is expected to become a tender.
+            $ogunu = $clients->create([
+                'name' => 'Ogunu Port Services Limited',
+                'legal_name' => 'Ogunu Port Services Limited',
+                'code' => 'OPS-CL',
+                'industry' => 'Ports & marine terminals',
+                'client_type' => 'private',
+                'registration_no' => 'RC 902114',
+                'email' => 'engineering@ogunuport.example',
+                'phone' => '+234 53 250 118',
+                'address' => 'Ogunu Jetty Complex, Warri South',
+                'city' => 'Warri',
+                'state' => 'Delta',
+                'country' => 'Nigeria',
+                'payment_terms_days' => 30,
+                'org_unit_id' => $unit['ENG']->id,
+                'notes' => 'Condition assessment delivered. Repair works expected to tender next '
+                    .'quarter on the strength of it.',
+            ], $ops);
+
+            $this->moveCommercial($ogunu, 'client', 'active', $ops, 'Survey commissioned.');
+            $clients->assignOwner($ogunu, $engManager, $ops);
+
+            $clients->addContact($ogunu, [
+                'name' => 'Bright Eweka',
+                'position' => 'Harbour Engineer',
+                'email' => 'b.eweka@ogunuport.example',
+                'phone' => '+234 806 512 7740',
+                'is_primary' => true,
+            ], $ops);
+
+            // A PROSPECT, and left as one. A client register holding nothing but live accounts is a
+            // register somebody keeps a spreadsheet beside — which is how the spreadsheet ends up
+            // being the real system.
+            $lekki = $clients->create([
+                'name' => 'Lekki Industrial Park Development Company',
+                'code' => 'LIPD',
+                'industry' => 'Industrial estates',
+                'client_type' => 'private',
+                'email' => 'projects@lekki-park.example',
+                'city' => 'Lagos',
+                'state' => 'Lagos',
+                'country' => 'Nigeria',
+                'org_unit_id' => $unit['OPS']->id,
+                'notes' => 'Prequalification pack submitted. Tender for the phase 2 utilities '
+                    .'corridor expected in the new year.',
+            ], $ops);
+
+            $clients->assignOwner($lekki, $ops, $ops);
+
+            // ------------------------------------------------------------------- vendors
+            // Registered by the procurement OFFICER and approved by the procurement MANAGER. The
+            // officer's template grants `vendor.create` and not `vendor.manage`, so the split below
+            // is enforced by the engine rather than illustrated by convention — segregation of
+            // duties, in place before the procurement module that leans on it exists.
+            $sahara = $vendors->create([
+                'name' => 'Sahara Steel & Fabrication Limited',
+                'legal_name' => 'Sahara Steel & Fabrication Limited',
+                'code' => 'SSF',
+                'category' => 'Structural steel & tank fabrication',
+                'vendor_type' => 'subcontractor',
+                'registration_no' => 'RC 226901',
+                'tax_id' => 'TIN 20871144-0001',
+                'email' => 'tenders@saharasteel.example',
+                'phone' => '+234 1 448 7120',
+                'address' => 'KM 18 Lagos–Badagry Expressway',
+                'city' => 'Lagos',
+                'state' => 'Lagos',
+                'country' => 'Nigeria',
+                'payment_terms_days' => 30,
+                'credit_limit' => 400000000,
+                'org_unit_id' => $unit['PRC']->id,
+                'notes' => 'ASME U-stamp holder. Two shops, one of which is committed elsewhere '
+                    .'until the end of the quarter.',
+            ], $prcOfficer);
+
+            $this->moveCommercial($sahara, 'vendor', 'under_review', $prcOfficer,
+                'Prequalification pack received in full.');
+            $this->moveCommercial($sahara, 'vendor', 'approved', $prcManager,
+                'Shop audited. Welder qualifications and PQRs verified against the tank scope.');
+
+            $vendors->recordPrequalification(
+                $sahara,
+                now()->subMonths(8)->toDateString(),
+                now()->addMonths(16)->toDateString(),
+                $prcManager,
+            );
+
+            // Bank details are written by FINANCE and by nobody else. `vendor.bank` is a separate
+            // permission from `vendor.edit` for the reason §67 gives: an account number is a
+            // payment instrument, and the register masks it for everyone who does not hold it.
+            $vendors->updateBankDetails($sahara, [
+                'bank_name' => 'First Continental Bank Plc',
+                'bank_account_name' => 'Sahara Steel & Fabrication Limited',
+                'bank_account_number' => '0117420893',
+                'bank_branch' => 'Apapa',
+                'bank_swift' => 'FCBLNGLA',
+            ], $finance, 'Verified against the certificate of incorporation and a bank reference.');
+
+            $vendors->addContact($sahara, [
+                'name' => 'Kunle Adebayo',
+                'position' => 'Commercial Manager',
+                'email' => 'k.adebayo@saharasteel.example',
+                'phone' => '+234 805 219 6633',
+                'is_primary' => true,
+            ], $prcOfficer);
+
+            $vendors->recordRating($sahara, 4.5, $qaManager,
+                'Tank floor plates delivered to programme. Two minor NCRs, both closed at the shop.');
+            $vendors->recordRating($sahara, 4.0, $projectManager,
+                'Shell course delivery slipped a week against their own promise, recovered on site.');
+
+            // AN EXPIRED PREQUALIFICATION — the condition a real register is most often failing on,
+            // and the one nobody notices until an order is raised. This vendor is still approved,
+            // still active, well rated, and `Vendor::canBeUsed()` refuses them anyway.
+            $panafric = $vendors->create([
+                'name' => 'PanAfric Valves & Fittings',
+                'legal_name' => 'PanAfric Valves & Fittings Nigeria Limited',
+                'code' => 'PAVF',
+                'category' => 'Valves, flanges and pipe fittings',
+                'vendor_type' => 'supplier',
+                'registration_no' => 'RC 551408',
+                'email' => 'sales@panafricvalves.example',
+                'phone' => '+234 1 291 8850',
+                'city' => 'Lagos',
+                'state' => 'Lagos',
+                'country' => 'Nigeria',
+                'payment_terms_days' => 21,
+                'org_unit_id' => $unit['PRC']->id,
+                'notes' => 'Renewal pack chased twice. Their ISO 9001 certificate lapsed in the '
+                    .'meantime, which is why this has not simply been re-dated.',
+            ], $prcOfficer);
+
+            $this->moveCommercial($panafric, 'vendor', 'under_review', $prcOfficer, 'Renewal in progress.');
+            $this->moveCommercial($panafric, 'vendor', 'approved', $prcManager, 'Approved on the original assessment.');
+
+            $vendors->recordPrequalification(
+                $panafric,
+                now()->subMonths(26)->toDateString(),
+                now()->subMonths(2)->toDateString(),
+                $prcManager,
+            );
+
+            $vendors->recordRating($panafric, 3.0, $prcOfficer,
+                'Correct goods, consistently late. Two deliveries out of five inside the promised week.');
+
+            // EXPIRING, not expired — inside the 60-day warning window the provisioner sets as the
+            // default, so the register's `expiring` view has something in it on the day the demo is
+            // opened rather than on some day nobody is looking.
+            $coastal = $vendors->create([
+                'name' => 'Coastal Marine Services Ltd',
+                'code' => 'CMS',
+                'category' => 'Marine logistics & jetty access',
+                'vendor_type' => 'service',
+                'registration_no' => 'RC 731266',
+                'email' => 'ops@coastalmarine.example',
+                'phone' => '+234 84 230 615',
+                'city' => 'Warri',
+                'state' => 'Delta',
+                'country' => 'Nigeria',
+                'payment_terms_days' => 30,
+                'org_unit_id' => $unit['PRC']->id,
+                'notes' => 'Boat and barge hire for the Ogunu jetty survey. Renewal pack requested.',
+            ], $prcOfficer);
+
+            $this->moveCommercial($coastal, 'vendor', 'under_review', $prcOfficer, 'Assessed for the jetty survey.');
+            $this->moveCommercial($coastal, 'vendor', 'approved', $prcManager, 'Vessel certificates and P&I cover verified.');
+
+            $vendors->recordPrequalification(
+                $coastal,
+                now()->subMonths(22)->toDateString(),
+                now()->addDays(38)->toDateString(),
+                $prcManager,
+            );
+
+            $vendors->recordRating($coastal, 5.0, $engManager,
+                'Survey team on the water every day of the window, including the two we did not expect to get.');
+
+            // PROVISIONAL: used once, under supervision, on the strength of a reference rather than
+            // a full assessment. The state most companies actually have and few systems model — and
+            // without it they either approve people they have not assessed or refuse work they have
+            // already promised.
+            $ashaka = $vendors->create([
+                'name' => 'Ashaka Industrial Coatings',
+                'code' => 'AIC',
+                'category' => 'Surface preparation & protective coatings',
+                'vendor_type' => 'subcontractor',
+                'email' => 'enquiries@ashakacoatings.example',
+                'phone' => '+234 807 330 4412',
+                'city' => 'Warri',
+                'state' => 'Delta',
+                'country' => 'Nigeria',
+                'payment_terms_days' => 14,
+                'org_unit_id' => $unit['PRC']->id,
+                'notes' => 'Referred by the client. One tank exterior only, with our own inspector '
+                    .'at every hold point, pending a full assessment.',
+            ], $prcOfficer);
+
+            $this->moveCommercial($ashaka, 'vendor', 'under_review', $prcOfficer, 'Client referral. Pack partially returned.');
+            $this->moveCommercial($ashaka, 'vendor', 'provisional', $prcManager,
+                'One package only, supervised. Full prequalification before any repeat award.');
+
+            // BLACKLISTED, with the reason on the record. Blacklisting goes through the service
+            // rather than the status graph precisely so the reason cannot be omitted — and the
+            // status chip follows the column rather than the other way round.
+            $horizon = $vendors->create([
+                'name' => 'Bright Horizon Logistics',
+                'code' => 'BHL',
+                'category' => 'Haulage & heavy lift transport',
+                'vendor_type' => 'service',
+                'registration_no' => 'RC 880417',
+                'email' => 'dispatch@brighthorizon.example',
+                'city' => 'Lagos',
+                'state' => 'Lagos',
+                'country' => 'Nigeria',
+                'org_unit_id' => $unit['PRC']->id,
+            ], $prcOfficer);
+
+            $this->moveCommercial($horizon, 'vendor', 'under_review', $prcOfficer, 'Assessed for tank shell haulage.');
+            $this->moveCommercial($horizon, 'vendor', 'approved', $prcManager, 'Approved on documents.');
+
+            $vendors->blacklist(
+                $horizon,
+                'Two of the three low-loaders presented for the shell course move carried no valid '
+                .'insurance, and the certificates produced at the gate had been altered. Referred '
+                .'to the managing director. No further enquiries to be issued to this company.',
+                $prcManager,
+            );
+
+            // NEVER ASSESSED, and deliberately left that way. This is the permissive default made
+            // visible: procurement can raise an order against this supplier today, and the register
+            // says plainly that nobody has looked at them. A company that wants that refused turns
+            // it on in configuration — the platform does not assume every tenant prequalifies.
+            $vendors->create([
+                'name' => 'Kano Instrument Supplies',
+                'code' => 'KIS',
+                'category' => 'Field instrumentation & calibration',
+                'vendor_type' => 'supplier',
+                'email' => 'orders@kanoinstruments.example',
+                'city' => 'Kano',
+                'state' => 'Kano',
+                'country' => 'Nigeria',
+                'payment_terms_days' => 14,
+                'org_unit_id' => $unit['PRC']->id,
+                'notes' => 'Added by the officer against a single low-value requisition. No '
+                    .'prequalification pack requested yet.',
+            ], $prcOfficer);
+
+            // ARCHIVED: off the register without being deleted, because the history of what was
+            // bought from them has to outlive them.
+            $ironclad = $vendors->create([
+                'name' => 'Ironclad Scaffold Hire',
+                'code' => 'ISH',
+                'category' => 'Scaffold hire & erection',
+                'vendor_type' => 'subcontractor',
+                'email' => 'hire@ironcladscaffold.example',
+                'city' => 'Lagos',
+                'state' => 'Lagos',
+                'country' => 'Nigeria',
+                'org_unit_id' => $unit['PRC']->id,
+                'notes' => 'Ceased trading. Kept on the register because two closed jobs were '
+                    .'scaffolded by them and the records name them.',
+            ], $prcOfficer);
+
+            $this->moveCommercial($ironclad, 'vendor', 'archived', $prcManager,
+                'Company dissolved. Retained for the historical record only.');
+
+            // ----------------------------------------------------------------- contracts
+            // The head contract, and the number the client will quote at us for the next two years.
+            // CONFIDENTIAL BY DEFAULT — ContractService stamps it — so the value is invisible to
+            // everybody without `contract.view_confidential`, which on the default templates means
+            // the managing director, finance and procurement, and nobody else.
+            $headContract = $contracts->create([
+                'title' => 'Delta Terminal Tank Farm Expansion — EPC Contract',
+                'description' => 'Engineering, procurement and construction of two 15,000 m³ crude '
+                    .'storage tanks with associated tie-in piping and a firewater system upgrade.',
+                'direction' => 'client',
+                'party_type' => 'client',
+                'party_id' => $riverine->id,
+                'contract_type' => 'lump_sum',
+                'reference' => 'RPDC/EPC/2025/017',
+                'project_id' => $job['DTE']?->id,
+                'org_unit_id' => $unit['PMO']->id,
+                'value' => 4180000000,
+                'retention_percent' => 5,
+                'advance_percent' => 15,
+                'signed_on' => now()->subMonths(5)->startOfMonth()->subDays(9)->toDateString(),
+                'starts_on' => now()->subMonths(5)->startOfMonth()->toDateString(),
+                'ends_on' => now()->addMonths(7)->endOfMonth()->toDateString(),
+                'defects_liability_months' => 12,
+                'owner_id' => $projectManager->id,
+                'scope_summary' => 'Two tanks to API 650, tie-in spools to the existing 24" header, '
+                    .'a firewater ring main and two new monitors. Commissioning support for 30 days '
+                    .'after mechanical completion.',
+                'payment_terms' => 'Monthly valuation, certified within 14 days, paid within 45 days '
+                    .'of certification. 15% advance against an on-demand bank guarantee, recovered '
+                    .'pro rata. 5% retention, half released at taking-over and half at the end of '
+                    .'the defects liability period.',
+            ], $finance);
+
+            $this->moveCommercial($headContract, 'contract', 'in_review', $finance,
+                'Drafted onto their form of contract.');
+            $this->moveCommercial($headContract, 'contract', 'awaiting_signature', $md,
+                'Commercial terms accepted. Liability cap and the LD rate negotiated down.');
+            $this->moveCommercial($headContract, 'contract', 'active', $finance,
+                'Executed by both parties. Original filed.');
+
+            // Retention accrues per valuation and is released in stages — which is the whole reason
+            // it is a movement with a reason attached rather than a figure somebody types over.
+            $contracts->addRetention($headContract, 41800000, $finance, 'Valuation 1 — 5% of ₦836m certified.');
+            $contracts->addRetention($headContract, 33900000, $finance, 'Valuation 2 — 5% of ₦678m certified.');
+            $contracts->addRetention($headContract, 29500000, $finance, 'Valuation 3 — 5% of ₦590m certified.');
+
+            // The consultancy contract: finished, and marked so. `completed` and `terminated` are
+            // both terminal and deliberately different conversations.
+            $surveyContract = $contracts->create([
+                'title' => 'Ogunu Jetty Deck Condition Assessment',
+                'description' => 'Visual and hammer-tap survey of the jetty deck with a repair '
+                    .'strategy and a budget estimate.',
+                'direction' => 'client',
+                'party_type' => 'client',
+                'party_id' => $ogunu->id,
+                'contract_type' => 'lump_sum',
+                'reference' => 'OPS/CON/2025/004',
+                'project_id' => $job['OJA']?->id,
+                'org_unit_id' => $unit['ENG']->id,
+                'value' => 62400000,
+                'signed_on' => now()->subMonths(5)->subDays(4)->toDateString(),
+                'starts_on' => now()->subMonths(5)->toDateString(),
+                'ends_on' => now()->subMonths(2)->toDateString(),
+                'owner_id' => $engManager->id,
+                'scope_summary' => 'Survey of 4,200 m² of deck soffit and 96 piles above low water, '
+                    .'a condition report and a costed repair strategy.',
+                'payment_terms' => '40% on mobilisation, 60% on acceptance of the report. 30 days.',
+            ], $finance);
+
+            $this->moveCommercial($surveyContract, 'contract', 'in_review', $finance, 'Their standard consultancy terms.');
+            $this->moveCommercial($surveyContract, 'contract', 'awaiting_signature', $md, 'Approved.');
+            $this->moveCommercial($surveyContract, 'contract', 'active', $finance, 'Executed.');
+            $this->moveCommercial($surveyContract, 'contract', 'completed', $finance,
+                'Report accepted and the final invoice settled.');
+
+            // THE SAME REGISTER, HELD THE OTHER WAY ROUND. A subcontract is not a different kind of
+            // record, and a system that gave it one would ask the same eleven questions twice and
+            // then disagree with itself about the answers.
+            $fabrication = $contracts->create([
+                'title' => 'Delta Terminal — Tank Plate Fabrication Subcontract',
+                'description' => 'Shop fabrication of floor plates, shell courses and roof structure '
+                    .'for both tanks, delivered to site in erection sequence.',
+                'direction' => 'vendor',
+                'party_type' => 'vendor',
+                'party_id' => $sahara->id,
+                'contract_type' => 'remeasurable',
+                'reference' => 'MEI/SUB/2025/031',
+                'project_id' => $job['DTE']?->id,
+                'org_unit_id' => $unit['PRC']->id,
+                'value' => 1240000000,
+                'retention_percent' => 5,
+                'signed_on' => now()->subMonths(4)->subDays(12)->toDateString(),
+                'starts_on' => now()->subMonths(4)->toDateString(),
+                'ends_on' => now()->addMonths(3)->toDateString(),
+                'defects_liability_months' => 12,
+                'owner_id' => $prcManager->id,
+                'scope_summary' => 'Plate cutting, rolling, shop welding and NDT to the approved WPS. '
+                    .'Delivery in erection sequence to the site laydown area.',
+                'payment_terms' => 'Back to back with the head contract: certified monthly, paid '
+                    .'within 14 days of receipt from the client. 5% retention on the same terms.',
+                'notes' => 'Deliberately back to back with RPDC/EPC/2025/017 on payment and '
+                    .'retention. The defects liability periods are aligned so the two expire together.',
+            ], $prcManager);
+
+            $this->moveCommercial($fabrication, 'contract', 'in_review', $prcManager, 'Drafted on our own form.');
+            $this->moveCommercial($fabrication, 'contract', 'awaiting_signature', $md, 'Approved for award.');
+            $this->moveCommercial($fabrication, 'contract', 'active', $prcManager, 'Executed and the shop released to start.');
+
+            $contracts->addRetention($fabrication, 24800000, $finance, 'Application 1 — 5% of ₦496m.');
+            $contracts->addRetention($fabrication, 19100000, $finance, 'Application 2 — 5% of ₦382m.');
+            $contracts->releaseRetention($fabrication, 11000000, $finance,
+                'Half of the first application released against the shop completion certificate.');
+
+            // A framework with no project and no committed value: the call-off agreement every
+            // buying department has, and the one a project-shaped register cannot hold at all.
+            $framework = $contracts->create([
+                'title' => 'Valves and Pipe Fittings — Framework Agreement',
+                'description' => 'Two-year call-off agreement for valves, flanges and fittings '
+                    .'against an agreed schedule of rates.',
+                'direction' => 'vendor',
+                'party_type' => 'vendor',
+                'party_id' => $panafric->id,
+                'contract_type' => 'framework',
+                'reference' => 'MEI/FRM/2025/006',
+                'org_unit_id' => $unit['PRC']->id,
+                'retention_percent' => 0,
+                'signed_on' => now()->subMonths(14)->toDateString(),
+                'starts_on' => now()->subMonths(14)->toDateString(),
+                'ends_on' => now()->addMonths(10)->toDateString(),
+                'owner_id' => $prcManager->id,
+                'scope_summary' => 'Schedule of rates fixed for the first year and indexed '
+                    .'thereafter. No committed volume.',
+                'payment_terms' => '21 days from receipt of a correct invoice against a call-off order.',
+                'notes' => 'Suspended: their prequalification lapsed two months ago and no call-off '
+                    .'is to be raised until it is renewed.',
+            ], $prcManager);
+
+            $this->moveCommercial($framework, 'contract', 'in_review', $prcManager, 'Rates agreed.');
+            $this->moveCommercial($framework, 'contract', 'awaiting_signature', $md, 'Approved.');
+            $this->moveCommercial($framework, 'contract', 'active', $prcManager, 'Executed.');
+            $this->moveCommercial($framework, 'contract', 'suspended', $prcManager,
+                'Prequalification lapsed. No call-off to be raised until it is renewed.');
+
+            // ------------------------------------------------------------ the join itself
+            $this->linkProjectCommercially($job['DTE'] ?? null, $riverine, $headContract, $ops);
+            $this->linkProjectCommercially($job['OJA'] ?? null, $ogunu, $surveyContract, $ops);
+            $this->linkCorrespondence();
+        });
+    }
+
+    /*
+     * Kestrel, who do none of this.
+     *
+     * ONE CLIENT, TWO SUPPLIERS, ONE CONTRACT, AND NO PREQUALIFICATION AT ALL. A facilities
+     * management company of eight does not run a vendor assessment process, and a platform that
+     * forced one on them would be telling them their business. Their suppliers sit in `draft`
+     * forever, carry no prequalification dates and are perfectly orderable — the same
+     * `Vendor::canBeUsed()` that refuses Meridian's lapsed supplier lets both of these through,
+     * because there is nothing here to have lapsed.
+     *
+     * THE MANAGING DIRECTOR DRAFTS, APPROVES AND EXECUTES THE CONTRACT, which in a bigger company
+     * would be a segregation failure and here is simply Tuesday. The platform does not pretend
+     * otherwise: it enforces whatever the tenant's roles say, and Kestrel's say this.
+     */
+    private function seedKestrelCommercial(Organization $organization): void
+    {
+        $this->context->within($organization, function () {
+            $this->bootDelivery();
+
+            $vendors = app(VendorService::class);
+            $clients = app(ClientService::class);
+            $contracts = app(ContractService::class);
+
+            $staff = $this->staff();
+            $unit = $this->unitsByCode();
+            $job = Project::query()->get()->keyBy('code');
+
+            $md = $this->accountOf($staff, 'KFM-001');              // Rowan Calder
+            $opsManager = $this->accountOf($staff, 'KFM-002');      // Priti Shah
+            $maintenanceHead = $this->accountOf($staff, 'KFM-003'); // Duncan Reilly
+
+            $trafford = $clients->create([
+                'name' => 'Trafford Point Estates LLP',
+                'legal_name' => 'Trafford Point Estates LLP',
+                'code' => 'TPE',
+                'industry' => 'Commercial property',
+                'client_type' => 'private',
+                'registration_no' => 'OC 402118',
+                'email' => 'buildingservices@traffordpoint.example',
+                'phone' => '+44 161 244 0180',
+                'address' => 'Trafford Point, 1 Ashburton Road West',
+                'city' => 'Manchester',
+                'country' => 'United Kingdom',
+                'payment_terms_days' => 30,
+                'org_unit_id' => $unit['MNT']->id,
+                'notes' => 'Managing agent for the building. The tenant on floors 4 to 6 is who '
+                    .'actually complains, and they are not our client.',
+            ], $opsManager);
+
+            $this->moveCommercial($trafford, 'client', 'active', $opsManager,
+                'PPM contract renewed for a third year.');
+            $clients->assignOwner($trafford, $opsManager, $opsManager);
+
+            $clients->addContact($trafford, [
+                'name' => 'Helen Marsh',
+                'position' => 'Building Manager',
+                'email' => 'h.marsh@traffordpoint.example',
+                'phone' => '+44 7700 900412',
+                'is_primary' => true,
+                'notes' => 'Agrees every isolation before it happens. Nothing goes off without her.',
+            ], $opsManager);
+
+            // No prequalification, no assessment, no status moves. This is what the register looks
+            // like in a company that buys from people it has used for years, and it is a complete,
+            // working register rather than a half-filled one.
+            $airHandling = $vendors->create([
+                'name' => 'Northern Air Handling Ltd',
+                'code' => 'NAH',
+                'category' => 'AHU supply & commissioning',
+                'vendor_type' => 'supplier',
+                'email' => 'sales@northernair.example',
+                'phone' => '+44 161 872 3311',
+                'city' => 'Manchester',
+                'country' => 'United Kingdom',
+                'payment_terms_days' => 30,
+                'org_unit_id' => $unit['MNT']->id,
+                'notes' => 'Supplied and commissioned AHU-1 and AHU-2 in 2023. Same unit, same '
+                    .'controls, which is most of why they got AHU-3.',
+            ], $maintenanceHead);
+
+            $vendors->addContact($airHandling, [
+                'name' => 'Paul Brennan',
+                'position' => 'Sales Engineer',
+                'email' => 'p.brennan@northernair.example',
+                'phone' => '+44 7700 900733',
+                'is_primary' => true,
+            ], $maintenanceHead);
+
+            $vendors->recordRating($airHandling, 4.0, $maintenanceHead,
+                'Unit arrived on the promised day. Commissioning engineer needed chasing twice.');
+
+            $vendors->create([
+                'name' => 'Peak Electrical Contractors',
+                'code' => 'PEC',
+                'category' => 'Electrical installation & testing',
+                'vendor_type' => 'subcontractor',
+                'email' => 'office@peakelectrical.example',
+                'phone' => '+44 161 903 4420',
+                'city' => 'Stockport',
+                'country' => 'United Kingdom',
+                'payment_terms_days' => 21,
+                'org_unit_id' => $unit['MNT']->id,
+                'notes' => 'Used for anything beyond our own two electricians. NICEIC registered; '
+                    .'the certificate is on file with the compliance lead.',
+            ], $maintenanceHead);
+
+            // One contract, and NO RETENTION. Facilities management is a service against a schedule
+            // of rates; a form that demanded a retention percentage would get a zero typed into it,
+            // which is how a field stops meaning anything.
+            $ppm = $contracts->create([
+                'title' => 'Trafford Point — Planned Preventive Maintenance',
+                'description' => 'Mechanical and electrical PPM across the building, with a reactive '
+                    .'call-out allowance and an agreed schedule of rates for additional works.',
+                'direction' => 'client',
+                'party_type' => 'client',
+                'party_id' => $trafford->id,
+                'contract_type' => 'framework',
+                'reference' => 'TPE/PPM/2026/03',
+                'project_id' => $job['TPA']?->id,
+                'org_unit_id' => $unit['MNT']->id,
+                'value' => 284000,
+                'currency' => 'GBP',
+                'signed_on' => now()->subMonths(8)->toDateString(),
+                'starts_on' => now()->subMonths(8)->startOfMonth()->toDateString(),
+                'ends_on' => now()->addMonths(4)->endOfMonth()->toDateString(),
+                'owner_id' => $opsManager->id,
+                'scope_summary' => 'Statutory and manufacturer PPM to the M&E asset register, with a '
+                    .'four-hour reactive response in hours and eight out of hours. Additional works '
+                    .'ordered against the agreed rates.',
+                'payment_terms' => 'Invoiced monthly in arrears, 30 days. Additional works invoiced '
+                    .'on completion against a signed instruction.',
+                'notes' => 'The AHU replacement is an additional work under this contract, not a '
+                    .'separate one — which is why the project points here.',
+            ], $md);
+
+            $this->moveCommercial($ppm, 'contract', 'in_review', $md, 'Third-year renewal, rates uplifted 3.1%.');
+            $this->moveCommercial($ppm, 'contract', 'awaiting_signature', $md, 'Agreed with the managing agent.');
+            $this->moveCommercial($ppm, 'contract', 'active', $md, 'Signed by both parties.');
+
+            $this->linkProjectCommercially($job['TPA'] ?? null, $trafford, $ppm, $opsManager);
+            $this->linkCorrespondence();
+        });
+    }
+
+    // ================================================================= commercial helpers
+
+    /**
+     * Move a commercial record along its own graph, as somebody entitled to.
+     *
+     * Thin, but not pointless: `StatusMachine::transition()` takes a Status rather than a key, and
+     * the two chapters above make roughly forty of these moves. Without it every line would carry
+     * a `statusFor()` call and the narrative would disappear into plumbing.
+     */
+    private function moveCommercial(Model $record, string $entityType, string $key, User $actor, ?string $why = null): void
+    {
+        $this->statuses->transition($record, $this->statusFor($entityType, $key), $actor, $why);
+    }
+
+    /**
+     * Point a project at the client and the contract it was always about.
+     *
+     * THE TYPED NAMES ARE LEFT EXACTLY AS THEY WERE. `client_name` and `contract_reference` are
+     * what somebody wrote when the job was opened, and overwriting them with the register's
+     * spelling would destroy the only evidence of what was actually agreed at the time. The link
+     * goes beside them — the same rule the party morph follows everywhere else in the application.
+     *
+     * Written with saveQuietly() rather than through ProjectService on purpose. These two columns
+     * are not on any form; they are set by picking a client on the project screen. Routing a
+     * back-fill through the update path would file a "project updated" entry on every job in the
+     * demo for a change nobody made today, which is precisely the kind of noise that teaches people
+     * to stop reading timelines.
+     */
+    private function linkProjectCommercially(?Project $project, Client $client, Contract $contract, User $actor): void
+    {
+        if ($project === null) {
+            return;
+        }
+
+        $project->client_id = $client->id;
+        $project->contract_id = $contract->id;
+        $project->saveQuietly();
+
+        app(ActivityRecorder::class)->record(
+            $project,
+            'linked',
+            $actor->name.' linked '.$project->name.' to '.$client->name.' and contract '
+                .($contract->reference ?? $contract->number),
+            ['client_id' => $client->id, 'contract_id' => $contract->id],
+            $actor,
+        );
+    }
+
+    /**
+     * Point the correspondence at the register it has been naming in free text all along.
+     *
+     * THE MATCH IS ON THE NAME SOMEBODY TYPED, which is the honest way to do this: it is precisely
+     * the join a real company has to make by hand when it adopts a client register after two years
+     * of correspondence, and matching on anything cleverer would demonstrate a migration the
+     * application does not actually offer.
+     *
+     * ANYTHING THAT DOES NOT MATCH IS LEFT ALONE and stays free text — the regulators, the one-off
+     * consultants, the joint-venture partners who are on no register and never will be. A back-fill
+     * that invented a client record for each of them would be the "Miscellaneous client"
+     * anti-pattern, arrived at by script.
+     */
+    private function linkCorrespondence(): void
+    {
+        $parties = Client::query()->get()
+            ->map(fn (Client $c) => ['client', $c->id, $c->name])
+            ->concat(Vendor::query()->get()->map(fn (Vendor $v) => ['vendor', $v->id, $v->name]));
+
+        // COLUMN PREFIXES, NOT RELATION NAMES. Transmittals address `to_party_type`/`to_party_id`
+        // through a relation called `toParty`, and reaching for the relation name here builds a
+        // `whereNull("toParty_id")` that SQLite quietly reads as a string literal rather than an
+        // unknown column — no error, no matches, and a back-fill that appears to have run.
+        $registers = [
+            [Rfi::class, 'party', 'party_name'],
+            [Submittal::class, 'party', 'party_name'],
+            [Transmittal::class, 'to_party', 'to_name'],
+        ];
+
+        foreach ($registers as [$class, $prefix, $column]) {
+            foreach ($class::query()->whereNull($prefix.'_id')->get() as $record) {
+                $match = $parties->first(
+                    fn (array $party) => $party[2] === (string) $record->getAttribute($column),
+                );
+
+                if ($match === null) {
+                    continue;
+                }
+
+                $record->setAttribute($prefix.'_type', $match[0]);
+                $record->setAttribute($prefix.'_id', $match[1]);
+                $record->saveQuietly();
+            }
+        }
     }
 
     // ================================================================= HSE configuration helpers

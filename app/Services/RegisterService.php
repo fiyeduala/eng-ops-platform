@@ -129,7 +129,13 @@ abstract class RegisterService
         }
 
         if (isset(self::$columnCache[$table]['confidentiality'])) {
-            $record->setAttribute('confidentiality', Confidentiality::Internal);
+            // The model decides, not this service. Nearly every register starts internal; the
+            // contract register starts confidential, and saying so on the model means every path
+            // that creates one — seeder, import, another module — gets the same answer as the
+            // form does. See Scopeable::defaultConfidentiality().
+            $record->setAttribute('confidentiality', method_exists($record, 'defaultConfidentiality')
+                ? $record->defaultConfidentiality()
+                : Confidentiality::Internal);
         }
     }
 

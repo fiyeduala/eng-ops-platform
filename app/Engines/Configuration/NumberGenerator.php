@@ -287,6 +287,17 @@ class NumberGenerator
             // same meeting is a defect in the numbering, not a charming ambiguity.
             'quality_inspection' => ['prefix' => 'ITP', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
             'ncr' => ['prefix' => 'NCR', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+
+            // --- Phase 5: the commercial foundation -----------------------------------
+            // Vendors and clients do NOT reset. A vendor code is quoted on every purchase order
+            // ever raised against them and referenced by finance a decade later; an annual series
+            // would eventually issue VEN-0007 twice and make a payment enquiry ambiguous in exactly
+            // the conversation where somebody is chasing money.
+            'vendor' => ['prefix' => 'VEN', 'pattern' => '{PREFIX}-{SEQ}', 'reset_period' => 'none', 'padding' => 4],
+            'client' => ['prefix' => 'CLI', 'pattern' => '{PREFIX}-{SEQ}', 'reset_period' => 'none', 'padding' => 4],
+            // Contracts DO reset, because a contract is an event with a year attached and every
+            // commercial review is annual. "CTR-2026-0004" is how it is quoted in a meeting.
+            'contract' => ['prefix' => 'CTR', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
         ];
     }
 }

@@ -45,8 +45,11 @@ class SubmittalRequest extends TenantRequest
             'discipline_id' => ['nullable', 'integer', $this->existsInTenant('org_units')],
             'org_unit_id' => ['nullable', 'integer', $this->existsInTenant('org_units')],
 
-            // Who is reviewing it. Free text until Phase 5 — see RfiRequest for the same reasoning.
+            // Who is reviewing it. Free text plus an optional link — see RfiRequest for the same
+            // reasoning, and ResolvesParties for why the id is looked up rather than trusted.
             'party_name' => ['nullable', 'string', 'max:200'],
+            'party_type' => ['nullable', Rule::in(['client', 'vendor'])],
+            'party_id' => ['nullable', 'integer', 'required_with:party_type'],
 
             'submitted_by' => ['nullable', 'integer', $this->existsInTenant('users')],
             'submitted_on' => ['nullable', 'date'],
@@ -60,7 +63,7 @@ class SubmittalRequest extends TenantRequest
     {
         $this->nullifyBlanks([
             'description', 'type', 'revision', 'project_id', 'discipline_id', 'org_unit_id',
-            'party_name', 'submitted_by', 'submitted_on', 'required_by',
+            'party_name', 'party_type', 'party_id', 'submitted_by', 'submitted_on', 'required_by',
         ]);
     }
 

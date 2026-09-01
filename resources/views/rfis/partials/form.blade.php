@@ -58,11 +58,14 @@
         </div>
 
         <div class="space-y-5 p-5">
-            <x-field label="Party" name="party_name"
-                     help="The organization or person on the other side of this query.">
-                <x-input name="party_name" :value="$rfi->party_name" maxlength="180"
-                         placeholder="e.g. Meridian Consulting Engineers"/>
-            </x-field>
+            @include("partials.party-picker", [
+                "typeName" => "party_type",
+                "idName" => "party_id",
+                "nameName" => "party_name",
+                "label" => "Party",
+                "record" => $rfi,
+                "help" => "The organization or person on the other side of this query. Link it to a client or vendor when there is one — that is what makes \"everything outstanding with them\" answerable.",
+            ])
 
             <div class="grid gap-5 sm:grid-cols-2">
                 <x-field label="Project" name="project_id">

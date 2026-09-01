@@ -9,6 +9,7 @@ use App\Engines\Audit\ActivityRecorder;
 use App\Engines\Configuration\NumberGenerator;
 use App\Engines\Configuration\StatusMachine;
 use App\Engines\Workflow\WorkflowEngine;
+use App\Http\Controllers\Concerns\OffersPartyOptions;
 use App\Models\OrgUnit;
 use App\Models\Project;
 use App\Models\Status;
@@ -42,6 +43,8 @@ use Illuminate\Http\Request;
  */
 abstract class RegisterController extends Controller
 {
+    use OffersPartyOptions;
+
     public function __construct(
         protected readonly ScopeCompiler $compiler,
         protected readonly StatusMachine $statuses,

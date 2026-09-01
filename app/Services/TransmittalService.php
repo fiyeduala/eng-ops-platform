@@ -13,6 +13,8 @@ use App\Models\DocumentVersion;
 use App\Models\Transmittal;
 use App\Models\TransmittalItem;
 use App\Models\User;
+use App\Services\Concerns\ResolvesParties;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -33,6 +35,8 @@ use Illuminate\Support\Facades\DB;
  */
 class TransmittalService
 {
+    use ResolvesParties;
+
     public function __construct(
         private readonly NumberGenerator $numbers,
         private readonly StatusMachine $statuses,
@@ -52,6 +56,17 @@ class TransmittalService
             $transmittal->created_by = $actor->getKey();
             $transmittal->number = $this->numbers->next('transmittal');
             $transmittal->status_id = $this->statuses->initialFor('transmittal')?->id;
+
+            // The recipient may be a client, a vendor or another unit of this company — a drawing
+            // issued from engineering to construction is a transmittal in every organization that
+            // issues them. The id is resolved through a tenant-scoped lookup rather than filled,
+            // so a posted id belonging to somebody else's client simply does not resolve (§75).
+            $this->nameParty(
+                $transmittal,
+                $this->resolveParty($transmittal, $attributes, 'to_party_type', 'to_party_id', 'toParty'),
+                'to_name',
+                $attributes,
+            );
 
             $transmittal->save();
 
@@ -73,7 +88,16 @@ class TransmittalService
     {
         $this->assertDraft($transmittal, 'changed');
 
-        $transmittal->fill($this->safeAttributes($attributes))->save();
+        $transmittal->fill($this->safeAttributes($attributes));
+
+        $this->nameParty(
+            $transmittal,
+            $this->resolveParty($transmittal, $attributes, 'to_party_type', 'to_party_id', 'toParty'),
+            'to_name',
+            $attributes,
+        );
+
+        $transmittal->save();
 
         return $transmittal;
     }
@@ -276,6 +300,25 @@ class TransmittalService
     }
 
     /**
+     * The one register that may also be addressed internally.
+     *
+     * A transmittal from the design office to the construction team is a formal issue with the same
+     * evidential weight as one to a client — "we sent you Rev C on 14 March" is the point, and who
+     * "you" was does not change what the record has to prove.
+     *
+     * @return array<string,class-string<Model>>
+     */
+    protected function partyClasses(): array
+    {
+        return $this->partyClassesWithUnits();
+    }
+
+    protected function partyTypeMessage(): string
+    {
+        return 'A transmittal is addressed to a client, a vendor or a unit of this company.';
+    }
+
+    /**
      * @param  array<string,mixed>  $attributes
      * @return array<string,mixed>
      */
@@ -285,6 +328,8 @@ class TransmittalService
             'id', 'organization_id', 'number', 'created_by', 'status_id',
             'issued_at', 'issued_by', 'acknowledged_at', 'acknowledged_by_name',
             'created_at', 'updated_at', 'deleted_at',
+            // The morph pair is resolved through ResolvesParties, never filled — see that trait.
+            'to_party_type', 'to_party_id',
         ]));
     }
 }

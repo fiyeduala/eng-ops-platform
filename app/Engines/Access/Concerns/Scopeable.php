@@ -6,6 +6,7 @@ namespace App\Engines\Access\Concerns;
 
 use App\Engines\Access\ScopeCompiler;
 use App\Models\User;
+use App\Support\Enums\Confidentiality;
 use Illuminate\Database\Eloquent\Builder;
 
 /**
@@ -163,5 +164,23 @@ trait Scopeable
         foreach ($this->accessAssigneeColumns() as $column) {
             $query->orWhere($this->qualifyColumn($column), $user->id);
         }
+    }
+
+    /**
+     * What confidentiality a NEW record of this kind starts at.
+     *
+     * Internal is right for nearly everything: a deliverable, an RFI, a vendor and a task are all
+     * things the company is meant to be able to read. The exception is the contract register, and
+     * a migration-level column default was not enough to express it — RegisterService stamps this
+     * value onto every record before saving, so the database default never applies and a contract
+     * created by a seeder, an import or another module would silently come out internal while the
+     * policy, the form and the docs all said confidential.
+     *
+     * Putting it on the model rather than in the service keeps the answer next to the reason. A
+     * model that knows it is dangerous says so once, and every path that creates one obeys.
+     */
+    public function defaultConfidentiality(): Confidentiality
+    {
+        return Confidentiality::Internal;
     }
 }

@@ -207,6 +207,19 @@ class OrganizationProvisioner
             'ncr.dispositions' => '',
             'ncr.response_days' => 14,
 
+            // --- commercial registers ----------------------------------------------------
+            // Blank means "use the constants on the model". A company that has never opened
+            // Settings still gets a usable list of vendor categories; a company that has
+            // opened it once owns the list from then on and we never overwrite their words.
+            'vendor.types' => '',
+            'vendor.categories' => '',
+            'vendor.prequalification_warning_days' => 60,
+            'client.types' => '',
+            'client.industries' => '',
+            'contract.types' => '',
+            'contract.default_retention_percent' => '5',
+            'contract.expiry_warning_days' => 90,
+
             // --- notifications -----------------------------------------------------------
             'notify.channels' => ['database', 'mail'],
             'notify.digest_hour' => 7,

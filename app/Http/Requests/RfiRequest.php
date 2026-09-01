@@ -46,10 +46,17 @@ class RfiRequest extends TenantRequest
             'discipline_id' => ['nullable', 'integer', $this->existsInTenant('org_units')],
             'org_unit_id' => ['nullable', 'integer', $this->existsInTenant('org_units')],
 
-            // The other side. Free text until Phase 5 gives clients and vendors their own tables —
-            // an RFI goes to a regulator, a joint-venture partner or a specialist consultant just
-            // as often as it goes to somebody already in the system.
+            // The other side. FREE TEXT REMAINS THE PRIMARY FIELD even now that clients and vendors
+            // have tables: an RFI goes to a regulator, a joint-venture partner or a specialist
+            // consultant just as often as it goes to somebody already on a register, and a form
+            // that insists on a link is a form people work around.
             'party_name' => ['nullable', 'string', 'max:200'],
+
+            // The optional link. Whitelisted here and again in ResolvesParties, which resolves the
+            // id through a tenant-scoped query — `Rule::in` proves the shape, only the lookup can
+            // prove the row is ours (§75, §84).
+            'party_type' => ['nullable', Rule::in(['client', 'vendor'])],
+            'party_id' => ['nullable', 'integer', 'required_with:party_type'],
 
             // Who is asking, on the record. Often not the person typing: a document controller logs
             // the query an engineer wrote, and the engineer is the one who has to defend it.
@@ -72,7 +79,7 @@ class RfiRequest extends TenantRequest
     {
         $this->normaliseBooleans(['cost_impact', 'schedule_impact']);
         $this->nullifyBlanks([
-            'project_id', 'discipline_id', 'org_unit_id', 'party_name',
+            'project_id', 'discipline_id', 'org_unit_id', 'party_name', 'party_type', 'party_id',
             'raised_by', 'raised_on', 'required_by', 'impact_notes',
         ]);
     }

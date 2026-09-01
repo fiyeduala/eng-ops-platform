@@ -8,6 +8,7 @@ use App\Engines\Access\ScopeCompiler;
 use App\Engines\Audit\ActivityRecorder;
 use App\Engines\Configuration\NumberGenerator;
 use App\Engines\Configuration\StatusMachine;
+use App\Http\Controllers\Concerns\OffersPartyOptions;
 use App\Http\Requests\TransmittalItemRequest;
 use App\Http\Requests\TransmittalRequest;
 use App\Models\Document;
@@ -53,6 +54,8 @@ use Illuminate\View\View;
  */
 class TransmittalController extends Controller
 {
+    use OffersPartyOptions;
+
     public function __construct(
         private readonly ScopeCompiler $compiler,
         private readonly ActivityRecorder $activity,
@@ -133,7 +136,7 @@ class TransmittalController extends Controller
         $user = $request->user();
 
         $transmittal->loadMissing([
-            'status', 'project', 'orgUnit', 'issuer:id,name', 'creator:id,name',
+            'status', 'project', 'orgUnit', 'toParty', 'issuer:id,name', 'creator:id,name',
             'items' => fn ($q) => $q->orderBy('sort')->with([
                 'documentVersion.document:id,number,title,document_category_id,confidentiality',
                 'documentVersion.document.category:id,name,code',
@@ -176,7 +179,11 @@ class TransmittalController extends Controller
 
         $this->assertPlacementIsReachable($request, $data);
 
-        $transmittal = $this->transmittals->create($data, $request->user());
+        try {
+            $transmittal = $this->transmittals->create($data, $request->user());
+        } catch (\DomainException $e) {
+            return back()->withInput()->withErrors(['to_party_id' => $e->getMessage()]);
+        }
 
         return redirect()->route('transmittals.show', $transmittal)
             ->with('status', $transmittal->displayName().' has been drafted. Add the revisions, then issue it.');
@@ -200,7 +207,11 @@ class TransmittalController extends Controller
 
         $this->assertPlacementIsReachable($request, $data);
 
-        $this->transmittals->update($transmittal, $data, $request->user());
+        try {
+            $this->transmittals->update($transmittal, $data, $request->user());
+        } catch (\DomainException $e) {
+            return back()->withInput()->withErrors(['to_party_id' => $e->getMessage()]);
+        }
 
         return redirect()->route('transmittals.show', $transmittal)
             ->with('status', $transmittal->displayName().' has been updated.');
@@ -386,6 +397,7 @@ class TransmittalController extends Controller
                 ->mapWithKeys(fn (OrgUnit $u) => [
                     $u->id => str_repeat('— ', max(0, (int) $u->depth)).$u->name,
                 ])->all(),
+            ...$this->partyOptions($request->user()),
             'purposes' => Transmittal::PURPOSES,
             'transports' => Transmittal::TRANSPORTS,
             'media' => TransmittalItem::MEDIA,
