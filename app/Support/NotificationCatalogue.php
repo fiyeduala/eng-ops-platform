@@ -163,6 +163,100 @@ final class NotificationCatalogue
             'A change to scope on your project was approved, rejected, deferred or withdrawn.',
             'high', true, [true, true, false],
         ],
+
+        // ------------------------------------------------------------------ HSE
+        //
+        // THE MOST MANDATORY BLOCK IN THE CATALOGUE, and it is worth saying why in one place rather
+        // than five times below. Everywhere else in this application, a person who has decided they
+        // do not want to hear about something is entitled to that decision. Here they are not:
+        // "somebody was hurt" and "your permit expires in an hour" are not preferences, and a
+        // company whose safety alerts can be silenced by the individuals they are aimed at has a
+        // notification system, not a safety system.
+        //
+        // WHAT THEY STILL OBEY IS AUTHORIZATION. Every one of these dispatches with a
+        // requiredAbility, so an incident notification reaches only people who could open the
+        // incident, and NONE of them carries the injury, the diagnosis or the person's name in its
+        // body. The alert says a serious incident was reported on a project and gives a link; what
+        // happened to whom is behind `hse_incident.view_confidential` on the record itself (§68).
+        'hse_incident.reported' => [
+            'hse_incident', 'HSE', 'An incident was reported',
+            'A safety incident was logged on a project you are responsible for.',
+            'urgent', true, [true, true, true],
+        ],
+        'hse_incident.escalated' => [
+            'hse_incident', 'HSE', 'An incident is reportable to the authorities',
+            'An incident has been flagged as statutorily reportable, which usually carries a legal deadline.',
+            'urgent', true, [true, true, true],
+        ],
+        // Not urgent, and deliberately so: an investigation is days of work, and paging somebody at
+        // 23:00 to tell them they have been made the lead achieves nothing except training them to
+        // ignore the channel that also carries the incident alerts above.
+        'investigation.assigned' => [
+            'hse_incident', 'HSE', 'You are leading an investigation',
+            'You have been made the lead investigator on an incident.',
+            'high', true, [true, true, false],
+        ],
+        'corrective_action.assigned' => [
+            'corrective_action', 'HSE', 'A corrective action was assigned to you',
+            'Somebody has given you an action arising from an incident, inspection, observation or NCR.',
+            'high', true, [true, true, false],
+        ],
+        // The reminder that makes the register mean anything. An action nobody is reminded of is a
+        // row in a table; this is what turns it into something that gets done.
+        'corrective_action.overdue' => [
+            'corrective_action', 'HSE', 'A corrective action is overdue',
+            'An action assigned to you has passed its due date without being completed.',
+            'high', true, [true, true, false],
+        ],
+        'corrective_action.verified' => [
+            'corrective_action', 'HSE', 'Your corrective action was verified',
+            'Somebody independently confirmed an action you completed, and recorded whether it worked.',
+            'normal', false, [true, false, false],
+        ],
+        // Urgent and un-mutable, because it is the one alert in the module with a hard clock behind
+        // it. Work continuing past `valid_to` is itself the finding — see Permit's docblock.
+        'permit.expiring' => [
+            'permit', 'HSE', 'A permit to work is about to expire',
+            'A permit you requested or accepted reaches the end of its validity shortly.',
+            'urgent', true, [true, true, true],
+        ],
+        'permit.issued' => [
+            'permit', 'HSE', 'Your permit to work was issued',
+            'A permit you requested has been authorised and is waiting for you to accept it.',
+            'high', true, [true, true, false],
+        ],
+        'permit.suspended' => [
+            'permit', 'HSE', 'A permit to work was suspended',
+            'Work under a permit you requested, issued or accepted has been stopped.',
+            'urgent', true, [true, true, true],
+        ],
+        'hse_training.expiring' => [
+            'hse_training', 'HSE', 'A certificate is about to expire',
+            'A training certificate or competence card is approaching its expiry date.',
+            'normal', false, [true, true, false],
+        ],
+
+        // ------------------------------------------------------------------ quality
+        'quality_inspection.requested' => [
+            'quality_inspection', 'Quality', 'An inspection was requested',
+            'Somebody has asked for a hold point or witness point to be inspected.',
+            'high', true, [true, true, false],
+        ],
+        'quality_inspection.completed' => [
+            'quality_inspection', 'Quality', 'An inspection you requested was carried out',
+            'The inspection you requested has been attended and a result recorded.',
+            'high', true, [true, true, false],
+        ],
+        'ncr.issued' => [
+            'ncr', 'Quality', 'A non-conformance was raised',
+            'Work you are responsible for has been recorded as not meeting the specification.',
+            'high', true, [true, true, false],
+        ],
+        'ncr.dispositioned' => [
+            'ncr', 'Quality', 'A non-conformance was dispositioned',
+            'An engineering decision was recorded on an NCR you raised or responded to.',
+            'high', true, [true, true, false],
+        ],
     ];
 
     /**

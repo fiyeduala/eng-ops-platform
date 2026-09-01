@@ -4,9 +4,22 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use App\Models\CorrectiveAction;
 use App\Models\Deliverable;
 use App\Models\Drawing;
+use App\Models\HseInspection;
+use App\Models\HseInspectionItem;
+use App\Models\HseObservation;
+use App\Models\Incident;
+use App\Models\IncidentPerson;
+use App\Models\Investigation;
+use App\Models\Ncr;
+use App\Models\QualityInspection;
+use App\Models\QualityInspectionItem;
+use App\Models\RiskAssessment;
 use App\Models\Submittal;
+use App\Models\TrainingCourse;
+use App\Models\TrainingRecord;
 
 /**
  * How each configurable setting is presented and validated (§72, §86).
@@ -112,6 +125,71 @@ final class SettingsCatalogue
                     'engineering.submittal_review_codes' => ['label' => 'Submittal review codes', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'What a reviewer stamps on a package. Leave blank to use: '.implode(', ', Submittal::DEFAULT_REVIEW_CODES)],
                     'engineering.rfi_response_days' => ['label' => 'Default RFI response time', 'type' => 'integer', 'rules' => ['required', 'integer', 'between:1,90'], 'help' => 'Working days, used to suggest a required-by date. Anyone raising an RFI can still choose their own.'],
                     'engineering.submittal_review_days' => ['label' => 'Default submittal review time', 'type' => 'integer', 'rules' => ['required', 'integer', 'between:1,90'], 'help' => 'Days, used to suggest a required-by date.'],
+                ],
+            ],
+
+            /*
+             * The vocabulary of the HSE registers.
+             *
+             * Same principle as the engineering lists above, and more load-bearing here. An
+             * incident category, a severity scale and an involvement type are the words a company
+             * already uses on paper; a platform that imposed its own would be argued with on the
+             * first day and worked around by the second. None of them is a business rule — the
+             * rules live in the policies and the services — so all of them are configuration (§73).
+             *
+             * ONE CAVEAT, WRITTEN HERE BECAUSE THIS IS WHERE SOMEBODY WILL EDIT IT: the values a
+             * workflow condition tests are the SLUGS of these labels. Renaming "Major" to "Serious"
+             * changes `major` to `serious`, and a routing rule written against the old slug stops
+             * matching. Adding and removing entries is safe; renaming one is a change to
+             * configuration that other configuration depends on.
+             */
+            'hse' => [
+                'label' => 'HSE registers',
+                'description' => 'The vocabulary your incidents, observations, risk assessments, inspections and training records use. Separate each entry with a comma.',
+                'settings' => [
+                    'hse_incident.categories' => ['label' => 'Incident categories', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Leave blank to use: '.implode(', ', Incident::DEFAULT_CATEGORIES)],
+                    'hse_incident.severities' => ['label' => 'Severity scale', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Used for BOTH what happened and what could have happened, so that the two can be compared. Leave blank to use: '.implode(', ', Incident::DEFAULT_SEVERITIES)],
+                    'hse_incident.involvements' => ['label' => 'How a person was involved', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Leave blank to use: '.implode(', ', IncidentPerson::DEFAULT_INVOLVEMENTS)],
+                    'hse_incident.treatments' => ['label' => 'Treatment given', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'The classification a lost-time figure is argued from. Leave blank to use: '.implode(', ', IncidentPerson::DEFAULT_TREATMENTS)],
+                    'investigation.methods' => ['label' => 'Investigation methods', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Leave blank to use: '.implode(', ', Investigation::DEFAULT_METHODS)],
+                    'corrective_action.types' => ['label' => 'Corrective action types', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Leave blank to use: '.implode(', ', CorrectiveAction::DEFAULT_TYPES)],
+                    'corrective_action.priorities' => ['label' => 'Corrective action priorities', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Leave blank to use: '.implode(', ', CorrectiveAction::DEFAULT_PRIORITIES)],
+                    'corrective_action.effectiveness' => ['label' => 'Effectiveness ratings', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Recorded when an action is verified — the answer to "did it work". Leave blank to use: '.implode(', ', CorrectiveAction::DEFAULT_EFFECTIVENESS)],
+                    'hse_observation.types' => ['label' => 'Observation types', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Keep the positive entries. A register that only records failure teaches people that reporting is punishment. Leave blank to use: '.implode(', ', HseObservation::DEFAULT_TYPES)],
+                    'hse_observation.categories' => ['label' => 'Observation categories', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Leave blank to use: '.implode(', ', HseObservation::DEFAULT_CATEGORIES)],
+                    'hse_observation.risk_levels' => ['label' => 'Observation risk levels', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Leave blank to use: '.implode(', ', HseObservation::DEFAULT_RISK_LEVELS)],
+                    'risk_assessment.types' => ['label' => 'Risk assessment types', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Leave blank to use: '.implode(', ', RiskAssessment::DEFAULT_TYPES)],
+                    'risk_assessment.default_validity_months' => ['label' => 'Risk assessments stay valid for', 'type' => 'integer', 'rules' => ['required', 'integer', 'between:1,60'], 'help' => 'Months. Used to suggest a review date; whoever writes the assessment can still choose their own.'],
+                    'hse_inspection.types' => ['label' => 'HSE inspection types', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Leave blank to use: '.implode(', ', HseInspection::DEFAULT_TYPES)],
+                    'hse_inspection.results' => ['label' => 'HSE inspection item results', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Keep an entry meaning "not applicable", or items that do not apply will count against the score. Leave blank to use: '.implode(', ', HseInspectionItem::DEFAULT_RESULTS)],
+                    'training_course.categories' => ['label' => 'Training categories', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Leave blank to use: '.implode(', ', TrainingCourse::DEFAULT_CATEGORIES)],
+                    'hse_training.results' => ['label' => 'Training outcomes', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Leave blank to use: '.implode(', ', TrainingRecord::DEFAULT_RESULTS)],
+                    'hse_training.expiry_warning_days' => ['label' => 'Warn about expiring certificates', 'type' => 'integer', 'rules' => ['required', 'integer', 'between:7,365'], 'help' => 'Days ahead. This is the window the training register opens on.'],
+                    'permit.expiry_warning_hours' => ['label' => 'Warn about expiring permits', 'type' => 'integer', 'rules' => ['required', 'integer', 'between:1,168'], 'help' => 'Hours ahead. Permits are measured in hours because they are worked to in hours.'],
+                ],
+            ],
+
+            /*
+             * The vocabulary of the quality registers.
+             *
+             * Kept separate from HSE rather than merged into one "operations" group, because the
+             * people who edit them are different people. A quality manager who has to scroll past
+             * eighteen safety settings to rename a disposition will eventually ask a developer to
+             * do it instead, which is the failure mode this whole layer exists to prevent.
+             */
+            'quality' => [
+                'label' => 'Quality registers',
+                'description' => 'The vocabulary your inspections and non-conformance reports use. Separate each entry with a comma.',
+                'settings' => [
+                    'quality_inspection.types' => ['label' => 'Inspection types', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Hold points and witness points are not the same thing — work may continue past a witness point and may not past a hold point. Leave blank to use: '.implode(', ', QualityInspection::DEFAULT_TYPES)],
+                    'quality_inspection.results' => ['label' => 'Inspection results', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'A result that no longer matches a configured status leaves the record where it is rather than moving it somewhere nobody asked for. Leave blank to use: '.implode(', ', QualityInspection::DEFAULT_RESULTS)],
+                    'quality_inspection.item_results' => ['label' => 'Inspection item results', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Leave blank to use: '.implode(', ', QualityInspectionItem::DEFAULT_RESULTS)],
+                    'quality_inspection.notice_days' => ['label' => 'Notice required for an inspection', 'type' => 'integer', 'rules' => ['required', 'integer', 'between:0,30'], 'help' => 'Days, used to suggest a required-by date when one is requested.'],
+                    'ncr.severities' => ['label' => 'NCR severities', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Leave blank to use: '.implode(', ', Ncr::DEFAULT_SEVERITIES)],
+                    'ncr.categories' => ['label' => 'NCR categories', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Leave blank to use: '.implode(', ', Ncr::DEFAULT_CATEGORIES)],
+                    'ncr.sources' => ['label' => 'How the non-conformance was found', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'What a supplier scorecard is built from. Leave blank to use: '.implode(', ', Ncr::DEFAULT_SOURCES)],
+                    'ncr.dispositions' => ['label' => 'NCR dispositions', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Repair, use-as-is and regrade always demand a written justification, whatever they are called here. Leave blank to use: '.implode(', ', Ncr::DEFAULT_DISPOSITIONS)],
+                    'ncr.response_days' => ['label' => 'Default NCR response time', 'type' => 'integer', 'rules' => ['required', 'integer', 'between:1,90'], 'help' => 'Days, used to suggest a required-by date.'],
                 ],
             ],
 

@@ -319,6 +319,245 @@ final class StatusCatalogue
                     ['decided', 'closed', 'Close', 'change_request.edit'],
                 ],
             ],
+
+            /*
+             * ------------------------------------------------------------------ HSE
+             *
+             * THE INCIDENT GRAPH IS THE ONE THAT CARRIES PHASE 4's EXIT CRITERION. `under_review`
+             * exists as a status in its own right — rather than folding straight from reported to
+             * closed — precisely so that an administrator has somewhere to hang "when it gets here,
+             * open an investigation and a corrective action". That is configuration doing the work
+             * a listener would otherwise do in PHP (§32, §73).
+             *
+             * `reported` is initial rather than `draft`. Incidents are not drafted: something
+             * happened, and the register's first duty is to have a row for it within the hour. A
+             * company that wants a drafting step adds one.
+             */
+            'hse_incident' => [
+                'statuses' => [
+                    'reported' => ['label' => 'Reported', 'color' => 'warning', 'initial' => true],
+                    'under_review' => ['label' => 'Under review', 'color' => 'brand'],
+                    'investigating' => ['label' => 'Investigating', 'color' => 'brand'],
+                    'actions_pending' => ['label' => 'Actions pending', 'color' => 'warning'],
+                    'closed' => ['label' => 'Closed', 'color' => 'success', 'terminal' => true],
+                    'void' => ['label' => 'Logged in error', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['reported', 'under_review', 'Start review', 'hse_incident.edit'],
+                    ['under_review', 'investigating', 'Open investigation', 'hse_incident.investigate'],
+                    ['investigating', 'actions_pending', 'Findings issued', 'hse_incident.investigate'],
+                    ['under_review', 'actions_pending', 'Raise actions', 'hse_incident.edit'],
+                    ['actions_pending', 'closed', 'Close out', 'hse_incident.close'],
+                    ['closed', 'under_review', 'Reopen', 'hse_incident.close', true],
+                    ['reported', 'void', 'Logged in error', 'hse_incident.close', true],
+                ],
+            ],
+
+            'investigation' => [
+                'statuses' => [
+                    'open' => ['label' => 'Open', 'color' => 'brand', 'initial' => true],
+                    'in_progress' => ['label' => 'In progress', 'color' => 'brand'],
+                    'draft_findings' => ['label' => 'Draft findings', 'color' => 'warning'],
+                    'completed' => ['label' => 'Completed', 'color' => 'success', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['open', 'in_progress', 'Start', 'hse_incident.investigate'],
+                    ['in_progress', 'draft_findings', 'Draft findings', 'hse_incident.investigate'],
+                    ['draft_findings', 'completed', 'Sign off', 'hse_incident.investigate'],
+                    ['completed', 'in_progress', 'Reopen', 'hse_incident.investigate', true],
+                ],
+            ],
+
+            /*
+             * Two statuses no other register has: `verified` and `ineffective`. They are the whole
+             * argument of the corrective-action module. "Completed" is the assignee's word;
+             * "verified" is somebody else's, and "ineffective" is the outcome a register that only
+             * had "done" could never record — the action was carried out and the problem came back.
+             */
+            'corrective_action' => [
+                'statuses' => [
+                    'open' => ['label' => 'Open', 'color' => 'warning', 'initial' => true],
+                    'in_progress' => ['label' => 'In progress', 'color' => 'brand'],
+                    'completed' => ['label' => 'Completed', 'color' => 'brand'],
+                    'verified' => ['label' => 'Verified', 'color' => 'success', 'terminal' => true],
+                    'ineffective' => ['label' => 'Ineffective', 'color' => 'danger'],
+                    'cancelled' => ['label' => 'Cancelled', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['open', 'in_progress', 'Start', 'corrective_action.edit'],
+                    ['in_progress', 'completed', 'Mark complete', 'corrective_action.edit', true],
+                    ['open', 'completed', 'Mark complete', 'corrective_action.edit', true],
+                    ['completed', 'verified', 'Verify', 'corrective_action.verify'],
+                    ['completed', 'ineffective', 'Not effective', 'corrective_action.verify', true],
+                    ['ineffective', 'in_progress', 'Reopen', 'corrective_action.assign'],
+                    [null, 'cancelled', 'Cancel', 'corrective_action.close', true],
+                ],
+            ],
+
+            'hse_observation' => [
+                'statuses' => [
+                    'open' => ['label' => 'Open', 'color' => 'brand', 'initial' => true],
+                    'action_raised' => ['label' => 'Action raised', 'color' => 'warning'],
+                    'closed' => ['label' => 'Closed', 'color' => 'success', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['open', 'action_raised', 'Raise action', 'hse_observation.edit'],
+                    ['open', 'closed', 'Close', 'hse_observation.close'],
+                    ['action_raised', 'closed', 'Close', 'hse_observation.close'],
+                    ['closed', 'open', 'Reopen', 'hse_observation.close', true],
+                ],
+            ],
+
+            /*
+             * `expired` is deliberately NOT in this list. Expiry is a date — see
+             * RiskAssessment::hasExpired() — and a status that has to be swept into place by a
+             * nightly job is a status that is wrong every night until the job runs. The register
+             * derives it from `valid_to`, which is right the moment the clock passes.
+             */
+            'hse_risk' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'in_review' => ['label' => 'In review', 'color' => 'brand'],
+                    'approved' => ['label' => 'Approved', 'color' => 'success'],
+                    'superseded' => ['label' => 'Superseded', 'color' => 'neutral', 'terminal' => true],
+                    'withdrawn' => ['label' => 'Withdrawn', 'color' => 'danger', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['draft', 'in_review', 'Send for review', 'hse_risk.edit'],
+                    ['in_review', 'draft', 'Return for amendment', 'hse_risk.edit', true],
+                    ['in_review', 'approved', 'Approve', 'hse_risk.approve'],
+                    ['approved', 'superseded', 'Supersede', 'hse_risk.approve'],
+                    [null, 'withdrawn', 'Withdraw', 'hse_risk.approve', true],
+                ],
+            ],
+
+            'hse_inspection' => [
+                'statuses' => [
+                    'scheduled' => ['label' => 'Scheduled', 'color' => 'neutral', 'initial' => true],
+                    'performed' => ['label' => 'Performed', 'color' => 'brand'],
+                    'actions_pending' => ['label' => 'Actions pending', 'color' => 'warning'],
+                    'closed' => ['label' => 'Closed', 'color' => 'success', 'terminal' => true],
+                    'cancelled' => ['label' => 'Cancelled', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['scheduled', 'performed', 'Record results', 'hse_inspection.edit'],
+                    ['performed', 'actions_pending', 'Raise actions', 'hse_inspection.edit'],
+                    ['performed', 'closed', 'Close', 'hse_inspection.close'],
+                    ['actions_pending', 'closed', 'Close', 'hse_inspection.close'],
+                    ['scheduled', 'cancelled', 'Cancel', 'hse_inspection.edit', true],
+                ],
+            ],
+
+            'toolbox_talk' => [
+                'statuses' => [
+                    'planned' => ['label' => 'Planned', 'color' => 'neutral', 'initial' => true],
+                    'held' => ['label' => 'Held', 'color' => 'success', 'terminal' => true],
+                    'cancelled' => ['label' => 'Cancelled', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['planned', 'held', 'Record delivery', 'toolbox_talk.edit'],
+                    ['planned', 'cancelled', 'Cancel', 'toolbox_talk.edit'],
+                ],
+            ],
+
+            /*
+             * THE ONLY GRAPH IN THE APPLICATION WHERE A TERMINAL STATE IS THE NORMAL DAILY OUTCOME.
+             * Permits are opened and closed within a shift, in their hundreds, and `suspended` is a
+             * round trip rather than an exception — a gas alarm stops the work and the same permit
+             * resumes an hour later. Modelling suspension as cancel-and-reissue would lose the fact
+             * that it was one job.
+             */
+            'permit' => [
+                'statuses' => [
+                    'requested' => ['label' => 'Requested', 'color' => 'neutral', 'initial' => true],
+                    'issued' => ['label' => 'Issued', 'color' => 'brand'],
+                    'active' => ['label' => 'Active', 'color' => 'success'],
+                    'suspended' => ['label' => 'Suspended', 'color' => 'danger'],
+                    'closed' => ['label' => 'Closed', 'color' => 'neutral', 'terminal' => true],
+                    'rejected' => ['label' => 'Rejected', 'color' => 'danger', 'terminal' => true],
+                    'cancelled' => ['label' => 'Cancelled', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['requested', 'issued', 'Issue', 'permit.approve'],
+                    ['requested', 'rejected', 'Reject', 'permit.reject', true],
+                    ['issued', 'active', 'Accept', 'permit.review'],
+                    ['active', 'suspended', 'Suspend', 'permit.edit', true],
+                    ['suspended', 'active', 'Resume', 'permit.approve'],
+                    ['active', 'closed', 'Close', 'permit.close'],
+                    ['suspended', 'closed', 'Close', 'permit.close'],
+                    ['issued', 'cancelled', 'Cancel', 'permit.close', true],
+                    ['requested', 'cancelled', 'Cancel', 'permit.close', true],
+                ],
+            ],
+
+            /*
+             * A training record has no workflow worth the name — the certificate either exists or
+             * it does not — so the vocabulary records the ONE thing the register is opened for:
+             * whether the ticket is still good. `expiring` is a courtesy status a company can drive
+             * from the expiry report; nothing branches on it.
+             */
+            'hse_training' => [
+                'statuses' => [
+                    'valid' => ['label' => 'Valid', 'color' => 'success', 'initial' => true],
+                    'expiring' => ['label' => 'Expiring soon', 'color' => 'warning'],
+                    'expired' => ['label' => 'Expired', 'color' => 'danger'],
+                    'revoked' => ['label' => 'Revoked', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['valid', 'expiring', 'Flag as expiring', 'hse_training.edit'],
+                    ['expiring', 'expired', 'Mark expired', 'hse_training.edit'],
+                    ['valid', 'expired', 'Mark expired', 'hse_training.edit'],
+                    [null, 'revoked', 'Revoke', 'hse_training.manage', true],
+                ],
+            ],
+
+            // ------------------------------------------------------------------ quality
+
+            'quality_inspection' => [
+                'statuses' => [
+                    'requested' => ['label' => 'Requested', 'color' => 'neutral', 'initial' => true],
+                    'scheduled' => ['label' => 'Scheduled', 'color' => 'brand'],
+                    'passed' => ['label' => 'Passed', 'color' => 'success', 'terminal' => true],
+                    'passed_with_comment' => ['label' => 'Passed with comment', 'color' => 'success', 'terminal' => true],
+                    'rejected' => ['label' => 'Rejected', 'color' => 'danger'],
+                    'cancelled' => ['label' => 'Cancelled', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['requested', 'scheduled', 'Schedule', 'quality_inspection.edit'],
+                    ['scheduled', 'passed', 'Pass', 'quality_inspection.approve'],
+                    ['scheduled', 'passed_with_comment', 'Pass with comment', 'quality_inspection.approve', true],
+                    ['scheduled', 'rejected', 'Reject', 'quality_inspection.approve', true],
+                    ['rejected', 'requested', 'Re-request after rework', 'quality_inspection.edit'],
+                    ['requested', 'cancelled', 'Cancel', 'quality_inspection.edit', true],
+                ],
+            ],
+
+            /*
+             * NOTE WHAT THE NCR STATUSES DO NOT SAY: none of them is "use as is" or "rework". Those
+             * are dispositions, they live in their own column, and keeping them out of the status
+             * vocabulary is what lets "closed" and "closed as use-as-is" both be answerable — the
+             * first from the status, the second only from the pair. See Ncr's docblock.
+             */
+            'ncr' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'issued' => ['label' => 'Issued', 'color' => 'warning'],
+                    'responded' => ['label' => 'Responded', 'color' => 'brand'],
+                    'dispositioned' => ['label' => 'Dispositioned', 'color' => 'brand'],
+                    'verified' => ['label' => 'Verified', 'color' => 'success'],
+                    'closed' => ['label' => 'Closed', 'color' => 'success', 'terminal' => true],
+                    'withdrawn' => ['label' => 'Withdrawn', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['draft', 'issued', 'Issue', 'ncr.submit'],
+                    ['issued', 'responded', 'Record response', 'ncr.review'],
+                    ['responded', 'dispositioned', 'Record disposition', 'ncr.approve', true],
+                    ['issued', 'dispositioned', 'Record disposition', 'ncr.approve', true],
+                    ['dispositioned', 'verified', 'Verify', 'ncr.review'],
+                    ['verified', 'closed', 'Close', 'ncr.close'],
+                    ['draft', 'withdrawn', 'Withdraw', 'ncr.edit', true],
+                ],
+            ],
         ];
     }
 

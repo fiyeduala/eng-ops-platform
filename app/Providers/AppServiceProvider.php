@@ -16,30 +16,48 @@ use App\Engines\Workflow\AssigneeResolver;
 use App\Events\AnnouncementPublished;
 use App\Events\ApprovalDecided;
 use App\Events\ApprovalRequested;
+use App\Events\ChangeRequestDecided;
+use App\Events\CorrectiveActionAssigned;
 use App\Events\DocumentApproved;
 use App\Events\DocumentRevisionRequested;
+use App\Events\IncidentReported;
+use App\Events\InvestigationAssigned;
 use App\Events\MeetingCancelled;
 use App\Events\MeetingInvited;
 use App\Events\MeetingMinutesCirculated;
 use App\Events\MeetingRescheduled;
 use App\Events\MemoIssued;
-use App\Events\TaskAssigned;
-use App\Events\ChangeRequestDecided;
+use App\Events\NcrDispositioned;
+use App\Events\NcrIssued;
+use App\Events\PermitIssued;
+use App\Events\PermitSuspended;
+use App\Events\QualityInspectionCompleted;
+use App\Events\QualityInspectionRequested;
 use App\Events\RfiAnswered;
 use App\Events\SubmittalReviewed;
+use App\Events\TaskAssigned;
 use App\Events\TransmittalIssued;
 use App\Events\WorkflowStalled;
 use App\Listeners\NotifyAnnouncementAudience;
 use App\Listeners\NotifyApprovalAssignees;
 use App\Listeners\NotifyApprovalOutcome;
 use App\Listeners\NotifyChangeRequestDecided;
+use App\Listeners\NotifyCorrectiveActionAssigned;
 use App\Listeners\NotifyDocumentApproved;
 use App\Listeners\NotifyDocumentRevisionRequested;
+use App\Listeners\NotifyIncidentReported;
+use App\Listeners\NotifyInvestigationAssigned;
 use App\Listeners\NotifyMeetingCancelled;
 use App\Listeners\NotifyMeetingMinutes;
 use App\Listeners\NotifyMeetingParticipants;
 use App\Listeners\NotifyMeetingRescheduled;
 use App\Listeners\NotifyMemoRecipients;
+use App\Listeners\NotifyNcrDispositioned;
+use App\Listeners\NotifyNcrIssued;
+use App\Listeners\NotifyPermitIssued;
+use App\Listeners\NotifyPermitSuspended;
+use App\Listeners\NotifyQualityInspectionCompleted;
+use App\Listeners\NotifyQualityInspectionRequested;
 use App\Listeners\NotifyRfiAnswered;
 use App\Listeners\NotifySubmittalReviewed;
 use App\Listeners\NotifyTaskAssignee;
@@ -51,6 +69,7 @@ use App\Models\Announcement;
 use App\Models\Approval;
 use App\Models\AuditLog;
 use App\Models\ChangeRequest;
+use App\Models\CorrectiveAction;
 use App\Models\Deliverable;
 use App\Models\Document;
 use App\Models\DocumentCategory;
@@ -58,26 +77,40 @@ use App\Models\DocumentVersion;
 use App\Models\Drawing;
 use App\Models\Employee;
 use App\Models\Follower;
+use App\Models\HseInspection;
+use App\Models\HseInspectionItem;
+use App\Models\HseObservation;
+use App\Models\Incident;
+use App\Models\IncidentPerson;
+use App\Models\Investigation;
 use App\Models\Location;
 use App\Models\Meeting;
 use App\Models\MeetingDecision;
 use App\Models\MeetingParticipant;
 use App\Models\Memo;
 use App\Models\MemoRecipient;
+use App\Models\Ncr;
 use App\Models\Notification;
 use App\Models\NotificationPreference;
 use App\Models\NumberingScheme;
 use App\Models\NumberSequence;
 use App\Models\Organization;
 use App\Models\OrgUnit;
+use App\Models\Permit;
+use App\Models\PermitPrecaution;
+use App\Models\PermitType;
 use App\Models\Position;
 use App\Models\Project;
 use App\Models\ProjectDepartment;
 use App\Models\ProjectMember;
 use App\Models\ProjectRole;
 use App\Models\ProjectType;
+use App\Models\QualityInspection;
+use App\Models\QualityInspectionItem;
 use App\Models\RecordPermission;
 use App\Models\Rfi;
+use App\Models\RiskAssessment;
+use App\Models\RiskAssessmentHazard;
 use App\Models\Role;
 use App\Models\Setting;
 use App\Models\Signature;
@@ -89,6 +122,10 @@ use App\Models\Task;
 use App\Models\TaskChecklistItem;
 use App\Models\TaskDependency;
 use App\Models\Template;
+use App\Models\ToolboxTalk;
+use App\Models\ToolboxTalkAttendee;
+use App\Models\TrainingCourse;
+use App\Models\TrainingRecord;
 use App\Models\Transmittal;
 use App\Models\TransmittalItem;
 use App\Models\User;
@@ -101,6 +138,7 @@ use App\Policies\AnnouncementPolicy;
 use App\Policies\ApprovalPolicy;
 use App\Policies\AuditLogPolicy;
 use App\Policies\ChangeRequestPolicy;
+use App\Policies\CorrectiveActionPolicy;
 use App\Policies\DeliverablePolicy;
 use App\Policies\DocumentCategoryPolicy;
 use App\Policies\DocumentPolicy;
@@ -108,24 +146,38 @@ use App\Policies\DocumentVersionPolicy;
 use App\Policies\DrawingPolicy;
 use App\Policies\EmployeePolicy;
 use App\Policies\FollowerPolicy;
+use App\Policies\HseInspectionItemPolicy;
+use App\Policies\HseInspectionPolicy;
+use App\Policies\HseObservationPolicy;
+use App\Policies\IncidentPersonPolicy;
+use App\Policies\IncidentPolicy;
+use App\Policies\InvestigationPolicy;
 use App\Policies\LocationPolicy;
 use App\Policies\MeetingDecisionPolicy;
 use App\Policies\MeetingParticipantPolicy;
 use App\Policies\MeetingPolicy;
 use App\Policies\MemoPolicy;
 use App\Policies\MemoRecipientPolicy;
+use App\Policies\NcrPolicy;
 use App\Policies\NotificationPolicy;
 use App\Policies\NumberingSchemePolicy;
 use App\Policies\NumberSequencePolicy;
 use App\Policies\OrganizationPolicy;
 use App\Policies\OrgUnitPolicy;
+use App\Policies\PermitPolicy;
+use App\Policies\PermitPrecautionPolicy;
+use App\Policies\PermitTypePolicy;
 use App\Policies\PositionPolicy;
 use App\Policies\ProjectDepartmentPolicy;
 use App\Policies\ProjectMemberPolicy;
 use App\Policies\ProjectPolicy;
 use App\Policies\ProjectRolePolicy;
 use App\Policies\ProjectTypePolicy;
+use App\Policies\QualityInspectionItemPolicy;
+use App\Policies\QualityInspectionPolicy;
 use App\Policies\RfiPolicy;
+use App\Policies\RiskAssessmentHazardPolicy;
+use App\Policies\RiskAssessmentPolicy;
 use App\Policies\RolePolicy;
 use App\Policies\SettingPolicy;
 use App\Policies\SignaturePolicy;
@@ -137,6 +189,10 @@ use App\Policies\TaskChecklistItemPolicy;
 use App\Policies\TaskDependencyPolicy;
 use App\Policies\TaskPolicy;
 use App\Policies\TemplatePolicy;
+use App\Policies\ToolboxTalkAttendeePolicy;
+use App\Policies\ToolboxTalkPolicy;
+use App\Policies\TrainingCoursePolicy;
+use App\Policies\TrainingRecordPolicy;
 use App\Policies\TransmittalItemPolicy;
 use App\Policies\TransmittalPolicy;
 use App\Policies\UserPolicy;
@@ -289,6 +345,32 @@ class AppServiceProvider extends ServiceProvider
             'submittal' => Submittal::class,
             'submittal_item' => SubmittalItem::class,
             'change_request' => ChangeRequest::class,
+
+            // --- Phase 4: HSE and quality --------------------------------------------
+            // `investigation` and `corrective_action` carry more weight than the rest: they are the
+            // two keys a workflow auto-action stores when an administrator configures "an incident
+            // spawns an investigation and a corrective action". That configuration is data in a
+            // customer's database, so these two strings are effectively public API — changing them
+            // would break routes that already exist in the field (§32).
+            'hse_incident' => Incident::class,
+            'incident_person' => IncidentPerson::class,
+            'investigation' => Investigation::class,
+            'corrective_action' => CorrectiveAction::class,
+            'hse_observation' => HseObservation::class,
+            'hse_risk' => RiskAssessment::class,
+            'risk_assessment_hazard' => RiskAssessmentHazard::class,
+            'hse_inspection' => HseInspection::class,
+            'hse_inspection_item' => HseInspectionItem::class,
+            'toolbox_talk' => ToolboxTalk::class,
+            'toolbox_talk_attendee' => ToolboxTalkAttendee::class,
+            'permit_type' => PermitType::class,
+            'permit' => Permit::class,
+            'permit_precaution' => PermitPrecaution::class,
+            'training_course' => TrainingCourse::class,
+            'hse_training' => TrainingRecord::class,
+            'quality_inspection' => QualityInspection::class,
+            'quality_inspection_item' => QualityInspectionItem::class,
+            'ncr' => Ncr::class,
         ]);
     }
 
@@ -398,6 +480,34 @@ class AppServiceProvider extends ServiceProvider
             Submittal::class => SubmittalPolicy::class,
             SubmittalItem::class => SubmittalItemPolicy::class,
             ChangeRequest::class => ChangeRequestPolicy::class,
+
+            // --- Phase 4: HSE and quality --------------------------------------------
+            // The line policies are not filler. IncidentPersonPolicy::viewMedical() is a SECOND
+            // question layered on top of `view` — an injury, a body part and a treatment are
+            // medical facts about a named person, and being able to open the incident is not the
+            // same as being entitled to read them (§68). PermitPrecautionPolicy and
+            // ToolboxTalkAttendeePolicy exist for the same reason in reverse: confirming a
+            // precaution and signing for a talk are acts, and they are gated on who you are rather
+            // than only on what you can see.
+            Incident::class => IncidentPolicy::class,
+            IncidentPerson::class => IncidentPersonPolicy::class,
+            Investigation::class => InvestigationPolicy::class,
+            CorrectiveAction::class => CorrectiveActionPolicy::class,
+            HseObservation::class => HseObservationPolicy::class,
+            RiskAssessment::class => RiskAssessmentPolicy::class,
+            RiskAssessmentHazard::class => RiskAssessmentHazardPolicy::class,
+            HseInspection::class => HseInspectionPolicy::class,
+            HseInspectionItem::class => HseInspectionItemPolicy::class,
+            ToolboxTalk::class => ToolboxTalkPolicy::class,
+            ToolboxTalkAttendee::class => ToolboxTalkAttendeePolicy::class,
+            PermitType::class => PermitTypePolicy::class,
+            Permit::class => PermitPolicy::class,
+            PermitPrecaution::class => PermitPrecautionPolicy::class,
+            TrainingCourse::class => TrainingCoursePolicy::class,
+            TrainingRecord::class => TrainingRecordPolicy::class,
+            QualityInspection::class => QualityInspectionPolicy::class,
+            QualityInspectionItem::class => QualityInspectionItemPolicy::class,
+            Ncr::class => NcrPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {
@@ -517,6 +627,50 @@ class AppServiceProvider extends ServiceProvider
             ],
             ChangeRequestDecided::class => [
                 NotifyChangeRequestDecided::class,
+            ],
+
+            // --- HSE -----------------------------------------------------------------
+            // NOTHING HERE SPAWNS A RECORD. Phase 4's exit criterion is that an incident produces
+            // an investigation and a corrective action THROUGH CONFIGURATION ALONE, so that work
+            // belongs to workflow auto-actions an administrator sets up against a status — not to a
+            // listener bolted onto IncidentReported, which would hard-code one company's process
+            // and leave every other company unable to change it (§32, §73, §90). These listeners
+            // only tell people.
+            IncidentReported::class => [
+                NotifyIncidentReported::class,
+            ],
+            InvestigationAssigned::class => [
+                NotifyInvestigationAssigned::class,
+            ],
+            CorrectiveActionAssigned::class => [
+                NotifyCorrectiveActionAssigned::class,
+            ],
+
+            // Permits are the one register where a notification failing to arrive is a safety
+            // matter rather than an inconvenience, which is why both keys are mandatory in the
+            // catalogue and cannot be muted per user.
+            PermitIssued::class => [
+                NotifyPermitIssued::class,
+            ],
+            PermitSuspended::class => [
+                NotifyPermitSuspended::class,
+            ],
+
+            // --- quality -------------------------------------------------------------
+            // Both halves of the sentence, unlike the engineering registers above: an inspection is
+            // requested BY somebody inside this system and attended BY somebody inside it, so
+            // unlike an RFI or a transmittal there is a real internal audience at both ends.
+            QualityInspectionRequested::class => [
+                NotifyQualityInspectionRequested::class,
+            ],
+            QualityInspectionCompleted::class => [
+                NotifyQualityInspectionCompleted::class,
+            ],
+            NcrIssued::class => [
+                NotifyNcrIssued::class,
+            ],
+            NcrDispositioned::class => [
+                NotifyNcrDispositioned::class,
             ],
         ];
 

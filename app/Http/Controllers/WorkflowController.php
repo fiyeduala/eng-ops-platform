@@ -115,6 +115,7 @@ class WorkflowController extends Controller
             'quorums' => WorkflowCatalogue::quorums(),
             'operators' => WorkflowCatalogue::operators(),
             'autoActions' => WorkflowCatalogue::autoActions(),
+            'spawnableRecords' => WorkflowCatalogue::spawnableRecords(),
             'timeline' => $this->activity->timelineFor($workflow)->limit(20)->get(),
             'canEdit' => $user->can('update', $workflow),
             'canPublish' => $user->can('publish', $workflow),

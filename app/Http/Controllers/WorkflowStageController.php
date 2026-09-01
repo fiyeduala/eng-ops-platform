@@ -191,6 +191,7 @@ class WorkflowStageController extends Controller
             'quorums' => WorkflowCatalogue::quorums(),
             'operators' => WorkflowCatalogue::operators(),
             'autoActions' => WorkflowCatalogue::autoActions(),
+            'spawnableRecords' => WorkflowCatalogue::spawnableRecords(),
             'conditionFields' => WorkflowCatalogue::conditionFields($workflow->entity_type),
             'rejectOptions' => [
                 WorkflowStage::ON_REJECT_OWNER => 'Send it back to the author',

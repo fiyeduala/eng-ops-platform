@@ -2,6 +2,11 @@ import './bootstrap';
 
 import Alpine from 'alpinejs';
 import documentEditor, { richTextField } from './editor';
+import attendanceSheet from './attendance-sheet';
+import checklistTable from './checklist-table';
+import criteriaTable from './criteria-table';
+import hazardTable from './hazard-table';
+import precautionTable from './precaution-table';
 import collapse from '@alpinejs/collapse';
 import focus from '@alpinejs/focus';
 
@@ -62,6 +67,35 @@ Alpine.data('documentEditor', documentEditor);
  * saved with a Save button rather than autosaved against its own endpoint.
  */
 Alpine.data('richTextField', richTextField);
+
+/*
+ * The hazard table on a risk assessment (Phase 4).
+ *
+ * Registered here for the same reason the editor is: the component receives its existing rows as a
+ * prop from the Blade file, rather than a loose script tag reading them back out of the DOM.
+ */
+Alpine.data('hazardTable', hazardTable);
+
+/*
+ * The questions an HSE inspection is walked against (Phase 4).
+ */
+Alpine.data('checklistTable', checklistTable);
+
+/*
+ * The acceptance criteria a quality inspection is walked against (Phase 4). Deliberately not the
+ * same component: one carries scores, the other carries the specification clause.
+ */
+Alpine.data('criteriaTable', criteriaTable);
+
+/*
+ * The attendance sheet on a toolbox talk (Phase 4).
+ */
+Alpine.data('attendanceSheet', attendanceSheet);
+
+/*
+ * The precaution template on a permit type (Phase 4).
+ */
+Alpine.data('precautionTable', precautionTable);
 
 window.Alpine = Alpine;
 Alpine.start();

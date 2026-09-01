@@ -193,7 +193,7 @@ not Rev 1 · signatures are internal approval signatures, not qualified ones und
 (docs/09 §5) · the TipTap bundle is ~564 kB minified and is loaded on every page; code-splitting it
 behind the editor routes is a Phase 9 performance item, not a correctness one.
 
-## PHASE 4 — Engineering · HSE · QA/QC ⬜
+## PHASE 4 — Engineering · HSE · QA/QC ✅
 
 Disciplines · deliverables · drawing register · design reviews · RFIs · technical queries ·
 submittals · HSE incidents/near misses/observations · risk assessments · inspections · toolbox
@@ -201,6 +201,78 @@ talks · permits-to-work · corrective actions · HSE training · quality inspec
 
 **Exit criteria:** an HSE incident automatically spawns an investigation and corrective-action task
 through configuration alone.
+
+**Met, and proven by `tests/Feature/Hse/IncidentSpawnsInvestigationTest`.** The test configures the
+entire route by POSTing to `workflows.store`, `workflows.stages.store` and `workflows.publish` —
+the same three endpoints the builder screen posts to, with the same field names its inputs carry. It
+calls no service and constructs no stage. A site safety officer then reports an incident through the
+ordinary register form and submits it; the investigation opens with the incident's project and
+classification and the configured lead and due date, and the corrective action is raised, assigned
+and dated. Neither the engine nor the controller names either record type.
+
+The mechanism is the `create_record` auto-action plus `SpawnsFromRecord` — see docs/07 §6. The
+runner resolves a morph key through the morph map and asks the class; the builder's picker is
+discovered the same way. Adding a spawnable record type in Phase 5 is one interface on one model.
+
+**The exit criterion is in the demo data, not only in the test.** `DemoSeeder` configures Meridian's
+incident route through `WorkflowDefinitionService` — one stage, "HSE manager review", assigned to
+the `hse-manager` role, carrying two `create_record` actions — reports a lost-time injury against
+it, and then FETCHES the investigation and the corrective action back out of the database, throwing
+a `RuntimeException` if either is missing rather than seeding a thinner story quietly. Seeding
+produces `INC-2026-0002 → INV-2026-0001`, lead resolved from the role and due in fourteen days, plus
+`CA-00004` on the site manager due in seven. Kestrel configures no incident route at all and closes
+its near miss by hand — the same seeder code, a different configuration (§73).
+
+The seeder's `decide()` helper is now typed to `Model` rather than `Document`, which is Engine 2's
+argument in one signature: the demo approves an incident with the call it approves a drawing
+register submission with, because the engine never knew which it had.
+
+**Four defects this phase found**, each invisible to a unit test because each lived in the seam
+between a form, a request and an engine:
+
+- **`WorkflowStageRequest` validated every auto-action key except `record`.** `validated()` returns
+  only what the rules name, so the record type was stripped between the builder and the stage. The
+  stage saved, the screen said it saved, the summary listed the action — and the runner threw "a
+  create_record action named no record type" on the first incident that reached the stage.
+  Configuration that silently discards half of itself is worse than configuration that refuses.
+- **Nothing outside `DocumentService` ever called `WorkflowEngine::start()`.** The engine was
+  general and its single caller was not, so no register record could enter a route at all — the exit
+  criterion was unreachable through the UI no matter how the workflow was configured (§90). The fix
+  is `RegisterController::submitForApproval()`, shared by every register whose model uses
+  `HasWorkflow`, gated on `update` rather than a new permission nobody knew to grant.
+- **`Incident::correctiveActions()` declared `HasMany` and returned a `MorphMany`**, and
+  `IncidentPerson` had no `$table`, so Laravel's pluraliser looked for `incident_people` against a
+  table called `incident_persons`. Both are fatal the moment an incident page has anything on it;
+  both went unnoticed because no test had opened a fully populated incident.
+- **`RegisterService::create()` left `confidentiality` to the column default.** The row was always
+  right, so every test that reloaded a record passed; the object the service handed back carried no
+  such key at all. Two things read the object rather than the row — the notification gate, which
+  skips a subject whose classification it cannot see (§68), and `SubmittalService::resubmit()`,
+  which copies the parent's classification onto the next attempt. The second copied a null onto a
+  NOT NULL column and took the whole resubmittal down, but only for callers that never reload: a
+  seeder, an import, a queued job. Through HTTP, route model binding hid it completely. The
+  classification is now stamped on the model at creation, column-gated and cached per table.
+
+**Idempotence is tested separately and is not a detail.** A stage is re-entered every time a report
+is sent back and resubmitted, and each entry runs its auto-actions again. The test sends the
+incident back with `request_revision`, resubmits it, and asserts the incident still has exactly one
+investigation and one corrective action — the same rows, not replacements. That check lives in
+`Investigation::spawnFrom()`, where "one per incident" is a fact about investigations, rather than in
+an engine that names no module.
+
+**Blade's `\B@` rule cost three broken pages** before a compile pass over the whole view tree caught
+them. Blade does not compile a directive immediately preceded by a word character, but it does
+compile the matching `@endif`: `the promised date@endif` left an `@if` open and `owes the answer@if`
+left a stray `@endif` behind, each producing a parse error at a line number nowhere near the cause.
+Every directive now starts after whitespace or punctuation, and `resources/views` compiles clean
+(226 templates).
+
+**Known limits, stated rather than discovered:** the `create_record` picker offers only record types
+that implement `SpawnsFromRecord` — currently investigations and corrective actions — so "open a
+permit when an inspection fails" is a Phase 5 interface, not a configuration option today · a
+corrective action's idempotence key is its configured title, so two actions with the same title on
+one stage collapse into one · `submitForApproval()` is wired to a route on incidents only; the other
+registers inherit the method but have no submit endpoint until a company asks for one.
 
 ## PHASE 5 — Business operations ⬜
 

@@ -167,6 +167,47 @@ class Navigation
                 ],
             ],
             [
+                // HSE, ordered by what a safety adviser opens most. Incidents first because that is
+                // what the section is judged on; observations high up because the whole point of a
+                // near-miss card is that reporting one takes thirty seconds; permits above training
+                // because a control room refreshes "live now" all day.
+                //
+                // Investigations get their own entry even though every one of them is reached from
+                // an incident, because "what is still under investigation" is a question asked
+                // across the whole register rather than about one record. They are governed by
+                // `hse_incident` throughout — an investigation is the incident's own paperwork.
+                'label' => 'Health & safety',
+                'items' => [
+                    ['label' => 'Incidents', 'route' => 'incidents.index', 'icon' => 'alert',
+                        'permission' => 'hse_incident.view', 'active' => 'incidents.*'],
+                    ['label' => 'Investigations', 'route' => 'investigations.index', 'icon' => 'search',
+                        'permission' => 'hse_incident.investigate', 'active' => 'investigations.*'],
+                    ['label' => 'Corrective actions', 'route' => 'corrective-actions.index', 'icon' => 'target',
+                        'permission' => 'corrective_action.view', 'active' => 'corrective-actions.*'],
+                    ['label' => 'Observations', 'route' => 'hse-observations.index', 'icon' => 'info',
+                        'permission' => 'hse_observation.view', 'active' => 'hse-observations.*'],
+                    ['label' => 'Permits to work', 'route' => 'permits.index', 'icon' => 'lock',
+                        'permission' => 'permit.view', 'active' => 'permits.*'],
+                    ['label' => 'Risk assessments', 'route' => 'risk-assessments.index', 'icon' => 'shield',
+                        'permission' => 'hse_risk.view', 'active' => 'risk-assessments.*'],
+                    ['label' => 'Inspections', 'route' => 'hse-inspections.index', 'icon' => 'check-square',
+                        'permission' => 'hse_inspection.view', 'active' => 'hse-inspections.*'],
+                    ['label' => 'Toolbox talks', 'route' => 'toolbox-talks.index', 'icon' => 'users',
+                        'permission' => 'toolbox_talk.view', 'active' => 'toolbox-talks.*'],
+                    ['label' => 'Training records', 'route' => 'training-records.index', 'icon' => 'badge',
+                        'permission' => 'hse_training.view', 'active' => 'training-records.*'],
+                ],
+            ],
+            [
+                'label' => 'Quality',
+                'items' => [
+                    ['label' => 'Inspection requests', 'route' => 'quality-inspections.index', 'icon' => 'check',
+                        'permission' => 'quality_inspection.view', 'active' => 'quality-inspections.*'],
+                    ['label' => 'Non-conformances', 'route' => 'ncrs.index', 'icon' => 'scroll',
+                        'permission' => 'ncr.view', 'active' => 'ncrs.*'],
+                ],
+            ],
+            [
                 'label' => 'Administration',
                 'items' => [
                     ['label' => 'User accounts', 'route' => 'users.index', 'icon' => 'key',
@@ -184,6 +225,19 @@ class Navigation
                         'active' => 'document-categories.*'],
                     ['label' => 'Templates', 'route' => 'templates.index', 'icon' => 'file-text',
                         'permission' => ['template.view', 'template.manage'], 'active' => 'templates.*'],
+
+                    // Two catalogues, listed here rather than beside the registers they feed,
+                    // because both are administration: `permit_types.precaution_template` is the
+                    // safety checklist copied onto every future permit, and a course's
+                    // `validity_months` decides when every certificate of that kind lapses. Both
+                    // are shown only to the `manage` holder, which is why their permission lists
+                    // omit the matching `.view` — everybody with `.view` can already read a type's
+                    // name on the records that use it, and does not need a settings screen for it.
+                    ['label' => 'Permit types', 'route' => 'permit-types.index', 'icon' => 'lock',
+                        'permission' => 'permit.manage', 'active' => 'permit-types.*'],
+                    ['label' => 'Training courses', 'route' => 'training-courses.index', 'icon' => 'badge',
+                        'permission' => 'hse_training.manage', 'active' => 'training-courses.*'],
+
                     ['label' => 'Audit trail', 'route' => 'audit.index', 'icon' => 'scroll',
                         'permission' => 'audit_log.view', 'active' => 'audit.*'],
                 ],

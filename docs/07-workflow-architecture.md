@@ -128,20 +128,75 @@ comments and timings are preserved for audit.
 
 ## 6. Automatic side effects (§32)
 
-Stages may declare `auto_actions` executed on enter or on complete:
+A stage carries `auto_actions`: a JSON list of keyed instructions run **when the stage opens**,
+each independently, by `AutoActionRunner`.
 
 ```json
-{ "on_complete": [
-    { "type": "create_task", "title": "Corrective action for {{record.number}}",
-      "assignee": "record_field:responsible_id", "due_in_days": 14 },
-    { "type": "set_status",  "status": "under_investigation" },
-    { "type": "notify",      "audience": "project_wide" },
-    { "type": "create_record", "entity": "corrective_action", "map": { … } }
-] }
+[
+  { "verb": "create_record", "record": "investigation",
+    "title": "Investigation into the reported incident",
+    "due_in_days": 14, "assignee_type": "role", "assignee_ref": "8" },
+  { "verb": "create_record", "record": "corrective_action",
+    "title": "Make the scaffold platform safe",
+    "due_in_days": 7, "assignee_type": "user", "assignee_ref": "31" },
+  { "verb": "set_status",  "status": "under_investigation" },
+  { "verb": "create_task", "title": "Close out the review comments", "due_in_days": 5 },
+  { "verb": "notify",      "message": "This report needs a decision today." }
+]
 ```
 
-This is how "NCR created → corrective action task created → assigned → deadline → notifications →
-overdue escalation" (§32) is configuration rather than code.
+Four verbs exist and no more (`AutoActionRunner::VERBS`). An action is a keyed instruction with
+named parameters — never a callable, a class name or an expression — so there is no path from a
+text field in the builder to code execution. Anything not in the list is refused at the form.
+
+**Three rules the runner is built around:**
+
+1. **Only the verbs in `VERBS` exist.** A `match` over a fixed list, not something clever.
+2. **Notifications go through the dispatcher**, which re-asks the subject's own policy for every
+   candidate. An auto-action names *who*; the dispatcher decides *whether they may hear it*, and
+   the dispatcher wins (§68).
+3. **A failing auto-action must not take the approval with it.** Each verb runs in its own
+   try/catch. The stage opening is what people are waiting on; a misconfigured side effect costs
+   somebody a puzzled look in the log, not every document in the company. The failure is written to
+   the record's own timeline as well as the log, where the person asking "why is this still Draft"
+   is actually looking.
+
+### `create_record` and `SpawnsFromRecord`
+
+`create_record` is how "an incident goes for review → an investigation opens → a corrective action
+is raised and assigned with a deadline" becomes a sentence on a form.
+
+The runner names no module. It resolves the configured morph key through the morph map and asks the
+**class** whether it can be opened from another record — `App\Engines\Workflow\Contracts\SpawnsFromRecord`.
+The builder's picker is discovered the same way (`WorkflowCatalogue::spawnableRecords()`), so adding
+a spawnable type in a later phase is one interface on one model, with no list anywhere to forget.
+
+The implementation owns the *should I?* question, not just the *how*:
+
+- **Idempotence.** A re-entered stage runs its auto-actions again — a report sent back and
+  resubmitted, an escalation that reopens a stage. `Investigation::spawnFrom()` returns `null` when
+  the incident already has one, because "one per incident" is a fact about investigations and the
+  engine cannot know it.
+- **Applicability.** A near miss with no injury may warrant no investigation under a company's own
+  rules. Returning `null` is a legitimate, silent outcome.
+
+Throwing is reserved for genuine misconfiguration, and rule 3 above catches it.
+
+The created record inherits the subject's project, unit and classification, so an investigation into
+a confidential incident is never opened more openly than the incident it is about (§68).
+
+**`auto_actions.*.record` is validated against the discovered list.** `validated()` returns only
+what the rules name: an unvalidated key is stripped between the form and the stage, and the action
+then saves cleanly, reports success, and throws on the first record that reaches the stage.
+
+**Entering a route is `RegisterController::submitForApproval()`**, shared by every register whose
+model uses `HasWorkflow` — not a per-module `submit()`. Gated on `update`: putting your own record
+forward for review is an act of authorship, and a module policy that freezes a record (a closed
+incident) already refuses `update`, so that refusal carries here for free.
+
+Proven end-to-end by `tests/Feature/Hse/IncidentSpawnsInvestigationTest`, which configures the whole
+route by POSTing to `workflows.store`, `workflows.stages.store` and `workflows.publish` and touches
+no service.
 
 ## 7. SLA and escalation (§57)
 

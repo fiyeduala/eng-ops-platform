@@ -10,6 +10,7 @@ use App\Http\Controllers\Auth\PasswordController;
 use App\Http\Controllers\Auth\PasswordResetController;
 use App\Http\Controllers\CalendarController;
 use App\Http\Controllers\ChangeRequestController;
+use App\Http\Controllers\CorrectiveActionController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DeliverableController;
 use App\Http\Controllers\DocumentCategoryController;
@@ -17,18 +18,27 @@ use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\DocumentVersionController;
 use App\Http\Controllers\DrawingController;
 use App\Http\Controllers\EmployeeController;
+use App\Http\Controllers\HseInspectionController;
+use App\Http\Controllers\HseObservationController;
+use App\Http\Controllers\IncidentController;
+use App\Http\Controllers\InvestigationController;
 use App\Http\Controllers\LocationController;
 use App\Http\Controllers\MeetingController;
 use App\Http\Controllers\MemoController;
+use App\Http\Controllers\NcrController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\OrganizationController;
 use App\Http\Controllers\OrgUnitController;
+use App\Http\Controllers\PermitController;
+use App\Http\Controllers\PermitTypeController;
 use App\Http\Controllers\PositionController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\ProjectDepartmentController;
 use App\Http\Controllers\ProjectMemberController;
+use App\Http\Controllers\QualityInspectionController;
 use App\Http\Controllers\RfiController;
+use App\Http\Controllers\RiskAssessmentController;
 use App\Http\Controllers\RoleController;
 use App\Http\Controllers\SettingController;
 use App\Http\Controllers\SubmittalController;
@@ -36,6 +46,9 @@ use App\Http\Controllers\TaskChecklistItemController;
 use App\Http\Controllers\TaskController;
 use App\Http\Controllers\TaskDependencyController;
 use App\Http\Controllers\TemplateController;
+use App\Http\Controllers\ToolboxTalkController;
+use App\Http\Controllers\TrainingCourseController;
+use App\Http\Controllers\TrainingRecordController;
 use App\Http\Controllers\TransmittalController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\WorkflowController;
@@ -800,6 +813,563 @@ Route::middleware(['auth', 'password.current'])->group(function () {
             ->middleware('permission:change_request.review')->name('change-requests.close');
         Route::post('change-requests/{change_request}/transition', [ChangeRequestController::class, 'transition'])
             ->middleware('permission:change_request.edit')->name('change-requests.transition');
+    });
+
+    /*
+    |----------------------------------------------------------------------------------------------
+    | Health, safety and environment
+    |----------------------------------------------------------------------------------------------
+    |
+    | THE SHAPE OF THIS SECTION IS THE PHASE'S ARGUMENT. Every lifecycle act is a POST to its own
+    | URL behind its own permission — issue a permit, disposition a non-conformance, sign for a
+    | toolbox talk — and not one of them can be reached by editing a form. A `PUT` that could set
+    | `issued_at` is a forged authorisation, and on this half of the application that is somebody's
+    | life (§84).
+    |
+    | THE NESTED CREATE ROUTES ARE THE OTHER HALF. An investigation is opened AT an incident, a
+    | corrective action is raised AT the record that needs it, an NCR is raised AT the inspection
+    | that found it. The parent is bound from the URL and authorized as a record; the link is never
+    | accepted as a posted id, because a posted id is an assertion about a record the poster may
+    | never have been allowed to see (§94).
+    |
+    | AND IT IS THE SAME SHAPE THE WORKFLOW ENGINE USES. `create_record` reaches the same services
+    | these routes reach, which is what lets a configured stage open an investigation and its
+    | corrective action with no code — the exit criterion for this phase.
+    */
+
+    // --- incidents -----------------------------------------------------------------------------
+
+    Route::middleware('permission:hse_incident.view')->group(function () {
+        Route::get('incidents', [IncidentController::class, 'index'])->name('incidents.index');
+        Route::get('incidents/{incident}', [IncidentController::class, 'show'])
+            ->whereNumber('incident')->name('incidents.show');
+    });
+
+    Route::get('incidents/create', [IncidentController::class, 'create'])
+        ->middleware('permission:hse_incident.create')->name('incidents.create');
+    Route::post('incidents', [IncidentController::class, 'store'])
+        ->middleware('permission:hse_incident.create')->name('incidents.store');
+
+    Route::whereNumber('incident')->group(function () {
+        Route::get('incidents/{incident}/edit', [IncidentController::class, 'edit'])
+            ->middleware('permission:hse_incident.edit')->name('incidents.edit');
+        Route::put('incidents/{incident}', [IncidentController::class, 'update'])
+            ->middleware('permission:hse_incident.edit')->name('incidents.update');
+        Route::delete('incidents/{incident}', [IncidentController::class, 'destroy'])
+            ->middleware('permission:hse_incident.delete')->name('incidents.destroy');
+
+        // The people involved. `hse_incident.edit` reaches the rows; the MEDICAL columns on them are
+        // gated separately by IncidentPersonPolicy::viewMedical, which asks for
+        // `hse_incident.view_confidential`. Middleware cannot make that distinction — it is per-field
+        // and per-row — so it is made in the controller and again in the views (§68).
+        Route::post('incidents/{incident}/people', [IncidentController::class, 'storePerson'])
+            ->middleware('permission:hse_incident.edit')->name('incidents.people.store');
+        Route::put('incidents/{incident}/people/{person}', [IncidentController::class, 'updatePerson'])
+            ->whereNumber('person')->middleware('permission:hse_incident.edit')->name('incidents.people.update');
+        Route::delete('incidents/{incident}/people/{person}', [IncidentController::class, 'destroyPerson'])
+            ->whereNumber('person')->middleware('permission:hse_incident.edit')->name('incidents.people.destroy');
+
+        // Declaring an incident reportable to a regulator is not editing it. It is the statement
+        // that a legal duty has been discharged, and it takes the authority that opens an
+        // investigation rather than the one that fixes a typo in the description.
+        Route::post('incidents/{incident}/reportable', [IncidentController::class, 'markReportable'])
+            ->middleware('permission:hse_incident.investigate')->name('incidents.reportable');
+
+        Route::post('incidents/{incident}/close', [IncidentController::class, 'close'])
+            ->middleware('permission:hse_incident.close')->name('incidents.close');
+        Route::post('incidents/{incident}/reopen', [IncidentController::class, 'reopen'])
+            ->middleware('permission:hse_incident.close')->name('incidents.reopen');
+        Route::post('incidents/{incident}/transition', [IncidentController::class, 'transition'])
+            ->middleware('permission:hse_incident.edit')->name('incidents.transition');
+
+        // Entering the approval route. Behind `edit` rather than a permission of its own: putting
+        // your own report forward is authorship, not a separate authority (see submitForApproval).
+        Route::post('incidents/{incident}/submit', [IncidentController::class, 'submit'])
+            ->middleware('permission:hse_incident.edit')->name('incidents.submit');
+
+        // Opened AT the incident, and only here — there is no top-level "new investigation" screen,
+        // because an investigation with no incident behind it investigates nothing. The controller
+        // refuses a second one, which is what makes the workflow's auto-action idempotent when a
+        // stage is re-entered.
+        Route::post('incidents/{incident}/investigation', [InvestigationController::class, 'store'])
+            ->middleware('permission:hse_incident.investigate')->name('incidents.investigations.store');
+
+        Route::post('incidents/{incident}/actions', [CorrectiveActionController::class, 'storeForIncident'])
+            ->middleware('permission:corrective_action.create')->name('incidents.actions.store');
+    });
+
+    // --- investigations ------------------------------------------------------------------------
+    //
+    // Governed by `hse_incident` throughout: an investigation is the incident's own paperwork, and a
+    // separate module would mean an organization could grant the right to investigate without the
+    // right to read what was being investigated (§32).
+
+    Route::middleware('permission:hse_incident.view')->group(function () {
+        Route::get('investigations', [InvestigationController::class, 'index'])->name('investigations.index');
+        Route::get('investigations/{investigation}', [InvestigationController::class, 'show'])
+            ->whereNumber('investigation')->name('investigations.show');
+    });
+
+    Route::whereNumber('investigation')->middleware('permission:hse_incident.investigate')->group(function () {
+        Route::get('investigations/{investigation}/edit', [InvestigationController::class, 'edit'])
+            ->name('investigations.edit');
+        Route::put('investigations/{investigation}', [InvestigationController::class, 'update'])
+            ->name('investigations.update');
+        Route::delete('investigations/{investigation}', [InvestigationController::class, 'destroy'])
+            ->name('investigations.destroy');
+
+        Route::post('investigations/{investigation}/complete', [InvestigationController::class, 'complete'])
+            ->name('investigations.complete');
+        Route::post('investigations/{investigation}/reopen', [InvestigationController::class, 'reopen'])
+            ->name('investigations.reopen');
+        Route::post('investigations/{investigation}/transition', [InvestigationController::class, 'transition'])
+            ->name('investigations.transition');
+    });
+
+    Route::post('investigations/{investigation}/actions', [CorrectiveActionController::class, 'storeForInvestigation'])
+        ->whereNumber('investigation')
+        ->middleware('permission:corrective_action.create')->name('investigations.actions.store');
+
+    // --- corrective actions --------------------------------------------------------------------
+
+    Route::middleware('permission:corrective_action.view')->group(function () {
+        Route::get('corrective-actions', [CorrectiveActionController::class, 'index'])
+            ->name('corrective-actions.index');
+        Route::get('corrective-actions/{corrective_action}', [CorrectiveActionController::class, 'show'])
+            ->whereNumber('corrective_action')->name('corrective-actions.show');
+    });
+
+    Route::get('corrective-actions/create', [CorrectiveActionController::class, 'create'])
+        ->middleware('permission:corrective_action.create')->name('corrective-actions.create');
+    Route::post('corrective-actions', [CorrectiveActionController::class, 'store'])
+        ->middleware('permission:corrective_action.create')->name('corrective-actions.store');
+
+    Route::whereNumber('corrective_action')->group(function () {
+        Route::get('corrective-actions/{corrective_action}/edit', [CorrectiveActionController::class, 'edit'])
+            ->middleware('permission:corrective_action.edit')->name('corrective-actions.edit');
+        Route::put('corrective-actions/{corrective_action}', [CorrectiveActionController::class, 'update'])
+            ->middleware('permission:corrective_action.edit')->name('corrective-actions.update');
+        Route::delete('corrective-actions/{corrective_action}', [CorrectiveActionController::class, 'destroy'])
+            ->middleware('permission:corrective_action.delete')->name('corrective-actions.destroy');
+
+        Route::post('corrective-actions/{corrective_action}/assign', [CorrectiveActionController::class, 'assign'])
+            ->middleware('permission:corrective_action.assign')->name('corrective-actions.assign');
+
+        // Completing is the ASSIGNEE's act and takes only `edit` — the policy then narrows it to
+        // the person the action was given to. Verifying that it worked is somebody else's, and it
+        // has its own permission for exactly that reason: an action closed by the person who was
+        // asked to do it proves nothing at all.
+        Route::post('corrective-actions/{corrective_action}/complete', [CorrectiveActionController::class, 'complete'])
+            ->middleware('permission:corrective_action.edit')->name('corrective-actions.complete');
+        Route::post('corrective-actions/{corrective_action}/verify', [CorrectiveActionController::class, 'verify'])
+            ->middleware('permission:corrective_action.verify')->name('corrective-actions.verify');
+
+        // Withdrawal, not closure. The status reached is `cancelled`, and it is deliberately not
+        // counted anywhere as a success.
+        Route::post('corrective-actions/{corrective_action}/cancel', [CorrectiveActionController::class, 'cancel'])
+            ->middleware('permission:corrective_action.close')->name('corrective-actions.cancel');
+
+        Route::post(
+            'corrective-actions/{corrective_action}/transition',
+            [CorrectiveActionController::class, 'transition'],
+        )->middleware('permission:corrective_action.edit')->name('corrective-actions.transition');
+    });
+
+    // --- observations --------------------------------------------------------------------------
+
+    Route::middleware('permission:hse_observation.view')->group(function () {
+        Route::get('hse-observations', [HseObservationController::class, 'index'])
+            ->name('hse-observations.index');
+        Route::get('hse-observations/{hse_observation}', [HseObservationController::class, 'show'])
+            ->whereNumber('hse_observation')->name('hse-observations.show');
+    });
+
+    Route::get('hse-observations/create', [HseObservationController::class, 'create'])
+        ->middleware('permission:hse_observation.create')->name('hse-observations.create');
+    Route::post('hse-observations', [HseObservationController::class, 'store'])
+        ->middleware('permission:hse_observation.create')->name('hse-observations.store');
+
+    Route::whereNumber('hse_observation')->group(function () {
+        Route::get('hse-observations/{hse_observation}/edit', [HseObservationController::class, 'edit'])
+            ->middleware('permission:hse_observation.edit')->name('hse-observations.edit');
+        Route::put('hse-observations/{hse_observation}', [HseObservationController::class, 'update'])
+            ->middleware('permission:hse_observation.edit')->name('hse-observations.update');
+        Route::delete('hse-observations/{hse_observation}', [HseObservationController::class, 'destroy'])
+            ->middleware('permission:hse_observation.delete')->name('hse-observations.destroy');
+
+        Route::post('hse-observations/{hse_observation}/close', [HseObservationController::class, 'close'])
+            ->middleware('permission:hse_observation.close')->name('hse-observations.close');
+        Route::post('hse-observations/{hse_observation}/reopen', [HseObservationController::class, 'reopen'])
+            ->middleware('permission:hse_observation.close')->name('hse-observations.reopen');
+        Route::post('hse-observations/{hse_observation}/transition', [HseObservationController::class, 'transition'])
+            ->middleware('permission:hse_observation.edit')->name('hse-observations.transition');
+
+        Route::post('hse-observations/{hse_observation}/actions', [CorrectiveActionController::class, 'storeForObservation'])
+            ->middleware('permission:corrective_action.create')->name('hse-observations.actions.store');
+    });
+
+    // --- risk assessments ----------------------------------------------------------------------
+
+    Route::middleware('permission:hse_risk.view')->group(function () {
+        Route::get('risk-assessments', [RiskAssessmentController::class, 'index'])
+            ->name('risk-assessments.index');
+        Route::get('risk-assessments/{risk_assessment}', [RiskAssessmentController::class, 'show'])
+            ->whereNumber('risk_assessment')->name('risk-assessments.show');
+    });
+
+    Route::get('risk-assessments/create', [RiskAssessmentController::class, 'create'])
+        ->middleware('permission:hse_risk.create')->name('risk-assessments.create');
+    Route::post('risk-assessments', [RiskAssessmentController::class, 'store'])
+        ->middleware('permission:hse_risk.create')->name('risk-assessments.store');
+
+    Route::whereNumber('risk_assessment')->group(function () {
+        Route::get('risk-assessments/{risk_assessment}/edit', [RiskAssessmentController::class, 'edit'])
+            ->middleware('permission:hse_risk.edit')->name('risk-assessments.edit');
+        Route::put('risk-assessments/{risk_assessment}', [RiskAssessmentController::class, 'update'])
+            ->middleware('permission:hse_risk.edit')->name('risk-assessments.update');
+        Route::delete('risk-assessments/{risk_assessment}', [RiskAssessmentController::class, 'destroy'])
+            ->middleware('permission:hse_risk.delete')->name('risk-assessments.destroy');
+
+        // The hazard table is the assessment's own content, so it takes the assessment's own edit
+        // permission. There is no separate hazard permission and there should not be: a hazard row
+        // has no meaning apart from the assessment it sits in.
+        Route::get('risk-assessments/{risk_assessment}/hazards', [RiskAssessmentController::class, 'editHazards'])
+            ->middleware('permission:hse_risk.edit')->name('risk-assessments.hazards.edit');
+        Route::put('risk-assessments/{risk_assessment}/hazards', [RiskAssessmentController::class, 'updateHazards'])
+            ->middleware('permission:hse_risk.edit')->name('risk-assessments.hazards.update');
+
+        Route::post('risk-assessments/{risk_assessment}/review', [RiskAssessmentController::class, 'review'])
+            ->middleware('permission:hse_risk.edit')->name('risk-assessments.review');
+
+        // Nobody approves their own, and an assessment with no hazards on it cannot be approved at
+        // all. Both refusals are in the policy and again in the service.
+        Route::post('risk-assessments/{risk_assessment}/approve', [RiskAssessmentController::class, 'approve'])
+            ->middleware('permission:hse_risk.approve')->name('risk-assessments.approve');
+
+        Route::post('risk-assessments/{risk_assessment}/transition', [RiskAssessmentController::class, 'transition'])
+            ->middleware('permission:hse_risk.edit')->name('risk-assessments.transition');
+    });
+
+    // --- HSE inspections -----------------------------------------------------------------------
+
+    Route::middleware('permission:hse_inspection.view')->group(function () {
+        Route::get('hse-inspections', [HseInspectionController::class, 'index'])
+            ->name('hse-inspections.index');
+        Route::get('hse-inspections/{hse_inspection}', [HseInspectionController::class, 'show'])
+            ->whereNumber('hse_inspection')->name('hse-inspections.show');
+    });
+
+    Route::get('hse-inspections/create', [HseInspectionController::class, 'create'])
+        ->middleware('permission:hse_inspection.create')->name('hse-inspections.create');
+    Route::post('hse-inspections', [HseInspectionController::class, 'store'])
+        ->middleware('permission:hse_inspection.create')->name('hse-inspections.store');
+
+    Route::whereNumber('hse_inspection')->group(function () {
+        Route::get('hse-inspections/{hse_inspection}/edit', [HseInspectionController::class, 'edit'])
+            ->middleware('permission:hse_inspection.edit')->name('hse-inspections.edit');
+        Route::put('hse-inspections/{hse_inspection}', [HseInspectionController::class, 'update'])
+            ->middleware('permission:hse_inspection.edit')->name('hse-inspections.update');
+        Route::delete('hse-inspections/{hse_inspection}', [HseInspectionController::class, 'destroy'])
+            ->middleware('permission:hse_inspection.delete')->name('hse-inspections.destroy');
+
+        Route::get('hse-inspections/{hse_inspection}/items', [HseInspectionController::class, 'editItems'])
+            ->middleware('permission:hse_inspection.edit')->name('hse-inspections.items.edit');
+        Route::put('hse-inspections/{hse_inspection}/items', [HseInspectionController::class, 'updateItems'])
+            ->middleware('permission:hse_inspection.edit')->name('hse-inspections.items.update');
+
+        // Carrying out the walk is `edit` — the person who does the inspecting is the person who
+        // maintains it — but the service freezes the checklist the moment this succeeds, so `edit`
+        // stops meaning "may rewrite the questions" at exactly that point (§59).
+        Route::post('hse-inspections/{hse_inspection}/perform', [HseInspectionController::class, 'perform'])
+            ->middleware('permission:hse_inspection.edit')->name('hse-inspections.perform');
+        Route::post('hse-inspections/{hse_inspection}/close', [HseInspectionController::class, 'close'])
+            ->middleware('permission:hse_inspection.close')->name('hse-inspections.close');
+        Route::post('hse-inspections/{hse_inspection}/transition', [HseInspectionController::class, 'transition'])
+            ->middleware('permission:hse_inspection.edit')->name('hse-inspections.transition');
+
+        Route::post('hse-inspections/{hse_inspection}/actions', [CorrectiveActionController::class, 'storeForInspection'])
+            ->middleware('permission:corrective_action.create')->name('hse-inspections.actions.store');
+    });
+
+    // --- toolbox talks -------------------------------------------------------------------------
+
+    Route::middleware('permission:toolbox_talk.view')->group(function () {
+        Route::get('toolbox-talks', [ToolboxTalkController::class, 'index'])->name('toolbox-talks.index');
+        Route::get('toolbox-talks/{toolbox_talk}', [ToolboxTalkController::class, 'show'])
+            ->whereNumber('toolbox_talk')->name('toolbox-talks.show');
+    });
+
+    Route::get('toolbox-talks/create', [ToolboxTalkController::class, 'create'])
+        ->middleware('permission:toolbox_talk.create')->name('toolbox-talks.create');
+    Route::post('toolbox-talks', [ToolboxTalkController::class, 'store'])
+        ->middleware('permission:toolbox_talk.create')->name('toolbox-talks.store');
+
+    Route::whereNumber('toolbox_talk')->group(function () {
+        Route::get('toolbox-talks/{toolbox_talk}/edit', [ToolboxTalkController::class, 'edit'])
+            ->middleware('permission:toolbox_talk.edit')->name('toolbox-talks.edit');
+        Route::put('toolbox-talks/{toolbox_talk}', [ToolboxTalkController::class, 'update'])
+            ->middleware('permission:toolbox_talk.edit')->name('toolbox-talks.update');
+        Route::delete('toolbox-talks/{toolbox_talk}', [ToolboxTalkController::class, 'destroy'])
+            ->middleware('permission:toolbox_talk.delete')->name('toolbox-talks.destroy');
+
+        Route::post('toolbox-talks/{toolbox_talk}/record', [ToolboxTalkController::class, 'record'])
+            ->middleware('permission:toolbox_talk.edit')->name('toolbox-talks.record');
+
+        // `toolbox_talk.view` ONLY, and that is the point of the route. The people signing are
+        // labourers and subcontractors who hold nothing else in this application; the policy then
+        // narrows it to their own row and refuses a second signature. A supervisor cannot sign on
+        // their behalf here — entering the crew list is `edit`, and those rows carry a name with no
+        // signature, which is an honest record of what happened.
+        Route::post('toolbox-talks/{toolbox_talk}/attendees/{attendee}/sign', [ToolboxTalkController::class, 'sign'])
+            ->whereNumber('attendee')->middleware('permission:toolbox_talk.view')->name('toolbox-talks.attendees.sign');
+
+        Route::post('toolbox-talks/{toolbox_talk}/transition', [ToolboxTalkController::class, 'transition'])
+            ->middleware('permission:toolbox_talk.edit')->name('toolbox-talks.transition');
+    });
+
+    // --- permits to work -----------------------------------------------------------------------
+    //
+    // NINE LIFECYCLE ROUTES AND FOUR DIFFERENT PERMISSIONS BEHIND THEM. This is the most heavily
+    // separated record in the application, and every separation is one somebody died to establish:
+    // the person who wants the work done never authorises it, the person who authorises it never
+    // accepts it on the crew's behalf, and anybody who can see a live permit can stop the work
+    // under it.
+
+    Route::middleware('permission:permit.view')->group(function () {
+        Route::get('permits', [PermitController::class, 'index'])->name('permits.index');
+        Route::get('permits/{permit}', [PermitController::class, 'show'])
+            ->whereNumber('permit')->name('permits.show');
+    });
+
+    Route::get('permits/create', [PermitController::class, 'create'])
+        ->middleware('permission:permit.create')->name('permits.create');
+    Route::post('permits', [PermitController::class, 'store'])
+        ->middleware('permission:permit.create')->name('permits.store');
+
+    Route::whereNumber('permit')->group(function () {
+        Route::get('permits/{permit}/edit', [PermitController::class, 'edit'])
+            ->middleware('permission:permit.edit')->name('permits.edit');
+        Route::put('permits/{permit}', [PermitController::class, 'update'])
+            ->middleware('permission:permit.edit')->name('permits.update');
+        Route::delete('permits/{permit}', [PermitController::class, 'destroy'])
+            ->middleware('permission:permit.delete')->name('permits.destroy');
+
+        // One route per line of the checklist, and it takes `permit.review` rather than `edit`:
+        // confirming a precaution is a statement that somebody physically checked the thing, and it
+        // attaches their name to it. The question after an incident is never "was the checklist
+        // completed" — it is "who confirmed the space had been purged, and when".
+        Route::post('permits/{permit}/precautions/{precaution}/confirm', [PermitController::class, 'confirmPrecaution'])
+            ->whereNumber('precaution')->middleware('permission:permit.review')->name('permits.precautions.confirm');
+
+        Route::post('permits/{permit}/gas-test', [PermitController::class, 'recordGasTest'])
+            ->middleware('permission:permit.edit')->name('permits.gas-test');
+
+        // Issue and resume are the same authority — putting work under authorisation — so both take
+        // `permit.approve`. Rejection is separated from it because a company may want a supervisor
+        // who can refuse a permit without being able to grant one.
+        Route::post('permits/{permit}/issue', [PermitController::class, 'issue'])
+            ->middleware('permission:permit.approve')->name('permits.issue');
+        Route::post('permits/{permit}/reject', [PermitController::class, 'reject'])
+            ->middleware('permission:permit.reject')->name('permits.reject');
+        Route::post('permits/{permit}/resume', [PermitController::class, 'resume'])
+            ->middleware('permission:permit.approve')->name('permits.resume');
+
+        // Acceptance is the crew's, and the policy refuses the issuer.
+        Route::post('permits/{permit}/accept', [PermitController::class, 'accept'])
+            ->middleware('permission:permit.review')->name('permits.accept');
+
+        // DELIBERATELY THE WIDEST ROUTE IN THE MODULE. Anybody with edit reach on a permit can stop
+        // the work under it. Requiring the issuer's authority would mean work continuing while
+        // somebody goes looking for them, and that trade is not one this application makes.
+        Route::post('permits/{permit}/suspend', [PermitController::class, 'suspend'])
+            ->middleware('permission:permit.edit')->name('permits.suspend');
+
+        Route::post('permits/{permit}/close', [PermitController::class, 'close'])
+            ->middleware('permission:permit.close')->name('permits.close');
+        Route::post('permits/{permit}/cancel', [PermitController::class, 'cancel'])
+            ->middleware('permission:permit.close')->name('permits.cancel');
+
+        Route::post('permits/{permit}/transition', [PermitController::class, 'transition'])
+            ->middleware('permission:permit.edit')->name('permits.transition');
+    });
+
+    // --- permit types (configuration) ----------------------------------------------------------
+    //
+    // `permit.manage` for every write, not `permit.edit`. `precaution_template` is the checklist
+    // that gets copied onto every future confined-space permit, so a permit issuer doing their
+    // day-to-day work must not be able to quietly take the gas test off it.
+
+    Route::middleware('permission:permit.view')->group(function () {
+        Route::get('permit-types', [PermitTypeController::class, 'index'])->name('permit-types.index');
+        Route::get('permit-types/{permit_type}', [PermitTypeController::class, 'show'])
+            ->whereNumber('permit_type')->name('permit-types.show');
+    });
+
+    Route::middleware('permission:permit.manage')->group(function () {
+        Route::get('permit-types/create', [PermitTypeController::class, 'create'])->name('permit-types.create');
+        Route::post('permit-types', [PermitTypeController::class, 'store'])->name('permit-types.store');
+
+        Route::whereNumber('permit_type')->group(function () {
+            Route::get('permit-types/{permit_type}/edit', [PermitTypeController::class, 'edit'])
+                ->name('permit-types.edit');
+            Route::put('permit-types/{permit_type}', [PermitTypeController::class, 'update'])
+                ->name('permit-types.update');
+            Route::delete('permit-types/{permit_type}', [PermitTypeController::class, 'destroy'])
+                ->name('permit-types.destroy');
+        });
+    });
+
+    // --- training ------------------------------------------------------------------------------
+
+    Route::middleware('permission:hse_training.view')->group(function () {
+        Route::get('training-courses', [TrainingCourseController::class, 'index'])
+            ->name('training-courses.index');
+        Route::get('training-courses/{training_course}', [TrainingCourseController::class, 'show'])
+            ->whereNumber('training_course')->name('training-courses.show');
+    });
+
+    Route::middleware('permission:hse_training.manage')->group(function () {
+        Route::get('training-courses/create', [TrainingCourseController::class, 'create'])
+            ->name('training-courses.create');
+        Route::post('training-courses', [TrainingCourseController::class, 'store'])
+            ->name('training-courses.store');
+
+        Route::whereNumber('training_course')->group(function () {
+            Route::get('training-courses/{training_course}/edit', [TrainingCourseController::class, 'edit'])
+                ->name('training-courses.edit');
+            Route::put('training-courses/{training_course}', [TrainingCourseController::class, 'update'])
+                ->name('training-courses.update');
+            Route::delete('training-courses/{training_course}', [TrainingCourseController::class, 'destroy'])
+                ->name('training-courses.destroy');
+        });
+    });
+
+    Route::middleware('permission:hse_training.view')->group(function () {
+        Route::get('training-records', [TrainingRecordController::class, 'index'])
+            ->name('training-records.index');
+        Route::get('training-records/{training_record}', [TrainingRecordController::class, 'show'])
+            ->whereNumber('training_record')->name('training-records.show');
+    });
+
+    Route::get('training-records/create', [TrainingRecordController::class, 'create'])
+        ->middleware('permission:hse_training.create')->name('training-records.create');
+    Route::post('training-records', [TrainingRecordController::class, 'store'])
+        ->middleware('permission:hse_training.create')->name('training-records.store');
+
+    Route::whereNumber('training_record')->group(function () {
+        Route::get('training-records/{training_record}/edit', [TrainingRecordController::class, 'edit'])
+            ->middleware('permission:hse_training.edit')->name('training-records.edit');
+        Route::put('training-records/{training_record}', [TrainingRecordController::class, 'update'])
+            ->middleware('permission:hse_training.edit')->name('training-records.update');
+        Route::delete('training-records/{training_record}', [TrainingRecordController::class, 'destroy'])
+            ->middleware('permission:hse_training.delete')->name('training-records.destroy');
+
+        // Renewing IS creating — a new certificate that remembers the old one, which stays exactly
+        // as it was. The certificate somebody held in 2024 was valid in 2024, and that is precisely
+        // what an investigation asks about two years later (§59).
+        Route::post('training-records/{training_record}/renew', [TrainingRecordController::class, 'renew'])
+            ->middleware('permission:hse_training.create')->name('training-records.renew');
+
+        Route::post('training-records/{training_record}/transition', [TrainingRecordController::class, 'transition'])
+            ->middleware('permission:hse_training.edit')->name('training-records.transition');
+    });
+
+    /*
+    |----------------------------------------------------------------------------------------------
+    | Quality
+    |----------------------------------------------------------------------------------------------
+    */
+
+    // --- quality inspections -------------------------------------------------------------------
+
+    Route::middleware('permission:quality_inspection.view')->group(function () {
+        Route::get('quality-inspections', [QualityInspectionController::class, 'index'])
+            ->name('quality-inspections.index');
+        Route::get('quality-inspections/{quality_inspection}', [QualityInspectionController::class, 'show'])
+            ->whereNumber('quality_inspection')->name('quality-inspections.show');
+    });
+
+    Route::get('quality-inspections/create', [QualityInspectionController::class, 'create'])
+        ->middleware('permission:quality_inspection.create')->name('quality-inspections.create');
+    Route::post('quality-inspections', [QualityInspectionController::class, 'store'])
+        ->middleware('permission:quality_inspection.create')->name('quality-inspections.store');
+
+    Route::whereNumber('quality_inspection')->group(function () {
+        Route::get('quality-inspections/{quality_inspection}/edit', [QualityInspectionController::class, 'edit'])
+            ->middleware('permission:quality_inspection.edit')->name('quality-inspections.edit');
+        Route::put('quality-inspections/{quality_inspection}', [QualityInspectionController::class, 'update'])
+            ->middleware('permission:quality_inspection.edit')->name('quality-inspections.update');
+        Route::delete('quality-inspections/{quality_inspection}', [QualityInspectionController::class, 'destroy'])
+            ->middleware('permission:quality_inspection.delete')->name('quality-inspections.destroy');
+
+        Route::get('quality-inspections/{quality_inspection}/items', [QualityInspectionController::class, 'editItems'])
+            ->middleware('permission:quality_inspection.edit')->name('quality-inspections.items.edit');
+        Route::put('quality-inspections/{quality_inspection}/items', [QualityInspectionController::class, 'updateItems'])
+            ->middleware('permission:quality_inspection.edit')->name('quality-inspections.items.update');
+
+        // REQUESTING IS BROAD, INSPECTING IS NARROW. Any site engineer raises a request for
+        // inspection; recording the verdict takes `quality_inspection.approve`, and the policy
+        // refuses it to whoever raised the request. A hold point that releases itself is not one.
+        Route::post('quality-inspections/{quality_inspection}/inspect', [QualityInspectionController::class, 'inspect'])
+            ->middleware('permission:quality_inspection.approve')->name('quality-inspections.inspect');
+
+        Route::post(
+            'quality-inspections/{quality_inspection}/transition',
+            [QualityInspectionController::class, 'transition'],
+        )->middleware('permission:quality_inspection.edit')->name('quality-inspections.transition');
+
+        // A rejection is not an NCR. Whether the finding becomes a formal non-conformance — with a
+        // disposition, a cost and a verification — is a separate decision, raised here.
+        Route::post('quality-inspections/{quality_inspection}/ncrs', [NcrController::class, 'storeForInspection'])
+            ->middleware('permission:ncr.create')->name('quality-inspections.ncrs.store');
+    });
+
+    // --- non-conformance reports ---------------------------------------------------------------
+
+    Route::middleware('permission:ncr.view')->group(function () {
+        Route::get('ncrs', [NcrController::class, 'index'])->name('ncrs.index');
+        Route::get('ncrs/{ncr}', [NcrController::class, 'show'])
+            ->whereNumber('ncr')->name('ncrs.show');
+    });
+
+    Route::get('ncrs/create', [NcrController::class, 'create'])
+        ->middleware('permission:ncr.create')->name('ncrs.create');
+    Route::post('ncrs', [NcrController::class, 'store'])
+        ->middleware('permission:ncr.create')->name('ncrs.store');
+
+    Route::whereNumber('ncr')->group(function () {
+        Route::get('ncrs/{ncr}/edit', [NcrController::class, 'edit'])
+            ->middleware('permission:ncr.edit')->name('ncrs.edit');
+        Route::put('ncrs/{ncr}', [NcrController::class, 'update'])
+            ->middleware('permission:ncr.edit')->name('ncrs.update');
+        Route::delete('ncrs/{ncr}', [NcrController::class, 'destroy'])
+            ->middleware('permission:ncr.delete')->name('ncrs.destroy');
+
+        Route::post('ncrs/{ncr}/issue', [NcrController::class, 'issue'])
+            ->middleware('permission:ncr.submit')->name('ncrs.issue');
+
+        // RESPONDING IS NOT DISPOSITIONING, and the split is the whole point of the register. The
+        // party who did the work answers the finding (`review`, which the author may legitimately
+        // hold); the engineering decision about what happens to the work is `approve`, and
+        // NcrPolicy refuses it to whoever raised the non-conformance at any scope.
+        Route::post('ncrs/{ncr}/respond', [NcrController::class, 'respond'])
+            ->middleware('permission:ncr.review')->name('ncrs.respond');
+        Route::post('ncrs/{ncr}/disposition', [NcrController::class, 'disposition'])
+            ->middleware('permission:ncr.approve')->name('ncrs.disposition');
+
+        // Verification is `review` again and is NOT gated on the author, because by then the
+        // question is whether the disposition was actually carried out — a factual check the
+        // originator is often the only person who can make, having seen the original defect.
+        Route::post('ncrs/{ncr}/verify', [NcrController::class, 'verify'])
+            ->middleware('permission:ncr.review')->name('ncrs.verify');
+
+        Route::post('ncrs/{ncr}/close', [NcrController::class, 'close'])
+            ->middleware('permission:ncr.close')->name('ncrs.close');
+        Route::post('ncrs/{ncr}/transition', [NcrController::class, 'transition'])
+            ->middleware('permission:ncr.edit')->name('ncrs.transition');
+
+        Route::post('ncrs/{ncr}/actions', [CorrectiveActionController::class, 'storeForNcr'])
+            ->middleware('permission:corrective_action.create')->name('ncrs.actions.store');
     });
 
     // --- approvals -----------------------------------------------------------------------------

@@ -62,7 +62,13 @@
         <div class="card mb-5 flex items-start gap-3 border-l-4 border-l-amber-400 p-4">
             <x-icon name="clock" class="mt-0.5 h-4 w-4 shrink-0 text-amber-600"/>
             <p class="text-sm text-[var(--text-body)]">
-                This organization owes the answer@if ($rfi->required_by), by {{ $rfi->required_by->format('j M Y') }}@endif.
+                {{-- Split across lines on purpose: Blade does not compile a directive that follows a
+                     word character, so `answer@if` left a stray @endif behind. --}}
+                This organization owes the answer
+                @if ($rfi->required_by)
+                    , by {{ $rfi->required_by->format('j M Y') }}
+                @endif
+                .
             </p>
         </div>
     @endif

@@ -171,6 +171,42 @@ class OrganizationProvisioner
             'engineering.rfi_response_days' => 14,
             'engineering.submittal_review_days' => 14,
 
+            // --- HSE registers -----------------------------------------------------------
+            // Blank for the same reason as the engineering lists: an unset vocabulary falls back
+            // to the model constants, and the setting starts existing the moment a safety manager
+            // decides their company says something different. The numbers are not lists and do
+            // need a value, because a blank warning window would mean "warn about nothing".
+            'hse_incident.categories' => '',
+            'hse_incident.severities' => '',
+            'hse_incident.involvements' => '',
+            'hse_incident.treatments' => '',
+            'investigation.methods' => '',
+            'corrective_action.types' => '',
+            'corrective_action.priorities' => '',
+            'corrective_action.effectiveness' => '',
+            'hse_observation.types' => '',
+            'hse_observation.categories' => '',
+            'hse_observation.risk_levels' => '',
+            'risk_assessment.types' => '',
+            'risk_assessment.default_validity_months' => 12,
+            'hse_inspection.types' => '',
+            'hse_inspection.results' => '',
+            'training_course.categories' => '',
+            'hse_training.results' => '',
+            'hse_training.expiry_warning_days' => 60,
+            'permit.expiry_warning_hours' => 4,
+
+            // --- quality registers -------------------------------------------------------
+            'quality_inspection.types' => '',
+            'quality_inspection.results' => '',
+            'quality_inspection.item_results' => '',
+            'quality_inspection.notice_days' => 2,
+            'ncr.severities' => '',
+            'ncr.categories' => '',
+            'ncr.sources' => '',
+            'ncr.dispositions' => '',
+            'ncr.response_days' => 14,
+
             // --- notifications -----------------------------------------------------------
             'notify.channels' => ['database', 'mail'],
             'notify.digest_hour' => 7,

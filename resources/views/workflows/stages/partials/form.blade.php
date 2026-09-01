@@ -64,7 +64,7 @@
         addCondition() { this.conditions.push({ field: '', operator: '=', value: '', logic: 'and' }); },
         addAction() {
             this.actions.push({
-                verb: '', status: '', title: '', message: '',
+                verb: '', status: '', title: '', message: '', record: '',
                 due_in_days: null, assignee_type: '', assignee_ref: '',
             });
         },
@@ -370,6 +370,32 @@
                             </div>
                         </div>
 
+
+                        {{-- Open a linked record. --}}
+                        <div class="mt-3" x-show="action.verb === 'create_record'" x-cloak>
+                            <label class="label">Open a</label>
+                            @if ($spawnableRecords === [])
+                                <p class="help">
+                                    Nothing in this installation can be opened from another record yet.
+                                </p>
+                            @else
+                                <select class="select" :name="`auto_actions[${index}][record]`"
+                                        x-model="action.record">
+                                    <option value="">Choose a record type</option>
+                                    @foreach ($spawnableRecords as $key => $label)
+                                        <option value="{{ $key }}">{{ $label }}</option>
+                                    @endforeach
+                                </select>
+                                <p class="help">
+                                    The new record inherits the subject's project, unit and
+                                    classification, so an investigation into a confidential incident is
+                                    never opened more openly than the incident itself (§68). Opening the
+                                    same kind of record this one already has is refused, and so is a
+                                    second attempt — a record that goes round the route twice does not
+                                    collect two investigations.
+                                </p>
+                            @endif
+                        </div>
                         {{-- Tell somebody. --}}
                         <div class="mt-3" x-show="action.verb === 'notify'" x-cloak>
                             <label class="label">Message</label>

@@ -8,6 +8,7 @@ use App\Engines\Audit\ActivityRecorder;
 use App\Engines\Configuration\NumberGenerator;
 use App\Engines\Configuration\StatusMachine;
 use App\Models\User;
+use App\Support\Enums\Confidentiality;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 
@@ -41,6 +42,13 @@ abstract class RegisterService
         protected readonly ActivityRecorder $activity,
     ) {}
 
+    /**
+     * Column listings, keyed by table. See stampConfidentiality().
+     *
+     * @var array<string,array<string,int>>
+     */
+    private static array $columnCache = [];
+
     /** The catalogue key: `deliverable`, `rfi`, `hse_incident`. Drives numbering and statuses. */
     abstract protected function entityType(): string;
 
@@ -66,6 +74,15 @@ abstract class RegisterService
             $record->setAttribute('number', $this->resolveNumber($attributes));
             $record->setAttribute('status_id', $this->statuses->initialFor($this->entityType())?->id);
 
+            // Classification is stamped here, never left to the column default. The database would
+            // apply `internal` on insert quite happily, but the model IN MEMORY would then carry no
+            // `confidentiality` key at all — and everything downstream reads the model, not the row.
+            // Two things were quietly wrong because of that: the notification gate skips a subject
+            // whose classification it cannot see (§68), and a register that copies one record's
+            // classification onto another — SubmittalService::resubmit() — copied a null onto a
+            // NOT NULL column and took the whole resubmittal down with it.
+            $this->stampConfidentiality($record);
+
             $this->beforeCreate($record, $attributes, $actor);
 
             $record->save();
@@ -83,6 +100,37 @@ abstract class RegisterService
 
             return $record;
         });
+    }
+
+    /**
+     * Give a record an explicit classification when the payload did not carry a usable one.
+     *
+     * COLUMN-GATED, NOT MODEL-GATED. Most registers have `confidentiality` and a few — the ones
+     * whose visibility is decided entirely by a parent record — do not, and the base class is not
+     * the place to keep a list of which is which. The listing is cached per table, so this costs
+     * one query per table per request rather than one per record written.
+     *
+     * A null already in the attribute array is treated as absent on purpose: the column is NOT
+     * NULL everywhere it exists, so a null is never a classification anybody chose. It is what
+     * arrives when one record copies another's — see SubmittalService::resubmit().
+     */
+    private function stampConfidentiality(Model $record): void
+    {
+        if (($record->getAttributes()['confidentiality'] ?? null) !== null) {
+            return;
+        }
+
+        $table = $record->getTable();
+
+        if (! isset(self::$columnCache[$table])) {
+            self::$columnCache[$table] = array_flip(
+                $record->getConnection()->getSchemaBuilder()->getColumnListing($table)
+            );
+        }
+
+        if (isset(self::$columnCache[$table]['confidentiality'])) {
+            $record->setAttribute('confidentiality', Confidentiality::Internal);
+        }
     }
 
     /**

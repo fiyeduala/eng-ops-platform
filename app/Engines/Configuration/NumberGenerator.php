@@ -259,6 +259,34 @@ class NumberGenerator
             'site_query' => ['prefix' => 'SQ', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
             'submittal' => ['prefix' => 'SUB', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
             'change_request' => ['prefix' => 'ECR', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+
+            // --- HSE ------------------------------------------------------------------
+            // Incidents number per year because every statutory return, insurance renewal and
+            // safety statistic is annual: "INC-2026-0012" is the twelfth this year, which is the
+            // figure a safety manager is asked for.
+            'hse_incident' => ['prefix' => 'INC', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+            'investigation' => ['prefix' => 'INV', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+            // Corrective actions do NOT reset. An action opened in December and closed in March
+            // spans the boundary, and the register is read as one continuous backlog rather than
+            // as a set of annual cohorts — a year-resetting series would make "CA-0007" ambiguous
+            // in exactly the conversation where somebody is chasing it.
+            'corrective_action' => ['prefix' => 'CA', 'pattern' => '{PREFIX}-{SEQ}', 'reset_period' => 'none', 'padding' => 5],
+            'hse_observation' => ['prefix' => 'OBS', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+            'hse_risk' => ['prefix' => 'RA', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+            'hse_inspection' => ['prefix' => 'HSI', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+            'toolbox_talk' => ['prefix' => 'TBT', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+            // Permits reset MONTHLY and pad to three, because a large site raises dozens a week and
+            // an annual series reaches five digits by autumn. "PTW-2026-08-041" is a number a
+            // control room can read off a board.
+            'permit' => ['prefix' => 'PTW', 'pattern' => '{PREFIX}-{YYYY}-{MM}-{SEQ}', 'reset_period' => 'monthly', 'padding' => 3],
+            'hse_training' => ['prefix' => 'TRN', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+
+            // --- quality --------------------------------------------------------------
+            // The industry says "RFI" for a request for inspection too, which is exactly why this
+            // series is ITP-prefixed instead: two registers quoting the same abbreviation in the
+            // same meeting is a defect in the numbering, not a charming ambiguity.
+            'quality_inspection' => ['prefix' => 'ITP', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+            'ncr' => ['prefix' => 'NCR', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
         ];
     }
 }

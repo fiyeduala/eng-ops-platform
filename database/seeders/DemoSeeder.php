@@ -21,6 +21,7 @@ use App\Models\Meeting;
 use App\Models\Memo;
 use App\Models\Organization;
 use App\Models\OrgUnit;
+use App\Models\PermitType;
 use App\Models\Position;
 use App\Models\Project;
 use App\Models\ProjectRole;
@@ -28,24 +29,42 @@ use App\Models\ProjectType;
 use App\Models\Role;
 use App\Models\Status;
 use App\Models\Task;
+use App\Models\TrainingCourse;
 use App\Models\Transmittal;
 use App\Models\User;
 use App\Models\Workflow;
 use App\Models\WorkflowStage;
 use App\Models\WorkflowStageInstance;
 use App\Services\AnnouncementService;
+use App\Services\ChangeRequestService;
+use App\Services\CorrectiveActionService;
+use App\Services\DeliverableService;
 use App\Services\DocumentService;
 use App\Services\DocumentVersionService;
+use App\Services\DrawingService;
+use App\Services\HseInspectionService;
+use App\Services\HseObservationService;
+use App\Services\IncidentService;
+use App\Services\InvestigationService;
 use App\Services\MeetingService;
 use App\Services\MemoService;
+use App\Services\NcrService;
+use App\Services\PermitService;
 use App\Services\ProjectService;
 use App\Services\ProjectTeamService;
+use App\Services\QualityInspectionService;
+use App\Services\RfiService;
+use App\Services\RiskAssessmentService;
+use App\Services\SubmittalService;
 use App\Services\TaskChecklistService;
 use App\Services\TaskDependencyService;
 use App\Services\TaskService;
 use App\Services\TemplateService;
+use App\Services\ToolboxTalkService;
+use App\Services\TrainingRecordService;
 use App\Services\TransmittalService;
 use App\Services\WorkflowDefinitionService;
+use App\Support\Enums\ChangeDisposition;
 use App\Support\Enums\Decision;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Seeder;
@@ -156,6 +175,18 @@ class DemoSeeder extends Seeder
         // needed a line of company-specific code to do it (§73).
         $this->seedMeridianDocuments($meridian);
         $this->seedKestrelDocuments($kestrel);
+
+        // What each company is BUILDING, and what it is doing about safety and quality (§39–§58).
+        // Last, because these registers reference everything above them: a deliverable belongs to a
+        // project, a drawing carries a document, an inspection is attended by a named inspector and
+        // an incident is reported against a site team. The two companies configure this half very
+        // differently — Meridian routes incidents to its HSE manager and lets that review open the
+        // investigation on its own, Kestrel configures no route at all and closes near misses by
+        // hand — and the difference is entirely in their data.
+        $this->seedMeridianEngineering($meridian);
+        $this->seedMeridianHse($meridian);
+        $this->seedMeridianQuality($meridian);
+        $this->seedKestrelHse($kestrel);
 
         // The rows above were written straight to the database, so nothing observed them happening.
         // A demo whose record timelines are all blank teaches the wrong lesson about Engine 4 — the
@@ -2346,6 +2377,1789 @@ class DemoSeeder extends Seeder
         });
     }
 
+    // ================================================================= engineering · HSE · quality
+
+    /**
+     * What Meridian is DESIGNING (§39–§45).
+     *
+     * The engineering registers hang off the live EPC job the delivery pass created, because that
+     * is the only place they mean anything: a deliverable with no project is a filename, and an RFI
+     * with no client is a question asked into the air.
+     *
+     * SERVICES ARE RESOLVED LOCALLY here rather than added to the class properties above. The
+     * delivery and document chapters keep theirs because their helpers are shared across both
+     * tenants; these three chapters are Meridian's alone, and fifteen more properties would make the
+     * top of this file harder to read than the code that uses them.
+     */
+    private function seedMeridianEngineering(Organization $organization): void
+    {
+        $this->context->within($organization, function () {
+            $this->bootDelivery();
+
+            $deliverables = app(DeliverableService::class);
+            $drawings = app(DrawingService::class);
+            $rfis = app(RfiService::class);
+            $submittals = app(SubmittalService::class);
+            $changes = app(ChangeRequestService::class);
+
+            $staff = $this->staff();
+            $unit = $this->unitsByCode();
+            $job = Project::query()->get()->keyBy('code');
+
+            $engineeringManager = $this->accountOf($staff, 'MEI-0004');  // Farida Yusuf
+            $leadEngineer = $this->accountOf($staff, 'MEI-0005');        // Marcus Adeyemi
+            $structuralEngineer = $this->accountOf($staff, 'MEI-0006');  // Ngozi Eze
+            $pipingEngineer = $this->accountOf($staff, 'MEI-0007');      // Segun Afolabi
+            $electricalEngineer = $this->accountOf($staff, 'MEI-0008');  // Priya Raghunathan
+            $documentController = $this->accountOf($staff, 'MEI-0010');  // Helen Obi
+            $projectManager = $this->accountOf($staff, 'MEI-0011');      // Daniel Mbeki
+            $siteManager = $this->accountOf($staff, 'MEI-0012');         // Kelechi Nwosu
+
+            $dte = $job['DTE'];
+
+            // ------------------------------------------------- deliverables
+            // Weighted, because a deliverables register whose rows all count the same reports a job
+            // as half done when the two big design packages have not started. `weight` is what the
+            // project's progress roll-up multiplies by.
+            $foundations = $deliverables->create([
+                'title' => 'Tank T-401 foundation design report',
+                'description' => 'Ring beam and piled raft design for the new 15,000 m³ product tank, '
+                    .'including settlement analysis against the 2019 site investigation.',
+                'project_id' => $dte->id,
+                'discipline_id' => $unit['ENG-CS']->id,
+                'org_unit_id' => $unit['ENG']->id,
+                'type' => 'Design report',
+                'responsible_id' => $structuralEngineer->id,
+                'planned_start_on' => now()->subDays(120)->toDateString(),
+                'planned_issue_on' => now()->subDays(64)->toDateString(),
+                'weight' => 8,
+                'revision' => 'Rev 1',
+            ], $leadEngineer);
+
+            $deliverables->reportProgress($foundations, 100, $structuralEngineer, null,
+                'Settlement check reissued after the client supplied the revised product density.');
+            $deliverables->issue($foundations, $leadEngineer, now()->subDays(61)->toDateString());
+
+            $isometrics = $deliverables->create([
+                'title' => 'Piping isometrics — 10" product transfer line P-1204',
+                'description' => 'Forty-one isometrics from the manifold to T-401, for fabrication '
+                    .'and for the stress report that follows them.',
+                'project_id' => $dte->id,
+                'discipline_id' => $unit['ENG-MP']->id,
+                'org_unit_id' => $unit['ENG']->id,
+                'type' => 'Drawing package',
+                'responsible_id' => $pipingEngineer->id,
+                'planned_start_on' => now()->subDays(70)->toDateString(),
+                'planned_issue_on' => now()->subDays(6)->toDateString(),
+                'weight' => 12,
+                'revision' => 'Rev 0',
+            ], $leadEngineer);
+
+            // Reported late and short, and the forecast says so. A register in which every forecast
+            // equals every plan is the one thing a project manager will not believe.
+            $deliverables->reportProgress($isometrics, 65, $pipingEngineer,
+                now()->addDays(11)->toDateString(),
+                'Held on the tie-in points at the manifold until RFI-0002 comes back.');
+
+            $singleLine = $deliverables->create([
+                'title' => 'Electrical single line diagram — substation B',
+                'description' => 'Incomer, bus section and outgoing feeders for the new pump house, '
+                    .'to be read with the load schedule.',
+                'project_id' => $dte->id,
+                'discipline_id' => $unit['ENG-EI']->id,
+                'org_unit_id' => $unit['ENG']->id,
+                'type' => 'Drawing',
+                'responsible_id' => $electricalEngineer->id,
+                'planned_start_on' => now()->subDays(52)->toDateString(),
+                'planned_issue_on' => now()->addDays(9)->toDateString(),
+                'weight' => 5,
+                'revision' => 'Rev A',
+            ], $leadEngineer);
+
+            $deliverables->reportProgress($singleLine, 80, $electricalEngineer, null,
+                'Out for internal check with the lead engineer.');
+
+            // ------------------------------------------------- drawings
+            // The drawing register is NOT the deliverables register. One deliverable is forty-one
+            // sheets; one sheet has its own revision, purpose of issue and checker. Both point at
+            // the same job and neither is derived from the other.
+            $foundationPlan = $drawings->create([
+                'number' => 'DTE-CS-DWG-1001',
+                'title' => 'T-401 foundation — general arrangement',
+                'project_id' => $dte->id,
+                'discipline_id' => $unit['ENG-CS']->id,
+                'org_unit_id' => $unit['ENG']->id,
+                'deliverable_id' => $foundations->id,
+                'sheet_number' => 1,
+                'sheet_count' => 3,
+                'sheet_size' => 'A1',
+                'scale' => '1:50',
+                'revision' => 'A',
+                'purpose' => 'ifr',
+                'revision_date' => now()->subDays(88)->toDateString(),
+                'drawn_by' => $structuralEngineer->id,
+                'checked_by' => $leadEngineer->id,
+            ], $structuralEngineer);
+
+            // Two revisions, in the order a real sheet gets them: reviewed, then approved, then
+            // released to build from. The register keeps the history; the site sees only the latest.
+            $drawings->revise($foundationPlan, 'B', $structuralEngineer, 'ifa',
+                now()->subDays(74)->toDateString());
+            $drawings->revise($foundationPlan, '0', $leadEngineer, 'ifc',
+                now()->subDays(60)->toDateString());
+
+            $drawings->create([
+                'number' => 'DTE-CS-DWG-1002',
+                'title' => 'T-401 foundation — reinforcement details',
+                'project_id' => $dte->id,
+                'discipline_id' => $unit['ENG-CS']->id,
+                'org_unit_id' => $unit['ENG']->id,
+                'deliverable_id' => $foundations->id,
+                'sheet_number' => 2,
+                'sheet_count' => 3,
+                'sheet_size' => 'A1',
+                'scale' => '1:20',
+                'revision' => '0',
+                'purpose' => 'ifc',
+                'revision_date' => now()->subDays(60)->toDateString(),
+                'drawn_by' => $structuralEngineer->id,
+                'checked_by' => $leadEngineer->id,
+            ], $structuralEngineer);
+
+            $isoSheet = $drawings->create([
+                'number' => 'DTE-MP-ISO-1204-07',
+                'title' => 'Isometric — line 10"-P-1204, spool 7 of 41',
+                'project_id' => $dte->id,
+                'discipline_id' => $unit['ENG-MP']->id,
+                'org_unit_id' => $unit['ENG']->id,
+                'deliverable_id' => $isometrics->id,
+                'sheet_number' => 7,
+                'sheet_count' => 41,
+                'sheet_size' => 'A3',
+                'scale' => 'NTS',
+                'revision' => 'A',
+                'purpose' => 'ifr',
+                'revision_date' => now()->subDays(15)->toDateString(),
+                'drawn_by' => $pipingEngineer->id,
+            ], $pipingEngineer);
+
+            // Voided rather than deleted. A drawing number that was issued once exists forever, and
+            // the site is entitled to find out what happened to a sheet somebody printed last month.
+            $superseded = $drawings->create([
+                'number' => 'DTE-EI-DWG-2101',
+                'title' => 'Substation B — single line diagram (superseded numbering)',
+                'project_id' => $dte->id,
+                'discipline_id' => $unit['ENG-EI']->id,
+                'org_unit_id' => $unit['ENG']->id,
+                'sheet_size' => 'A2',
+                'revision' => 'A',
+                'purpose' => 'ifr',
+                'revision_date' => now()->subDays(41)->toDateString(),
+                'drawn_by' => $electricalEngineer->id,
+            ], $electricalEngineer);
+
+            $this->statuses->transition($superseded, $this->statusFor('drawing', 'void'), $engineeringManager,
+                'Renumbered to DTE-EI-DWG-2110 after the client adopted their own substation numbering.');
+
+            // ------------------------------------------------- RFIs and technical queries
+            // ONE REGISTER, three kinds, both directions. The question we asked the client and the
+            // question the fabricator asked us are the same shape of record and are counted
+            // together when somebody asks how many queries this job is carrying.
+            $tieIn = $rfis->create([
+                'kind' => 'rfi',
+                'direction' => 'outgoing',
+                'subject' => 'Tie-in elevation at the existing product manifold',
+                'question' => 'Drawing RPDC-PR-1102 Rev 3 shows the manifold header at +4.250 m; the '
+                    ."site survey of 14 March measured +4.615 m at the same tag.\n\n"
+                    .'Please confirm which is correct. The isometrics for line 10"-P-1204 cannot be '
+                    .'released for fabrication until the tie-in elevation is fixed.',
+                'project_id' => $dte->id,
+                'discipline_id' => $unit['ENG-MP']->id,
+                'org_unit_id' => $unit['ENG']->id,
+                'party_name' => 'Rivers Petroleum Development Company',
+                'raised_by' => $pipingEngineer->id,
+                'raised_on' => now()->subDays(19)->toDateString(),
+                'required_by' => now()->subDays(5)->toDateString(),
+            ], $pipingEngineer);
+
+            $rfis->send($tieIn, $leadEngineer);
+
+            // Open, past its required-by date, and the deliverable above says it is what it is
+            // waiting on. The two records agree without either of them being derived from the other.
+
+            $weldProcedure = $rfis->create([
+                'kind' => 'technical_query',
+                'direction' => 'incoming',
+                'subject' => 'Acceptability of GTAW root with SMAW fill on the 10" line',
+                'question' => 'Our welders are qualified to WPS-014 (GTAW root, SMAW fill and cap). '
+                    .'The specification calls up WPS-011 throughout. May we use WPS-014 on the '
+                    .'buried section?',
+                'project_id' => $dte->id,
+                'discipline_id' => $unit['ENG-MP']->id,
+                'org_unit_id' => $unit['ENG']->id,
+                'party_name' => 'Harcourt Fabrication Services Ltd',
+                'raised_by' => $documentController->id,
+                'raised_on' => now()->subDays(12)->toDateString(),
+                'required_by' => now()->addDays(2)->toDateString(),
+            ], $documentController);
+
+            $rfis->send($weldProcedure, $documentController);
+            $rfis->answer($weldProcedure,
+                'WPS-014 is acceptable for the buried section provided the root pass is purged to '
+                    .'less than 0.5% oxygen and each joint is subject to 100% radiography rather '
+                    .'than the 10% called up in the specification. The additional NDT is at our '
+                    .'cost and has been raised as CR-0001.',
+                $leadEngineer, true, false,
+                'Additional radiography on 41 joints. Priced in CR-0001.');
+
+            $rfis->close($weldProcedure, $leadEngineer, 'Fabricator has confirmed and started welding.');
+
+            $siteQuery = $rfis->create([
+                'kind' => 'site_query',
+                'direction' => 'incoming',
+                'subject' => 'Obstruction found at gridline C4 during excavation',
+                'question' => 'A 150 mm abandoned line, not on any drawing we hold, crosses the '
+                    .'foundation footprint at roughly 1.2 m depth. Excavation stopped. Please advise '
+                    .'whether it can be cut and capped.',
+                'project_id' => $dte->id,
+                'discipline_id' => $unit['ENG-CS']->id,
+                'org_unit_id' => $unit['CON-DT']->id,
+                'party_name' => 'Delta Terminal site team',
+                'raised_by' => $siteManager->id,
+                'raised_on' => now()->subDays(3)->toDateString(),
+                'required_by' => now()->addDays(1)->toDateString(),
+            ], $siteManager);
+
+            $rfis->send($siteQuery, $siteManager);
+
+            // ------------------------------------------------- submittals
+            // A submittal is a package, and the review code lands on the PACKAGE and on each ITEM.
+            // "Approved as noted" on the cover with one item marked revise-and-resubmit is the
+            // normal outcome of a real review, and a register that only records the cover code
+            // cannot tell the fabricator which of eleven items to redo.
+            $valves = $submittals->create([
+                'title' => 'Manual valves — vendor data and material certificates',
+                'description' => 'Gate and globe valves for the T-401 transfer line, package 3 of 5.',
+                'type' => 'Vendor data',
+                'revision' => '0',
+                'project_id' => $dte->id,
+                'discipline_id' => $unit['ENG-MP']->id,
+                'org_unit_id' => $unit['ENG']->id,
+                'party_name' => 'Rivers Petroleum Development Company',
+                'required_by' => now()->subDays(9)->toDateString(),
+            ], $documentController);
+
+            $submittals->addItem($valves, null, [
+                'description' => '10" gate valve, class 300, gear operated',
+                'reference' => 'TAG V-1204-01 / spec MPS-014',
+                'quantity' => 6,
+            ], $documentController);
+
+            $certificates = $submittals->addItem($valves, null, [
+                'description' => 'EN 10204 3.1 material certificates for the valve bodies',
+                'reference' => 'MPS-014 cl. 8.3',
+                'quantity' => 6,
+            ], $documentController);
+
+            $submittals->addItem($valves, null, [
+                'description' => 'Hydrostatic test reports',
+                'reference' => 'API 598',
+                'quantity' => 6,
+            ], $documentController);
+
+            $submittals->submit($valves, $documentController);
+            $submittals->codeItem($certificates, 'C Revise and Resubmit', $engineeringManager,
+                'Certificates supplied are 2.2. The specification requires 3.1 with the heat numbers '
+                    .'traceable to the bodies.');
+            $submittals->review($valves, 'B Approved as Noted', 'revise_resubmit', $engineeringManager,
+                'Valves accepted. Resubmit the material certificates to 3.1 before the valves ship.');
+
+            $valvesRev1 = $submittals->resubmit($valves, $documentController);
+            $submittals->submit($valvesRev1, $documentController);
+
+            $coating = $submittals->create([
+                'title' => 'External coating system — data sheets and applicator qualification',
+                'description' => 'Three-coat epoxy system for the tank shell and the buried line.',
+                'type' => 'Method statement',
+                'revision' => '0',
+                'project_id' => $dte->id,
+                'discipline_id' => $unit['ENG-MP']->id,
+                'org_unit_id' => $unit['ENG']->id,
+                'party_name' => 'Rivers Petroleum Development Company',
+                'required_by' => now()->addDays(6)->toDateString(),
+            ], $documentController);
+
+            $submittals->addItem($coating, null, [
+                'description' => 'Product data sheets, primer / intermediate / topcoat',
+                'reference' => 'CTS-002',
+                'quantity' => 3,
+            ], $documentController);
+
+            $submittals->submit($coating, $documentController);
+
+            // ------------------------------------------------- change requests
+            // THE DISPOSITION IS NOT THE STATUS. This one is `closed` (where it got to) and
+            // `approved` (what was decided), and "how much did we approve this quarter" is a
+            // question the status column cannot answer on its own.
+            $radiography = $changes->create([
+                'title' => 'Additional radiography on buried section of line 10"-P-1204',
+                'description' => 'Increase NDT coverage on the buried section from 10% to 100% '
+                    .'radiography, following acceptance of WPS-014 for the root pass.',
+                'reason' => 'Raised out of TQ-0002. The alternative weld procedure is acceptable to '
+                    .'engineering only with full volumetric examination of the buried joints, which '
+                    .'cannot be re-excavated once backfilled.',
+                'project_id' => $dte->id,
+                'discipline_id' => $unit['ENG-MP']->id,
+                'org_unit_id' => $unit['PMO']->id,
+                'origin' => 'internal',
+                'cost_impact' => 2850000,
+                'schedule_impact_days' => 3,
+                'impact_notes' => '41 joints at ₦68,500 per joint including the standby time. Three '
+                    .'days on the critical path, absorbed into the float on the tie-in window.',
+                'raised_by' => $leadEngineer->id,
+                'raised_on' => now()->subDays(11)->toDateString(),
+                'required_by' => now()->subDays(4)->toDateString(),
+            ], $leadEngineer);
+
+            $changes->submit($radiography, $leadEngineer);
+            $changes->decide($radiography, ChangeDisposition::Approved, $projectManager,
+                'Approved. The client has accepted the cost under the variation account; the three '
+                    .'days come out of the tie-in float and the programme date does not move.',
+                2850000, 3);
+            $changes->close($radiography, $projectManager);
+
+            $craneAccess = $changes->create([
+                'title' => 'Second crane hardstanding on the east side of T-401',
+                'description' => 'Construct an additional 20 m × 15 m hardstanding to allow tandem '
+                    .'lifting of the shell courses.',
+                'reason' => 'Site-raised. The single hardstanding forces a long radius lift and adds '
+                    .'roughly nine days to the shell erection sequence.',
+                'project_id' => $dte->id,
+                'discipline_id' => $unit['ENG-CS']->id,
+                'org_unit_id' => $unit['CON-DT']->id,
+                'origin' => 'site',
+                'cost_impact' => 6400000,
+                'schedule_impact_days' => -9,
+                'impact_notes' => 'Saves nine days on erection at a cost the client has not agreed to '
+                    .'carry. Deferred pending the next progress meeting.',
+                'raised_by' => $siteManager->id,
+                'raised_on' => now()->subDays(6)->toDateString(),
+                'required_by' => now()->addDays(8)->toDateString(),
+            ], $siteManager);
+
+            $changes->submit($craneAccess, $siteManager);
+        });
+    }
+
+    /**
+     * What Meridian is DOING ABOUT SAFETY (§46–§53) — and the phase's exit criterion, demonstrated
+     * rather than described.
+     *
+     * THE ORDER OF THIS CHAPTER IS THE ARGUMENT. Configuration first: permit types, training
+     * courses, and an approval route for incidents whose review stage is configured to open an
+     * investigation and raise a corrective action. Then an incident is reported by a site officer
+     * and sent for review — and the investigation and the corrective action appear, assigned and
+     * dated, because of the route somebody set up on a screen. Nothing in this method creates
+     * either of them. If that ever stops being true this seeder will still run and the two records
+     * will simply not be there, which is why IncidentSpawnsInvestigationTest asserts it as well.
+     */
+    private function seedMeridianHse(Organization $organization): void
+    {
+        $this->context->within($organization, function () {
+            $this->bootDelivery();
+            $this->bootDocuments();
+
+            $incidents = app(IncidentService::class);
+            $investigations = app(InvestigationService::class);
+            $actions = app(CorrectiveActionService::class);
+            $observations = app(HseObservationService::class);
+            $risks = app(RiskAssessmentService::class);
+            $inspections = app(HseInspectionService::class);
+            $talks = app(ToolboxTalkService::class);
+            $permits = app(PermitService::class);
+            $training = app(TrainingRecordService::class);
+
+            $staff = $this->staff();
+            $unit = $this->unitsByCode();
+            $job = Project::query()->get()->keyBy('code');
+
+            $md = $this->accountOf($staff, 'MEI-0001');             // Adaeze Okonkwo
+            $pipingEngineer = $this->accountOf($staff, 'MEI-0007'); // Segun Afolabi
+            $siteManager = $this->accountOf($staff, 'MEI-0012');    // Kelechi Nwosu
+            $hseManager = $this->accountOf($staff, 'MEI-0013');     // Grace Ibrahim
+            $hseOfficer = $this->accountOf($staff, 'MEI-0014');     // Emeka Duru
+            $qaInspector = $this->accountOf($staff, 'MEI-0016');    // Ruth Okafor
+
+            $dte = $job['DTE'];
+
+            // ------------------------------------------------- configuration: permit types
+            // Not provisioned with the tenant, and deliberately: a facilities-management firm needs
+            // hot work and nothing else, while this company works in confined spaces every week.
+            // Each type carries its own precaution list, copied onto the permit at creation so the
+            // permit stays readable after somebody edits the type (§73).
+            $hotWork = $this->permitType($md, [
+                'name' => 'Hot work',
+                'code' => 'HW',
+                'description' => 'Welding, cutting, grinding or any work producing a source of '
+                    .'ignition outside a designated workshop.',
+                'color' => 'danger',
+                'default_duration_hours' => 8,
+                'requires_gas_test' => true,
+                'sort_order' => 1,
+                'precaution_template' => [
+                    ['description' => 'Combustible material removed or protected within 15 m', 'is_required' => true],
+                    ['description' => 'Gas test carried out and recorded within the last hour', 'is_required' => true],
+                    ['description' => 'Fire extinguisher and charged hose reel at the work face', 'is_required' => true],
+                    ['description' => 'Fire watch posted for the duration and 30 minutes after', 'is_required' => true],
+                    ['description' => 'Drains and openings within 15 m covered', 'is_required' => true],
+                    ['description' => 'Adjacent operations notified', 'is_required' => false],
+                ],
+            ]);
+
+            $confinedSpace = $this->permitType($md, [
+                'name' => 'Confined space entry',
+                'code' => 'CSE',
+                'description' => 'Entry into any tank, vessel, pit or excavation over 1.2 m deep '
+                    .'with restricted egress.',
+                'color' => 'danger',
+                'default_duration_hours' => 6,
+                'requires_gas_test' => true,
+                'requires_isolation' => true,
+                'sort_order' => 2,
+                'precaution_template' => [
+                    ['description' => 'Space isolated, drained, purged and certified gas free', 'is_required' => true],
+                    ['description' => 'Continuous atmospheric monitoring in place', 'is_required' => true],
+                    ['description' => 'Standby person at the entry point at all times', 'is_required' => true],
+                    ['description' => 'Rescue equipment and tripod rigged before entry', 'is_required' => true],
+                    ['description' => 'Entry log maintained at the access point', 'is_required' => true],
+                    ['description' => 'Communication with the control room tested', 'is_required' => false],
+                ],
+            ]);
+
+            $this->permitType($md, [
+                'name' => 'Working at height',
+                'code' => 'WAH',
+                'description' => 'Any work above 2 m where a fall could occur, other than from a '
+                    .'fully boarded and tagged scaffold.',
+                'color' => 'warning',
+                'default_duration_hours' => 10,
+                'sort_order' => 3,
+                'precaution_template' => [
+                    ['description' => 'Fall arrest harness inspected and anchor point identified', 'is_required' => true],
+                    ['description' => 'Exclusion zone established below the work', 'is_required' => true],
+                    ['description' => 'Tools tethered', 'is_required' => true],
+                    ['description' => 'Weather checked; work suspended above 25 knots', 'is_required' => false],
+                ],
+            ]);
+
+            $this->permitType($md, [
+                'name' => 'Excavation',
+                'code' => 'EXC',
+                'description' => 'Breaking ground anywhere inside the terminal fence.',
+                'color' => 'warning',
+                'default_duration_hours' => 10,
+                'requires_isolation' => true,
+                'sort_order' => 4,
+                'precaution_template' => [
+                    ['description' => 'Underground services scanned and marked within the last 24 hours', 'is_required' => true],
+                    ['description' => 'Permit to break ground held by the terminal operator', 'is_required' => true],
+                    ['description' => 'Sides battered or shored beyond 1.2 m', 'is_required' => true],
+                    ['description' => 'Edge protection and access ladder in place', 'is_required' => true],
+                ],
+            ]);
+
+            // ------------------------------------------------- configuration: training courses
+            // `validity_months` is what turns a filing cabinet into a register that tells you
+            // something: it is the only reason the platform can say who is out of ticket next month.
+            $induction = $this->trainingCourse($md, [
+                'name' => 'Meridian site induction',
+                'code' => 'IND',
+                'description' => 'Company rules, site hazards, emergency arrangements and the '
+                    .'stop-work authority every person on a Meridian site holds.',
+                'category' => 'Induction',
+                'validity_months' => 24,
+                'is_mandatory' => true,
+                'provider' => 'Meridian HSE department',
+                'duration_hours' => 3,
+                'sort_order' => 1,
+            ]);
+
+            $workingAtHeight = $this->trainingCourse($md, [
+                'name' => 'Working at height and harness use',
+                'code' => 'WAH',
+                'description' => 'Fall protection hierarchy, harness inspection, anchor selection '
+                    .'and suspension trauma.',
+                'category' => 'Technical',
+                'validity_months' => 36,
+                'is_mandatory' => false,
+                'provider' => 'Delta Safety Training Ltd',
+                'duration_hours' => 8,
+                'sort_order' => 2,
+            ]);
+
+            $confinedSpaceCourse = $this->trainingCourse($md, [
+                'name' => 'Confined space entry and rescue',
+                'code' => 'CSE',
+                'description' => 'Entry procedures, gas testing, standby duties and non-entry rescue.',
+                'category' => 'Technical',
+                'validity_months' => 24,
+                'provider' => 'Delta Safety Training Ltd',
+                'duration_hours' => 16,
+                'sort_order' => 3,
+            ]);
+
+            $firstAid = $this->trainingCourse($md, [
+                'name' => 'First aid at work',
+                'code' => 'FAW',
+                'description' => 'Three-day certificated first aid at work.',
+                'category' => 'Statutory',
+                'validity_months' => 36,
+                'provider' => 'Rivers State Red Cross',
+                'duration_hours' => 21,
+                'sort_order' => 4,
+            ]);
+
+            $this->trainingCourse($md, [
+                'name' => 'H2S awareness and escape breathing apparatus',
+                'code' => 'H2S',
+                'description' => 'Required for anyone entering the terminal process area.',
+                'category' => 'Technical',
+                'validity_months' => 12,
+                'is_mandatory' => true,
+                'provider' => 'Rivers Petroleum Development Company',
+                'duration_hours' => 4,
+                'sort_order' => 5,
+            ]);
+
+            // ------------------------------------------------- configuration: the incident route
+            // THIS IS THE EXIT CRITERION OF PHASE 4, set up the way a company sets it up: a route,
+            // one stage, two automatic actions chosen from a list. The stage's `auto_actions` name
+            // record TYPES — `investigation`, `corrective_action` — which the runner resolves
+            // through the morph map. No module is named in code anywhere in this block.
+            $hseRole = Role::query()->where('slug', 'hse-manager')->value('id');
+
+            $incidentRoute = $this->routes->create([
+                'name' => 'Incident review',
+                'description' => 'Every reported incident is reviewed by the HSE manager. Reaching '
+                    .'that review opens the investigation and raises the first corrective action, '
+                    .'so neither depends on somebody remembering.',
+                'entity_type' => 'hse_incident',
+                'is_default' => true,
+            ], $md);
+
+            $this->routes->addStage($incidentRoute, [
+                'name' => 'HSE manager review',
+                'instructions' => 'Confirm the classification and the potential severity, then '
+                    .'approve. The investigation and the first corrective action have already been '
+                    .'opened; approving closes the review, not the incident.',
+                'sequence' => 1,
+                'action_type' => 'approve',
+                'assignee_type' => 'role',
+                'assignee_ref' => (string) $hseRole,
+                'quorum' => 'all',
+                'on_reject' => 'return_to_owner',
+                'sla_hours' => 24,
+                'allow_delegate' => true,
+                'allow_self_approval' => false,
+                'is_active' => true,
+                'auto_actions' => [
+                    [
+                        'verb' => 'create_record',
+                        'record' => 'investigation',
+                        'title' => 'Investigation',
+                        'due_in_days' => 14,
+                        'assignee_type' => 'role',
+                        'assignee_ref' => (string) $hseRole,
+                    ],
+                    [
+                        'verb' => 'create_record',
+                        'record' => 'corrective_action',
+                        'title' => 'Immediate make-safe of the reported condition',
+                        'due_in_days' => 7,
+                        'assignee_type' => 'user',
+                        'assignee_ref' => (string) $siteManager->id,
+                    ],
+                ],
+            ], $md);
+
+            $this->routes->publish($incidentRoute, $md);
+
+            // ------------------------------------------------- risk assessment
+            // Two scores per hazard, before and after. A register that records only the residual
+            // score cannot show a regulator what the controls are actually for.
+            $scaffoldRa = $risks->create([
+                'title' => 'Erection and dismantling of access scaffold to T-401 shell',
+                'description' => 'Tube and fitting scaffold to 14 m around the new tank shell, '
+                    .'erected in lifts as the courses go up.',
+                'project_id' => $dte->id,
+                'org_unit_id' => $unit['HSE']->id,
+                'assessment_type' => 'Task based',
+                'activity' => 'Scaffold erection, alteration and dismantling',
+                'location' => 'Delta Terminal — tank farm, T-401',
+                'assessed_by' => $hseOfficer->id,
+                'assessed_on' => now()->subDays(48)->toDateString(),
+                'valid_from' => now()->subDays(45)->toDateString(),
+                'valid_to' => now()->addDays(135)->toDateString(),
+                'review_frequency_months' => 6,
+            ], $hseOfficer);
+
+            $risks->setHazards($scaffoldRa, [
+                [
+                    'hazard' => 'Fall from height during erection of the second and third lifts',
+                    'who_is_at_risk' => 'Scaffolders, banksman',
+                    'existing_controls' => 'Advanced guardrail system; harness clipped to the '
+                        .'transom above; scaffolders CISRS carded.',
+                    'likelihood' => 3, 'severity' => 5,
+                    'additional_controls' => 'Second scaffolder to check every harness before the '
+                        .'lift starts; no erection above 8 m in wind over 20 knots.',
+                    'residual_likelihood' => 2, 'residual_severity' => 5,
+                    'responsible_id' => $siteManager->id,
+                    'target_date' => now()->subDays(40)->toDateString(),
+                ],
+                [
+                    'hazard' => 'Dropped tubes and fittings onto operatives below',
+                    'who_is_at_risk' => 'Anyone at ground level within the tank bund',
+                    'existing_controls' => 'Exclusion zone barriered to 4 m; tools tethered; '
+                        .'materials raised by gin wheel, never thrown.',
+                    'likelihood' => 3, 'severity' => 4,
+                    'additional_controls' => 'Debris netting to the outer face from the second lift.',
+                    'residual_likelihood' => 2, 'residual_severity' => 3,
+                    'responsible_id' => $siteManager->id,
+                    'target_date' => now()->subDays(42)->toDateString(),
+                ],
+                [
+                    'hazard' => 'Incomplete scaffold used before it has been inspected and tagged',
+                    'who_is_at_risk' => 'Painters, welders, inspectors',
+                    'existing_controls' => 'Scafftag system; incomplete scaffolds tagged red and '
+                        .'access ladders removed at the end of each shift.',
+                    'likelihood' => 3, 'severity' => 4,
+                    'additional_controls' => 'Weekly documented scaffold inspection by a competent '
+                        .'person, recorded on the HSE inspection register.',
+                    'residual_likelihood' => 1, 'residual_severity' => 4,
+                    'responsible_id' => $hseOfficer->id,
+                    'target_date' => now()->subDays(38)->toDateString(),
+                ],
+                [
+                    'hazard' => 'Contact with the existing product line running through the bund',
+                    'who_is_at_risk' => 'Scaffolders, terminal operators',
+                    'existing_controls' => 'Line identified and marked; standoff maintained; '
+                        .'terminal operator notified before each lift.',
+                    'likelihood' => 2, 'severity' => 5,
+                    'additional_controls' => 'Physical standoff barrier fixed for the duration.',
+                    'residual_likelihood' => 1, 'residual_severity' => 5,
+                    'responsible_id' => $siteManager->id,
+                    'target_date' => now()->subDays(44)->toDateString(),
+                ],
+            ], $hseOfficer);
+
+            $risks->review($scaffoldRa, $siteManager);
+            $risks->approve($scaffoldRa, $hseManager);
+
+            // ------------------------------------------------- toolbox talk
+            // Attendees are NOT all accounts. Most people at a toolbox talk on a construction site
+            // work for somebody else, and a register that can only record employees records the
+            // wrong half of the workforce.
+            $scaffoldTalk = $talks->create([
+                'title' => 'Scaffold tagging — never climb a red tag',
+                'topic' => 'Scaffold inspection and the Scafftag system',
+                'content' => 'What the three tags mean, who is allowed to change one, and what to '
+                    ."do if you find a scaffold with no tag at all.\n\n"
+                    .'Green: inspected within the last seven days, safe to use. Amber: incomplete, '
+                    .'use only with a specific permit and harness. Red: do not climb. Only the '
+                    .'scaffold supervisor changes a tag, and the inspection is recorded on the '
+                    .'HSE inspection register the same day.',
+                'key_points' => "Check the tag before you climb.\n"
+                    ."A missing tag is a red tag.\n"
+                    ."Report an altered scaffold to the site office immediately.\n"
+                    .'Anyone may stop the job. Nobody is questioned for stopping it.',
+                'project_id' => $dte->id,
+                'org_unit_id' => $unit['CON-DT']->id,
+                'location' => 'Delta Terminal — muster point B',
+                'duration_minutes' => 20,
+                'presented_by' => $hseOfficer->id,
+            ], $hseOfficer);
+
+            $talks->record($scaffoldTalk, [
+                ['user_id' => $siteManager->id, 'person_name' => $siteManager->name, 'company' => 'Meridian Engineering & Infrastructure', 'trade' => 'Site management'],
+                ['user_id' => $qaInspector->id, 'person_name' => $qaInspector->name, 'company' => 'Meridian Engineering & Infrastructure', 'trade' => 'QA/QC'],
+                ['person_name' => 'Sunday Okon', 'company' => 'Harcourt Fabrication Services Ltd', 'trade' => 'Scaffolder'],
+                ['person_name' => 'Peter Uduak', 'company' => 'Harcourt Fabrication Services Ltd', 'trade' => 'Scaffolder'],
+                ['person_name' => 'Musa Danjuma', 'company' => 'Harcourt Fabrication Services Ltd', 'trade' => 'Banksman'],
+                ['person_name' => 'Ayo Fasanya', 'company' => 'Coastline Coatings Ltd', 'trade' => 'Blaster / painter'],
+                ['person_name' => 'John Etim', 'company' => 'Coastline Coatings Ltd', 'trade' => 'Blaster / painter'],
+                ['person_name' => 'Samuel Okoro', 'company' => 'Meridian Engineering & Infrastructure', 'trade' => 'Pipefitter'],
+            ], $hseOfficer, $this->workingDay(9, 7)->toDateTimeString());
+
+            // ------------------------------------------------- weekly site inspection
+            // Scored, and only the rows that were actually scored count towards either total, so a
+            // not-applicable line cannot quietly improve the percentage.
+            $weekly = $inspections->create([
+                'title' => 'Weekly site HSE inspection — week 34',
+                'description' => 'Routine walk of the tank farm working areas with the site manager.',
+                'project_id' => $dte->id,
+                'org_unit_id' => $unit['HSE']->id,
+                'inspection_type' => 'Weekly site inspection',
+                'location' => 'Delta Terminal — tank farm and laydown',
+                'scheduled_for' => now()->subDays(11)->toDateString(),
+                'accompanied_by' => 'Kelechi Nwosu (site manager), Sunday Okon (scaffold supervisor)',
+            ], $hseOfficer);
+
+            $inspections->setItems($weekly, [
+                ['reference' => '1.1', 'description' => 'Scaffolds tagged and inspected within seven days', 'category' => 'Work at height', 'score_possible' => 10],
+                ['reference' => '1.2', 'description' => 'Edge protection complete on all open edges', 'category' => 'Work at height', 'score_possible' => 10],
+                ['reference' => '2.1', 'description' => 'Excavations shored, barriered and with ladder access', 'category' => 'Excavation', 'score_possible' => 10],
+                ['reference' => '3.1', 'description' => 'Hot work permits displayed at the work face', 'category' => 'Permits', 'score_possible' => 10],
+                ['reference' => '3.2', 'description' => 'Fire extinguishers in date and unobstructed', 'category' => 'Fire', 'score_possible' => 10],
+                ['reference' => '4.1', 'description' => 'Housekeeping — walkways clear of trip hazards', 'category' => 'Housekeeping', 'score_possible' => 10],
+                ['reference' => '4.2', 'description' => 'Waste segregated and skips not overfilled', 'category' => 'Environment', 'score_possible' => 10],
+                ['reference' => '5.1', 'description' => 'PPE worn correctly, including eye protection in the grinding area', 'category' => 'PPE', 'score_possible' => 10],
+                ['reference' => '6.1', 'description' => 'Emergency muster points signed and unobstructed', 'category' => 'Emergency', 'score_possible' => 10],
+                ['reference' => '7.1', 'description' => 'Lifting equipment colour coded and certificates on site', 'category' => 'Lifting', 'score_possible' => 10],
+            ], $hseOfficer);
+
+            $weekly->load('items');
+            $weeklyResults = [];
+
+            foreach ($weekly->items as $index => $item) {
+                // Two failures and a borderline, positioned deliberately: the scaffold line is the
+                // one the incident below turns on, and an inspection that found nothing would make
+                // the incident look like bad luck rather than a missed warning.
+                $weeklyResults[$item->getKey()] = match ($index) {
+                    0 => ['result' => 'fail', 'severity' => 'Major', 'action_required' => true, 'score_achieved' => 0,
+                        'comment' => 'North-east scaffold to T-401 carrying a green tag dated 19 days ago. '
+                            .'Tag replaced with red and access ladder removed pending re-inspection.'],
+                    5 => ['result' => 'fail', 'severity' => 'Minor', 'action_required' => true, 'score_achieved' => 4,
+                        'comment' => 'Welding leads and hoses run across the main walkway between the '
+                            .'bund and the laydown. Route them at high level or cover them.'],
+                    7 => ['result' => 'observation', 'severity' => 'Minor', 'action_required' => false, 'score_achieved' => 7,
+                        'comment' => 'Two operatives in the grinding area with visors lifted. Corrected '
+                            .'on the spot and covered in the toolbox talk.'],
+                    default => ['result' => 'pass', 'score_achieved' => 10],
+                };
+            }
+
+            $inspections->perform($weekly, $weeklyResults, $hseOfficer,
+                'Site generally in good order. Two failures, both raised as corrective actions. The '
+                    .'scaffold tagging failure is the second in six weeks and is now on the HSE '
+                    .'manager report.');
+
+            $tagAction = $actions->openFrom($weekly, [
+                'title' => 'Re-establish the seven-day scaffold inspection routine',
+                'description' => 'Scaffold inspections are being missed. Assign a named competent '
+                    .'person for each scaffold, put the inspection in the weekly plan, and check '
+                    .'every tag on site against its date before the next shift starts.',
+                'action_type' => 'Corrective',
+                'priority' => 'High',
+                'due_in_days' => 5,
+            ], $siteManager->id, $hseOfficer);
+
+            $actions->openFrom($weekly, [
+                'title' => 'Route welding leads and hoses clear of the main walkway',
+                'action_type' => 'Corrective',
+                'priority' => 'Medium',
+                'due_in_days' => 3,
+            ], $siteManager->id, $hseOfficer);
+
+            $actions->complete($tagAction, $siteManager,
+                'Sunday Okon named as the competent person for all scaffolds on the job. Every tag '
+                    .'on site checked and four re-inspected. Inspection now a standing item on the '
+                    .'Monday plan.');
+
+            // ------------------------------------------------- observations
+            $observations->create([
+                'title' => 'Operative crossing the bund wall instead of using the steps',
+                'description' => 'Two operatives seen climbing the bund wall at the south corner to '
+                    .'save the walk to the steps. Spoken to at the time; both accepted it.',
+                'project_id' => $dte->id,
+                'org_unit_id' => $unit['HSE']->id,
+                'observation_type' => 'Unsafe act',
+                'category' => 'Behaviour',
+                'risk_level' => 'Medium',
+                'location' => 'Delta Terminal — T-401 bund, south corner',
+                'observed_at' => $this->workingDay(14, 10)->toDateTimeString(),
+                'observer_name' => 'Emeka Duru',
+                'immediate_action' => 'Stopped and explained. Bund steps signed and a second set of '
+                    .'steps requested at the south corner.',
+                'action_required' => false,
+            ], $hseOfficer);
+
+            $looseGrating = $observations->create([
+                'title' => 'Unsecured grating panel on the pump house access platform',
+                'description' => 'One grating panel lifting at the fixings on the east side of the '
+                    .'platform. It moves underfoot. Barriered off pending repair.',
+                'project_id' => $dte->id,
+                'org_unit_id' => $unit['HSE']->id,
+                'observation_type' => 'Unsafe condition',
+                'category' => 'Access',
+                'risk_level' => 'High',
+                'location' => 'Delta Terminal — pump house access platform',
+                'observed_at' => $this->workingDay(4, 15)->toDateTimeString(),
+                'observer_name' => 'Ruth Okafor',
+                'immediate_action' => 'Panel barriered and the platform closed to non-essential access.',
+                'action_required' => true,
+            ], $qaInspector);
+
+            $actions->openFrom($looseGrating, [
+                'title' => 'Refix the grating panel and check every fixing on the platform',
+                'action_type' => 'Corrective',
+                'priority' => 'High',
+                'due_in_days' => 2,
+            ], $siteManager->id, $hseManager);
+
+            // An anonymous one. The observer's name is deliberately absent rather than blanked on
+            // the screen: a reporting channel people believe is anonymous is the only kind that
+            // gets used, and a nullable column with `is_anonymous` beside it is the honest schema.
+            $observations->create([
+                'title' => 'Pressure to work through the gas test on the night shift',
+                'description' => 'Reported through the anonymous channel: a supervisor is said to '
+                    .'have told a crew to start cutting while the gas tester was still walking over. '
+                    .'No names given.',
+                'project_id' => $dte->id,
+                'org_unit_id' => $unit['HSE']->id,
+                'observation_type' => 'Unsafe act',
+                'category' => 'Supervision',
+                'risk_level' => 'High',
+                'location' => 'Delta Terminal — night shift',
+                'observed_at' => $this->workingDay(7, 21)->toDateTimeString(),
+                'is_anonymous' => true,
+                'action_required' => true,
+                'confidentiality' => 'restricted',
+            ], $hseManager);
+
+            // ------------------------------------------------- a near miss, closed out
+            // No route is started on this one. Submitting for review is a decision somebody makes,
+            // not something reporting does to you, and a register where every near miss drags a
+            // manager review behind it is a register that stops receiving near misses.
+            $dropped = $incidents->create([
+                'title' => 'Scaffold board fell two lifts into an empty exclusion zone',
+                'description' => 'A board being passed up to the third lift was not taken by the '
+                    .'receiving scaffolder and fell approximately 6 m. It landed inside the barriered '
+                    .'exclusion zone. Nobody was below.',
+                'project_id' => $dte->id,
+                'org_unit_id' => $unit['HSE']->id,
+                'category' => 'near_miss',
+                'severity' => 'minor',
+                'potential_severity' => 'fatality',
+                'location' => 'Delta Terminal — T-401, north face',
+                'occurred_at' => $this->workingDay(21, 11)->toDateTimeString(),
+                'immediate_actions' => 'Work stopped. Exclusion zone widened to 6 m and a second '
+                    .'banksman posted for the remaining lifts. Gin wheel used for all boards after.',
+            ], $hseOfficer);
+
+            // POTENTIAL severity is `fatality` while actual severity is `minor`, and that gap is the
+            // entire value of a near miss. A register that ranked this by what happened would file
+            // the loudest warning the job ever got at the bottom of the list.
+            $incidents->close($dropped, $hseManager);
+
+            // ------------------------------------------------- the incident that matters
+            $fall = $incidents->create([
+                'title' => 'Fall from scaffold during dismantling — fractured wrist',
+                'description' => 'While dismantling the second lift on the north-east face of T-401, '
+                    .'a scaffolder stepped onto a section from which the boards had already been '
+                    .'removed and fell approximately 2.4 m to the bund floor, landing on his '
+                    .'outstretched right hand. He was wearing a harness; it was not clipped at the '
+                    .'time of the fall.',
+                'project_id' => $dte->id,
+                'org_unit_id' => $unit['HSE']->id,
+                'category' => 'lost_time_injury',
+                'severity' => 'major',
+                'potential_severity' => 'fatality',
+                'location' => 'Delta Terminal — T-401, north-east face, bund floor',
+                'occurred_at' => $this->workingDay(6, 14)->toDateTimeString(),
+                'immediate_actions' => 'First aid given on site by the site nurse. Taken to Port '
+                    .'Harcourt General by company vehicle. All scaffold dismantling on the terminal '
+                    .'stopped by the HSE officer under stop-work authority and remains stopped.',
+                'is_lost_time' => true,
+                'lost_time_days' => 12,
+            ], $hseOfficer);
+
+            // The medical detail goes on the person, not on the incident, and only through the one
+            // method that accepts those columns (§68). Everybody who can see the incident can see
+            // that somebody was hurt; a much smaller group can see what happened to him.
+            $incidents->addPerson($fall, [
+                'person_name' => 'Peter Uduak',
+                'company' => 'Harcourt Fabrication Services Ltd',
+                'occupation' => 'Scaffolder',
+                'involvement' => 'injured',
+                'injury_type' => 'Fracture',
+                'body_part' => 'Right wrist',
+                'treatment' => 'hospital',
+                'days_lost' => 12,
+                'returned_to_work_on' => now()->addDays(6)->toDateString(),
+                'notes' => 'Distal radius fracture, cast applied, no surgery. Fit for light duties '
+                    .'from the return date, no work at height for eight weeks.',
+            ], $hseOfficer);
+
+            $incidents->addPerson($fall, [
+                'person_name' => 'Sunday Okon',
+                'company' => 'Harcourt Fabrication Services Ltd',
+                'occupation' => 'Scaffold supervisor',
+                'involvement' => 'witness',
+                'notes' => 'Was at ground level and saw the fall. Gave a statement the same afternoon.',
+            ], $hseOfficer);
+
+            $incidents->markReportable($fall, $hseManager,
+                now()->subDays(5)->toDateString(), 'FMoL/RS/2026/0871');
+
+            // ---------------------------------------------------------------------------------
+            // THE EXIT CRITERION, IN DEMO DATA.
+            //
+            // One line. It starts the route configured above, the review stage opens, and the
+            // stage's auto-actions run: an investigation is opened against this incident with the
+            // HSE manager as lead and fourteen days to run, and a corrective action is raised on
+            // the site manager with seven. Neither is created anywhere in this file — read on and
+            // you will find them fetched back out of the database, never constructed.
+            // ---------------------------------------------------------------------------------
+            $this->approvals->start($fall, $hseOfficer);
+
+            $this->decide($fall, $hseManager, Decision::Approve,
+                'Classification agreed. Reportable, and reported. Dismantling stays stopped across '
+                    .'the terminal until the investigation has an immediate cause and the method '
+                    .'statement has been rewritten.');
+
+            // ------------------------------------------------- what the route opened
+            $investigation = $fall->investigation()->first();
+
+            if ($investigation === null) {
+                // Loud, and deliberately so. If this ever fires, the platform's headline claim —
+                // that a company can configure a consequence without a developer — has quietly
+                // stopped being true, and a demo that silently seeded a thinner story would hide it.
+                throw new \RuntimeException(
+                    'The incident route did not open an investigation. The exit criterion of '
+                    .'phase 4 is not being met and the demo data would misrepresent the platform.'
+                );
+            }
+
+            $investigations->update($investigation, [
+                'method' => '5 Whys',
+                'started_on' => now()->subDays(5)->toDateString(),
+                'sequence_of_events' => "07:10 — Toolbox talk held; scaffold tagging covered.\n"
+                    ."13:20 — Dismantling of the second lift begins, three scaffolders, one banksman.\n"
+                    ."14:05 — Boards removed from the north-east bay and passed down.\n"
+                    .'14:12 — The injured party steps from the ledger onto the bay the boards had '
+                    ."been removed from, believing it still boarded, and falls to the bund floor.\n"
+                    ."14:14 — Fall witnessed by the supervisor at ground level; first aid called.\n"
+                    .'14:40 — Site nurse hands over; casualty taken to hospital.',
+                'immediate_cause' => 'He stepped onto an unboarded bay while unclipped. The section '
+                    .'had been stripped by a second pair working from the far end, and there was '
+                    .'nothing at the boundary to show where the boarded deck stopped.',
+                'root_cause' => 'The dismantling sequence was never agreed between the two pairs '
+                    .'working on the same lift. The method statement covers erection in detail and '
+                    .'treats dismantling as its reverse, so it specifies no sequence, no boundary '
+                    .'marking, and no clipping regime for a deck that is being progressively removed. '
+                    .'The crew were left to arrange it between themselves each shift.',
+                'contributing_factors' => 'Scaffold inspection had lapsed to 19 days, so the last '
+                    ."formal look at the structure predated the dismantling entirely.\n"
+                    .'Harness use during dismantling was custom rather than instruction: clipping to '
+                    ."a structure you are removing has no obvious anchor, and nobody had been given one.\n"
+                    .'Programme pressure to release the bund for the coating crew.',
+                'recommendations' => 'Rewrite the scaffold method statement to cover dismantling as '
+                    .'its own operation, with a named sequence, a marked boundary at the edge of the '
+                    ."remaining deck and a nominated anchor for each stage.\n"
+                    ."Reinstate the seven-day inspection with a named competent person.\n"
+                    .'Brief every scaffolder on the terminal before dismantling restarts.',
+            ], $hseManager);
+
+            $investigations->complete($investigation, $hseManager,
+                'The fall was caused by an unmarked and unboarded bay on a deck being dismantled by '
+                    .'two pairs working without an agreed sequence. The harness was worn and not '
+                    .'clipped; no anchor had been specified for dismantling. The method statement is '
+                    .'silent on all of it.');
+
+            // The corrective action the route raised. Fetched, not made.
+            $makeSafe = $fall->correctiveActions()->orderBy('id')->first();
+
+            if ($makeSafe === null) {
+                throw new \RuntimeException(
+                    'The incident route did not raise a corrective action, so the phase 4 exit '
+                    .'criterion is only half met.'
+                );
+            }
+
+            $actions->complete($makeSafe, $siteManager,
+                'All scaffold dismantling on the terminal stopped the same afternoon. The T-401 '
+                    .'scaffold has been re-boarded to a safe configuration, tagged red, and the '
+                    .'access ladders removed. Nothing will be dismantled until the rewritten method '
+                    .'statement is briefed.');
+
+            // Verified by somebody who neither carried it out nor was assigned it — the service
+            // refuses anything else, and so does the policy.
+            $actions->verify($makeSafe, $hseManager, 'effective',
+                'Walked the scaffold with the supervisor. Configuration is safe, tag is red, ladders '
+                    .'are off. Confirmed with the subcontractor that no dismantling is planned.');
+
+            // And the one the investigation asked for, which is still running.
+            $actions->openFrom($investigation, [
+                'title' => 'Rewrite the scaffold method statement to cover dismantling',
+                'description' => 'Dismantling to be written as its own operation: agreed sequence, '
+                    .'a marked boundary at the edge of the remaining deck, a nominated anchor point '
+                    .'for each stage, and a hold point before any lift is stripped. Brief every '
+                    .'scaffolder on the terminal before work restarts.',
+                'action_type' => 'Corrective',
+                'priority' => 'Critical',
+                'due_in_days' => 9,
+            ], $hseOfficer->id, $hseManager);
+
+            $actions->openFrom($investigation, [
+                'title' => 'Extend the seven-day scaffold inspection to every subcontracted scaffold',
+                'action_type' => 'Preventive',
+                'priority' => 'High',
+                'due_in_days' => 21,
+            ], $siteManager->id, $hseManager);
+
+            // The incident stays OPEN. Its investigation is complete and it could be closed today,
+            // and the reason it is not is that two actions are still running — which is exactly the
+            // state an HSE manager's dashboard exists to show.
+
+            // ------------------------------------------------- permits to work
+            // THREE PEOPLE, THREE ROLES, AND THE SERVICE ENFORCES ALL OF IT: the supervisor who
+            // wants the work requests it, the issuing authority issues it, and the supervisor
+            // accepts it back. A permit issued by the person who asked for it is not a permit, it
+            // is a note to self, and PermitService refuses to write one.
+            $hotWorkPermit = $permits->create([
+                'permit_type_id' => $hotWork->id,
+                'title' => 'Welding of nozzle N4 reinforcing pad, T-401',
+                'description' => 'Manual metal arc welding of the reinforcing pad to the shell at '
+                    .'N4, including grinding preparation.',
+                'project_id' => $dte->id,
+                'org_unit_id' => $unit['CON-DT']->id,
+                'location' => 'Delta Terminal — T-401, east shell, elevation +3.2 m',
+                'equipment' => 'Welding set, angle grinder, welding screens',
+                'worker_count' => 4,
+                'valid_from' => $this->workingDay(2, 7)->toDateTimeString(),
+            ], $siteManager);
+
+            foreach ($hotWorkPermit->precautions()->orderBy('sort_order')->get() as $precaution) {
+                if (! $precaution->is_required) {
+                    continue;
+                }
+
+                $permits->confirmPrecaution($precaution, $siteManager);
+            }
+
+            $permits->recordGasTest($hotWorkPermit, $hseOfficer, 'LEL 0%, O2 20.9%, H2S 0 ppm at the work face and 3 m radius');
+            $permits->issue($hotWorkPermit, $hseOfficer);
+            $permits->accept($hotWorkPermit, $siteManager);
+            $permits->close($hotWorkPermit, $siteManager,
+                'Welding complete, area cold, fire watch held for 45 minutes after the last arc. '
+                    .'Screens and leads removed.');
+
+            // Live now, and suspended. A suspension is not a cancellation: the work is expected to
+            // resume under the same permit once the reason has gone away, and the register has to
+            // be able to say what the reason was.
+            $entryPermit = $permits->create([
+                'permit_type_id' => $confinedSpace->id,
+                'title' => 'Internal inspection and weld cleaning, T-402 shell',
+                'description' => 'Entry to the existing tank for internal weld cleaning and the '
+                    .'pre-hydrotest inspection.',
+                'project_id' => $dte->id,
+                'org_unit_id' => $unit['CON-DT']->id,
+                'location' => 'Delta Terminal — T-402, manway M1',
+                'equipment' => 'Tripod and winch, forced ventilation, 24 V lighting, 4-gas monitor',
+                'worker_count' => 3,
+                'valid_from' => now()->subHours(4)->toDateTimeString(),
+                'isolation_reference' => 'ISO-DTE-2026-0114',
+            ], $siteManager);
+
+            foreach ($entryPermit->precautions()->orderBy('sort_order')->get() as $precaution) {
+                if (! $precaution->is_required) {
+                    continue;
+                }
+
+                $permits->confirmPrecaution($precaution, $siteManager);
+            }
+
+            $permits->recordGasTest($entryPermit, $hseOfficer, 'LEL 0%, O2 20.8%, H2S 0 ppm, CO 0 ppm at three depths');
+            $permits->issue($entryPermit, $hseOfficer);
+            $permits->accept($entryPermit, $siteManager);
+            $permits->suspend($entryPermit, $hseOfficer,
+                'Ventilation fan tripped and the atmosphere was not being monitored continuously '
+                    .'for approximately four minutes. Space evacuated, entry log closed out. Not to '
+                    .'resume until the fan is on a dedicated supply and a fresh gas test is run.');
+
+            // Requested and waiting. Somebody has to issue it, and until they do the work does not
+            // start — which is the whole point of the register having a status at all.
+            $permits->create([
+                'permit_type_id' => $confinedSpace->id,
+                'title' => 'Excavation entry for the tie-in pit at chainage 0+180',
+                'description' => 'Entry to the shored tie-in pit for the hot tap connection.',
+                'project_id' => $dte->id,
+                'org_unit_id' => $unit['CON-DT']->id,
+                'location' => 'Delta Terminal — pipe rack corridor, chainage 0+180',
+                'equipment' => 'Ladder access, 4-gas monitor, tripod',
+                'worker_count' => 2,
+                'valid_from' => now()->addDay()->setTime(7, 0)->toDateTimeString(),
+            ], $siteManager);
+
+            // ------------------------------------------------- training records
+            // The register earns its keep on the expiry column: everything below is the same shape,
+            // and the only thing that distinguishes a compliant workforce from an exposed one is
+            // which side of today `expires_on` falls on.
+            $training->create([
+                'training_course_id' => $induction->id,
+                'user_id' => $siteManager->id,
+                'project_id' => $dte->id,
+                'completed_on' => now()->subMonths(9)->toDateString(),
+                'certificate_number' => 'IND-2025-0412',
+                'result' => 'pass',
+                'provider' => 'Meridian HSE department',
+                'trainer_name' => 'Emeka Duru',
+            ], $hseOfficer);
+
+            $training->create([
+                'training_course_id' => $induction->id,
+                'user_id' => $qaInspector->id,
+                'project_id' => $dte->id,
+                'completed_on' => now()->subMonths(7)->toDateString(),
+                'certificate_number' => 'IND-2025-0468',
+                'result' => 'pass',
+                'provider' => 'Meridian HSE department',
+                'trainer_name' => 'Emeka Duru',
+            ], $hseOfficer);
+
+            $training->create([
+                'training_course_id' => $firstAid->id,
+                'user_id' => $hseOfficer->id,
+                'org_unit_id' => $unit['HSE']->id,
+                'completed_on' => now()->subMonths(14)->toDateString(),
+                'certificate_number' => 'FAW/PH/24/1180',
+                'result' => 'pass',
+                'score' => 88,
+                'provider' => 'Rivers State Red Cross',
+                'cost' => 145000,
+            ], $hseManager);
+
+            // Expires in five weeks. This is the row the register exists to surface, while there is
+            // still time to book the refresher.
+            $training->create([
+                'training_course_id' => $workingAtHeight->id,
+                'person_name' => 'Sunday Okon',
+                'company' => 'Harcourt Fabrication Services Ltd',
+                'project_id' => $dte->id,
+                'completed_on' => now()->subMonths(36)->addDays(35)->toDateString(),
+                'certificate_number' => 'DST/WAH/23/0904',
+                'result' => 'pass',
+                'provider' => 'Delta Safety Training Ltd',
+                'notes' => 'Subcontractor. Certificate copy held in the site office file.',
+            ], $hseOfficer);
+
+            // Already expired, and the man is on site. A register that could not show this would be
+            // worse than no register, because it would be quietly reassuring.
+            $training->create([
+                'training_course_id' => $confinedSpaceCourse->id,
+                'person_name' => 'Musa Danjuma',
+                'company' => 'Harcourt Fabrication Services Ltd',
+                'project_id' => $dte->id,
+                'completed_on' => now()->subMonths(26)->toDateString(),
+                'certificate_number' => 'DST/CSE/24/0221',
+                'result' => 'pass',
+                'provider' => 'Delta Safety Training Ltd',
+                'notes' => 'EXPIRED. Flagged to the subcontractor; not to stand by on any entry '
+                    .'until the refresher is done.',
+            ], $hseOfficer);
+
+            // Renewed rather than edited: the old certificate stays exactly as it was, because it
+            // was true for the period it covered.
+            $expiringInduction = $training->create([
+                'training_course_id' => $induction->id,
+                'user_id' => $pipingEngineer->id,
+                'org_unit_id' => $unit['ENG-MP-PD']->id,
+                'completed_on' => now()->subMonths(25)->toDateString(),
+                'certificate_number' => 'IND-2024-0207',
+                'result' => 'pass',
+                'provider' => 'Meridian HSE department',
+            ], $hseOfficer);
+
+            $training->renew($expiringInduction, [
+                'completed_on' => now()->subDays(20)->toDateString(),
+                'certificate_number' => 'IND-2026-0913',
+                'result' => 'pass',
+                'trainer_name' => 'Emeka Duru',
+            ], $hseOfficer);
+        });
+    }
+
+    /**
+     * What Meridian is DOING ABOUT QUALITY (§54–§58) — inspection requests, and what happens when
+     * one of them fails.
+     *
+     * THE TWO REGISTERS ARE ONE STORY. An inspection request is raised against an ITP line, somebody
+     * other than the requester attends it, and the verdict is recorded against each checkpoint. When
+     * the verdict is a rejection, the non-conformance that follows carries the inspection with it,
+     * so the NCR does not have to re-describe what was found — it points at the record that found
+     * it. Every state of that chain appears below exactly once, including the two that flatter
+     * nobody: an NCR waiting on a response that is already late, and a repair disposition that had
+     * to justify itself in writing before the service would accept it.
+     */
+    private function seedMeridianQuality(Organization $organization): void
+    {
+        $this->context->within($organization, function () {
+            $this->bootDelivery();
+
+            $inspections = app(QualityInspectionService::class);
+            $ncrs = app(NcrService::class);
+            $actions = app(CorrectiveActionService::class);
+
+            $staff = $this->staff();
+            $unit = $this->unitsByCode();
+            $job = Project::query()->get()->keyBy('code');
+
+            $engineeringManager = $this->accountOf($staff, 'MEI-0004'); // Farida Yusuf
+            $projectManager = $this->accountOf($staff, 'MEI-0011');     // Daniel Mbeki
+            $siteManager = $this->accountOf($staff, 'MEI-0012');        // Kelechi Nwosu
+            $qaManager = $this->accountOf($staff, 'MEI-0015');          // Yemi Bakare
+            $qaInspector = $this->accountOf($staff, 'MEI-0016');        // Ruth Okafor
+
+            $dte = $job['DTE'];
+
+            // ------------------------------------------------- a hold point, passed
+            // A HOLD POINT IS THE ONE THE CLIENT MUST ATTEND, and the work does not proceed past it
+            // whether they turn up or not. The distinction between hold, witness and surveillance is
+            // the whole of an ITP, and it is a plain string here because a company writes its own.
+            $foundationPour = $inspections->create([
+                'title' => 'Pre-pour inspection — T-401 ring beam, segment 3',
+                'description' => 'Reinforcement, formwork, cover and embedment check before the '
+                    .'third segment pour.',
+                'project_id' => $dte->id,
+                'org_unit_id' => $unit['QA']->id,
+                'discipline_id' => $unit['ENG-CS']->id,
+                'inspection_type' => 'Hold point',
+                'itp_reference' => 'ITP-DTE-CIV-001 line 14',
+                'activity' => 'Reinforced concrete ring beam, segment 3 of 6',
+                'location' => 'Delta Terminal — tank farm, T-401 ring beam',
+                'scheduled_for' => $this->workingDay(24, 8)->toDateTimeString(),
+                'required_by' => now()->subDays(24)->toDateString(),
+            ], $siteManager);
+
+            $inspections->setItems($foundationPour, [
+                ['reference' => '1', 'description' => 'Bar size, spacing and lap lengths to drawing DTE-CS-DWG-1001 rev 0', 'acceptance_criteria' => 'As drawing; laps not less than 45 diameters'],
+                ['reference' => '2', 'description' => 'Concrete cover to outer face', 'acceptance_criteria' => '50 mm minus 0 plus 10 mm'],
+                ['reference' => '3', 'description' => 'Formwork line, level and tie condition', 'acceptance_criteria' => 'Plus or minus 10 mm on line, plus or minus 5 mm on level'],
+                ['reference' => '4', 'description' => 'Anchor bolt template position and projection', 'acceptance_criteria' => 'Plus or minus 3 mm on centres'],
+                ['reference' => '5', 'description' => 'Formwork clean, free of debris and standing water', 'acceptance_criteria' => 'Visually clean'],
+            ], $siteManager);
+
+            $foundationPour->load('items');
+            $pourResults = [];
+
+            foreach ($foundationPour->items as $index => $item) {
+                $pourResults[$item->getKey()] = match ($index) {
+                    1 => ['result' => 'pass', 'measured_value' => '52 mm to 58 mm over 12 readings'],
+                    3 => ['result' => 'pass', 'measured_value' => 'Maximum 2 mm deviation on centres'],
+                    default => ['result' => 'pass'],
+                };
+            }
+
+            $inspections->inspect($foundationPour, 'passed', $qaInspector, $pourResults);
+
+            // ------------------------------------------------- passed, with something to say
+            $weldVisual = $inspections->create([
+                'title' => 'Visual and NDT review — spool 1204-07 shop welds',
+                'description' => 'Final visual inspection and review of the radiographic film for '
+                    .'the six shop welds on spool 1204-07.',
+                'project_id' => $dte->id,
+                'org_unit_id' => $unit['QA']->id,
+                'discipline_id' => $unit['ENG-MP']->id,
+                'inspection_type' => 'Witness point',
+                'itp_reference' => 'ITP-DTE-PIP-003 line 9',
+                'activity' => 'Shop fabrication of spool 1204-07',
+                'location' => 'Harcourt Fabrication Services — shop 2',
+                'scheduled_for' => $this->workingDay(17, 10)->toDateTimeString(),
+                'required_by' => now()->subDays(16)->toDateString(),
+                'witnessed_by' => 'B. Achike (Harcourt Fabrication QC), O. Lawal (client inspector)',
+            ], $qaManager);
+
+            $inspections->setItems($weldVisual, [
+                ['reference' => 'W1', 'description' => 'Weld 1204-07-01 visual', 'acceptance_criteria' => 'ASME B31.3 normal fluid service'],
+                ['reference' => 'W2', 'description' => 'Weld 1204-07-02 visual', 'acceptance_criteria' => 'ASME B31.3 normal fluid service'],
+                ['reference' => 'W3', 'description' => 'Weld 1204-07-03 visual and RT', 'acceptance_criteria' => 'ASME B31.3 normal fluid service'],
+                ['reference' => 'W4', 'description' => 'Weld 1204-07-04 visual and RT', 'acceptance_criteria' => 'ASME B31.3 normal fluid service'],
+                ['reference' => 'D1', 'description' => 'Dimensional check against isometric', 'acceptance_criteria' => 'Plus or minus 3 mm on face-to-face'],
+                ['reference' => 'M1', 'description' => 'Material traceability — heat numbers against certificates', 'acceptance_criteria' => 'All heats traceable to EN 10204 3.1'],
+            ], $qaManager);
+
+            $weldVisual->load('items');
+            $weldResults = [];
+
+            foreach ($weldVisual->items as $index => $item) {
+                $weldResults[$item->getKey()] = match ($index) {
+                    2 => ['result' => 'pass', 'comment' => 'Film RT-1204-07-03 reviewed. Two isolated pores, both within acceptance.'],
+                    4 => ['result' => 'pass', 'measured_value' => 'Face to face 2 mm short of nominal'],
+                    5 => ['result' => 'observation', 'comment' => 'Heat number for the 6 in elbow is legible on the certificate but the hard stamp on the fitting is painted over. Re-marked in the presence of the inspector.'],
+                    default => ['result' => 'pass'],
+                };
+            }
+
+            $inspections->inspect($weldVisual, 'passed_with_comment', $qaInspector, $weldResults,
+                'Welds accepted. The spool is released for coating. One traceability marking was '
+                    .'obscured by primer and has been re-marked; the fabricator is to mask hard '
+                    .'stamps before priming on the remaining spools.');
+
+            // ------------------------------------------------- the one that failed
+            $coating = $inspections->create([
+                'title' => 'Coating inspection — T-401 shell, courses 1 and 2 external',
+                'description' => 'Dry film thickness, adhesion and holiday detection on the '
+                    .'completed external coating to the lower two courses.',
+                'project_id' => $dte->id,
+                'org_unit_id' => $unit['QA']->id,
+                'inspection_type' => 'Inspection point',
+                'itp_reference' => 'ITP-DTE-COAT-002 line 6',
+                'activity' => 'External coating system, three coat, to T-401 shell',
+                'location' => 'Delta Terminal — T-401, courses 1 and 2',
+                'scheduled_for' => $this->workingDay(13, 9)->toDateTimeString(),
+                'required_by' => now()->subDays(12)->toDateString(),
+                'witnessed_by' => 'A. Fasanya (Coastline Coatings)',
+            ], $qaManager);
+
+            $inspections->setItems($coating, [
+                ['reference' => 'C1', 'description' => 'Surface preparation record and ambient conditions at application', 'acceptance_criteria' => 'Sa 2.5; RH below 85%; steel 3 C above dew point'],
+                ['reference' => 'C2', 'description' => 'Dry film thickness, 80/20 rule over 40 readings', 'acceptance_criteria' => 'Nominal 320 microns; no reading below 256 microns'],
+                ['reference' => 'C3', 'description' => 'Adhesion, cross hatch to ISO 2409', 'acceptance_criteria' => 'Classification 1 or better'],
+                ['reference' => 'C4', 'description' => 'Holiday detection at 5 kV', 'acceptance_criteria' => 'No holidays'],
+                ['reference' => 'C5', 'description' => 'Appearance, runs, sags and overspray', 'acceptance_criteria' => 'Uniform, free of defects'],
+            ], $qaManager);
+
+            $coating->load('items');
+            $coatingResults = [];
+
+            foreach ($coating->items as $index => $item) {
+                $coatingResults[$item->getKey()] = match ($index) {
+                    0 => ['result' => 'pass', 'measured_value' => 'RH 71%, steel 29.4 C, dew point 24.1 C'],
+                    1 => ['result' => 'fail', 'measured_value' => '11 of 40 readings between 180 and 240 microns',
+                        'comment' => 'Low readings clustered on the north face between the stiffener '
+                            .'and the second course weld seam. Nominal achieved elsewhere.'],
+                    3 => ['result' => 'fail', 'measured_value' => '3 holidays over 4 m of seam',
+                        'comment' => 'All three on the same seam as the low DFT readings.'],
+                    default => ['result' => 'pass'],
+                };
+            }
+
+            $inspections->inspect($coating, 'rejected', $qaInspector, $coatingResults,
+                'Rejected on dry film thickness and holiday detection over approximately 8 square '
+                    .'metres of the north face. Everything else is acceptable. NCR raised.');
+
+            // ------------------------------------------------- the NCR that came out of it
+            // The inspection is CARRIED, not copied. An NCR that restated the findings would drift
+            // from them the first time somebody corrected a reading.
+            $coatingNcr = $ncrs->create([
+                'title' => 'Coating thickness and holidays, T-401 north face, courses 1 and 2',
+                'description' => 'Eleven of forty DFT readings below the specified minimum and three '
+                    .'holidays detected at 5 kV, all in an area of approximately 8 square metres on '
+                    .'the north face adjacent to the course 2 seam.',
+                'project_id' => $dte->id,
+                'org_unit_id' => $unit['QA']->id,
+                'quality_inspection_id' => $coating->id,
+                'source' => 'Inspection',
+                'severity' => 'Major',
+                'category' => 'Coating',
+                'location' => 'Delta Terminal — T-401, north face, courses 1 and 2',
+                'requirement' => 'Specification DTE-SPC-COAT-001 clause 7.4: three coat system, '
+                    .'nominal 320 microns dry, no individual reading below 80% of nominal, and '
+                    .'clause 8.2: holiday detection at 5 kV with no holidays permitted.',
+                'party_name' => 'Coastline Coatings Ltd',
+                'required_by' => now()->subDays(2)->toDateString(),
+            ], $qaInspector);
+
+            $ncrs->issue($coatingNcr, $qaInspector);
+
+            $ncrs->respond($coatingNcr, $qaManager,
+                'Coastline Coatings response, received by email 4 days after issue: the affected '
+                    .'area was coated in the last hour of a shift by an operative who has since been '
+                    .'removed from the job. They propose to blast back the 8 square metre area to '
+                    .'bare steel, feather the edges, and reapply the full three coat system with '
+                    .'inspection at each coat. No charge to the project.');
+
+            // A `repair` disposition is one of the three the service refuses without a written
+            // justification, and it refuses it from the person who raised the NCR as well.
+            $ncrs->disposition($coatingNcr, $engineeringManager, 'repair',
+                'Accepted. Blast back to bare steel over the full affected area plus 100 mm, '
+                    .'feathered edges, three coat system reapplied with hold points at primer and '
+                    .'topcoat. Adhesion and holiday testing to be repeated over the repaired area '
+                    .'and over a 2 m band either side. The repair is confined to the north face and '
+                    .'does not affect the coating warranty on the remainder of the shell.');
+
+            $actions->openFrom($coatingNcr, [
+                'title' => 'Stop coating application in the last hour of shift without a second check',
+                'description' => 'The subcontractor is to hold a check by their own QC on any coat '
+                    .'applied after 16:00, and Meridian will witness the first four.',
+                'action_type' => 'Preventive',
+                'priority' => 'Medium',
+                'due_in_days' => 12,
+            ], $qaManager->id, $engineeringManager);
+
+            $ncrs->verify($coatingNcr, $qaManager,
+                'Repair inspected 6 days after disposition. DFT over 40 fresh readings on the '
+                    .'repaired area: minimum 302 microns, mean 331. Holiday detection clear over the '
+                    .'repair and the 2 m band either side. Adhesion classification 1.');
+
+            $ncrs->close($coatingNcr, $qaManager,
+                'Closed. No cost to the project; the subcontractor bore the repair.');
+
+            // ------------------------------------------------- and one still running, and late
+            // Nothing on this record is unusual, which is the point: the register has to be able to
+            // show an open NCR whose response date has passed, or a project reads as healthier than
+            // it is.
+            $anchorBolts = $ncrs->create([
+                'title' => 'Anchor bolt centres out of tolerance, pump P-201 plinth',
+                'description' => 'Anchor bolt centres on the P-201 plinth measured 12 mm out over '
+                    .'the 640 mm span against a plus or minus 3 mm tolerance. The pump baseplate '
+                    .'will not sit without reaming the holes, which the pump vendor does not permit.',
+                'project_id' => $dte->id,
+                'org_unit_id' => $unit['QA']->id,
+                'source' => 'Self identified',
+                'severity' => 'Major',
+                'category' => 'Dimensional',
+                'location' => 'Delta Terminal — pump house, P-201 plinth',
+                'requirement' => 'Drawing DTE-CS-DWG-1002 rev 0 and vendor drawing HPX-4400-GA: '
+                    .'anchor bolt centres plus or minus 3 mm.',
+                'party_name' => 'Meridian Construction — Delta Terminal site team',
+                'detected_by' => $qaInspector->id,
+                'detected_on' => now()->subDays(9)->toDateString(),
+                'required_by' => now()->subDays(2)->toDateString(),
+                'cost_impact' => 1450000,
+            ], $qaInspector);
+
+            $ncrs->issue($anchorBolts, $qaManager);
+
+            // ------------------------------------------------- and one still to happen
+            $upcoming = $inspections->create([
+                'title' => 'Hydrotest — T-401, witness point',
+                'description' => 'Fill, hold and inspect. Client and third party to attend.',
+                'project_id' => $dte->id,
+                'org_unit_id' => $unit['QA']->id,
+                'inspection_type' => 'Hold point',
+                'itp_reference' => 'ITP-DTE-MEC-004 line 22',
+                'activity' => 'Hydrostatic test of T-401 to 1.25 times design',
+                'location' => 'Delta Terminal — T-401',
+                'scheduled_for' => now()->addDays(9)->setTime(7, 0)->toDateTimeString(),
+                'required_by' => now()->addDays(11)->toDateString(),
+                'witnessed_by' => 'Client representative and third party inspector, to be confirmed',
+            ], $projectManager);
+
+            $inspections->setItems($upcoming, [
+                ['reference' => 'H1', 'description' => 'Test water quality — chlorides', 'acceptance_criteria' => 'Below 50 ppm chlorides'],
+                ['reference' => 'H2', 'description' => 'Fill rate and hold period', 'acceptance_criteria' => 'Fill in stages with a 24 hour hold at full'],
+                ['reference' => 'H3', 'description' => 'Shell and bottom weld seams during hold', 'acceptance_criteria' => 'No leakage, no visible distortion'],
+                ['reference' => 'H4', 'description' => 'Foundation settlement readings at eight stations', 'acceptance_criteria' => 'Differential settlement within API 653 limits'],
+            ], $projectManager);
+        });
+    }
+
+    /**
+     * Kestrel's safety file — the same modules, at a tenth of the size, and CONFIGURED DIFFERENTLY.
+     *
+     * The contrast with Meridian is the entire reason this method exists. An eight-person facilities
+     * company has one permit type, not four; two courses, not five; and — this is the important one
+     * — NO APPROVAL ROUTE FOR INCIDENTS AT ALL. Nothing here configures one, so nothing spawns: the
+     * near miss below is reported, looked at by the compliance manager, and closed by hand. That is
+     * a legitimate way to run a small company, and a platform that forced Meridian's arrangement
+     * onto it would be the kind of system §73 exists to rule out.
+     *
+     * The same seeder code produces both, because the difference lives in configuration rather than
+     * in a branch.
+     */
+    private function seedKestrelHse(Organization $organization): void
+    {
+        $this->context->within($organization, function () {
+            $this->bootDelivery();
+
+            $incidents = app(IncidentService::class);
+            $actions = app(CorrectiveActionService::class);
+            $observations = app(HseObservationService::class);
+            $risks = app(RiskAssessmentService::class);
+            $talks = app(ToolboxTalkService::class);
+            $permits = app(PermitService::class);
+            $training = app(TrainingRecordService::class);
+
+            $staff = $this->staff();
+            $unit = $this->unitsByCode();
+            $job = Project::query()->get()->keyBy('code');
+
+            $md = $this->accountOf($staff, 'KFM-001');              // Rowan Calder
+            $maintenanceHead = $this->accountOf($staff, 'KFM-003'); // Duncan Reilly
+            $complianceHead = $this->accountOf($staff, 'KFM-004');  // Nadia Osei
+            $mechanical = $this->accountOf($staff, 'KFM-005');      // Callum Whitfield
+            $electrical = $this->accountOf($staff, 'KFM-006');      // Erin Doyle
+
+            $ahu = $job['TPA'];
+
+            // One type. Kestrel does not enter confined spaces and does not break ground, and a
+            // configuration screen that made them carry those anyway would be answered the way
+            // every unused field is answered: by ticking through it.
+            $isolation = $this->permitType($md, [
+                'name' => 'Electrical isolation',
+                'code' => 'ISO',
+                'description' => 'Isolation, locking off and proving dead before any work on or '
+                    .'near live equipment in a client building.',
+                'color' => 'warning',
+                'default_duration_hours' => 8,
+                'requires_isolation' => true,
+                'sort_order' => 1,
+                'precaution_template' => [
+                    ['description' => 'Point of isolation identified and agreed with the building manager', 'is_required' => true],
+                    ['description' => 'Locked off, personal lock applied, key retained by the isolator', 'is_required' => true],
+                    ['description' => 'Proved dead at the point of work with a proving unit checked before and after', 'is_required' => true],
+                    ['description' => 'Caution notices posted and affected occupants informed', 'is_required' => true],
+                    ['description' => 'Alternative supply to life safety systems confirmed', 'is_required' => false],
+                ],
+            ]);
+
+            $ipaf = $this->trainingCourse($md, [
+                'name' => 'IPAF 3a and 3b — mobile elevating work platforms',
+                'code' => 'IPAF',
+                'description' => 'Static vertical and mobile boom platforms, as used for plant room '
+                    .'and atrium access.',
+                'category' => 'Technical',
+                'validity_months' => 60,
+                'provider' => 'North West Access Training',
+                'duration_hours' => 8,
+                'sort_order' => 1,
+            ]);
+
+            $this->trainingCourse($md, [
+                'name' => 'Asbestos awareness',
+                'code' => 'ASB',
+                'description' => 'Category A awareness for anyone working in buildings constructed '
+                    .'before 2000. Refreshed annually.',
+                'category' => 'Statutory',
+                'validity_months' => 12,
+                'is_mandatory' => true,
+                'provider' => 'North West Access Training',
+                'duration_hours' => 3,
+                'sort_order' => 2,
+            ]);
+
+            // ------------------------------------------------- one risk assessment, two hazards
+            $ahuRisk = $risks->create([
+                'title' => 'AHU-3 removal and replacement, Trafford Point plant room',
+                'description' => 'Removal of the existing unit through the plant room doors and '
+                    .'installation of the replacement, working at height off a scaffold tower.',
+                'project_id' => $ahu->id,
+                'org_unit_id' => $unit['CMP']->id,
+                'assessment_type' => 'Task based',
+                'activity' => 'Mechanical plant replacement in an occupied building',
+                'location' => 'Trafford Point — roof plant room',
+                'assessed_by' => $complianceHead->id,
+                'assessed_on' => now()->subDays(38)->toDateString(),
+                'valid_from' => now()->subDays(35)->toDateString(),
+                'valid_to' => now()->addDays(55)->toDateString(),
+                'review_frequency_months' => 3,
+            ], $complianceHead);
+
+            $risks->setHazards($ahuRisk, [
+                [
+                    'hazard' => 'Manual handling of AHU sections through a restricted plant room door',
+                    'who_is_at_risk' => 'Mechanical technicians',
+                    'existing_controls' => 'Unit split into four sections by the manufacturer; '
+                        .'skates and a pallet truck; two-person lift minimum.',
+                    'likelihood' => 3, 'severity' => 3,
+                    'additional_controls' => 'Genie lift hired for the fan section, which exceeds '
+                        .'the two-person limit.',
+                    'residual_likelihood' => 2, 'residual_severity' => 2,
+                    'responsible_id' => $maintenanceHead->id,
+                    'target_date' => now()->subDays(30)->toDateString(),
+                ],
+                [
+                    'hazard' => 'Live working during re-termination',
+                    'who_is_at_risk' => 'Electrical technician, building occupants',
+                    'existing_controls' => 'Permit to isolate; lock off and prove dead; no live '
+                        .'working permitted under any circumstances.',
+                    'likelihood' => 2, 'severity' => 5,
+                    'additional_controls' => 'Isolation agreed with the building manager in advance '
+                        .'so the supply is not restored by a third party mid-shift.',
+                    'residual_likelihood' => 1, 'residual_severity' => 5,
+                    'responsible_id' => $complianceHead->id,
+                    'target_date' => now()->subDays(32)->toDateString(),
+                ],
+            ], $complianceHead);
+
+            $risks->review($ahuRisk, $maintenanceHead);
+            $risks->approve($ahuRisk, $md);
+
+            // ------------------------------------------------- the isolation permit, live
+            $isolationPermit = $permits->create([
+                'permit_type_id' => $isolation->id,
+                'title' => 'Isolation of AHU-3 supply for re-termination',
+                'description' => 'Isolation at distribution board DB-R2 way 14 for the duration of '
+                    .'the re-termination and commissioning.',
+                'project_id' => $ahu->id,
+                'org_unit_id' => $unit['MNT-ELE']->id,
+                'location' => 'Trafford Point — roof plant room and DB-R2',
+                'equipment' => 'DB-R2 way 14, AHU-3 local isolator',
+                'worker_count' => 2,
+                'valid_from' => now()->subHours(2)->toDateTimeString(),
+                'isolation_reference' => 'KFM/ISO/2026/044',
+            ], $maintenanceHead);
+
+            foreach ($isolationPermit->precautions()->orderBy('sort_order')->get() as $precaution) {
+                if (! $precaution->is_required) {
+                    continue;
+                }
+
+                $permits->confirmPrecaution($precaution, $maintenanceHead);
+            }
+
+            $permits->issue($isolationPermit, $complianceHead);
+            $permits->accept($isolationPermit, $electrical);
+
+            // ------------------------------------------------- an observation and a near miss
+            $observations->create([
+                'title' => 'Plant room door propped open with a fire extinguisher',
+                'description' => 'The roof plant room fire door was being held open with an '
+                    .'extinguisher to run cables through. Closed, and a proper door retainer '
+                    .'requested from the building manager.',
+                'project_id' => $ahu->id,
+                'org_unit_id' => $unit['CMP']->id,
+                'observation_type' => 'Unsafe condition',
+                'category' => 'Fire',
+                'risk_level' => 'Medium',
+                'location' => 'Trafford Point — roof plant room',
+                'observed_at' => $this->workingDay(12, 11)->toDateTimeString(),
+                'observer_name' => 'Nadia Osei',
+                'immediate_action' => 'Door closed and the extinguisher returned to its bracket. '
+                    .'Cable route rethought so the door can stay shut.',
+                'action_required' => false,
+            ], $complianceHead);
+
+            // NO ROUTE IS STARTED, because Kestrel has not configured one. Compare with Meridian,
+            // where the same call on the same service opens an investigation and a corrective
+            // action. The difference is a configuration screen, not a code path.
+            $nearMiss = $incidents->create([
+                'title' => 'Scaffold tower moved while a technician was on the platform',
+                'description' => 'A second contractor began moving the tower to reach a light '
+                    .'fitting without checking the platform. The technician on it called out and '
+                    .'the tower was stopped within about half a metre. Nobody was hurt.',
+                'project_id' => $ahu->id,
+                'org_unit_id' => $unit['CMP']->id,
+                'category' => 'near_miss',
+                'severity' => 'minor',
+                'potential_severity' => 'major',
+                'location' => 'Trafford Point — fourth floor lobby',
+                'occurred_at' => $this->workingDay(16, 13)->toDateTimeString(),
+                'immediate_actions' => 'Tower tagged, and a rule agreed with the building manager '
+                    .'that only Kestrel moves Kestrel access equipment.',
+            ], $maintenanceHead);
+
+            $towerAction = $actions->openFrom($nearMiss, [
+                'title' => 'Tag all access equipment with a named responsible person',
+                'description' => 'Every tower and podium on a Kestrel job to carry a tag naming who '
+                    .'may move it, and the building manager to be told at induction.',
+                'action_type' => 'Corrective',
+                'priority' => 'Medium',
+                'due_in_days' => 10,
+            ], $maintenanceHead->id, $complianceHead);
+
+            $actions->complete($towerAction, $maintenanceHead,
+                'Tags printed and fitted to both towers and the podium. Covered with the building '
+                    .'manager at the Monday progress meeting and added to the site induction.');
+
+            $actions->verify($towerAction, $complianceHead, 'effective',
+                'Checked on site. Tags in place and legible. The other contractor confirmed they '
+                    .'were told.');
+
+            $incidents->close($nearMiss, $complianceHead);
+
+            // ------------------------------------------------- one toolbox talk, four people
+            $towerTalk = $talks->create([
+                'title' => 'Nobody moves a tower with somebody on it',
+                'topic' => 'Mobile access towers in occupied buildings',
+                'content' => 'Prompted by the near miss at Trafford Point. Who may move a tower, '
+                    .'what the tag means, and what to say to another contractor who reaches for it.',
+                'key_points' => "Only the person named on the tag moves the tower.\n"
+                    ."Check the platform before you move anything, every time.\n"
+                    .'Tell the building manager at induction, not after.',
+                'project_id' => $ahu->id,
+                'org_unit_id' => $unit['MNT']->id,
+                'location' => 'Manchester Office — meeting room',
+                'duration_minutes' => 15,
+            ], $complianceHead);
+
+            $talks->record($towerTalk, [
+                ['user_id' => $maintenanceHead->id, 'person_name' => $maintenanceHead->name, 'company' => 'Kestrel Facilities Management', 'trade' => 'Maintenance'],
+                ['user_id' => $mechanical->id, 'person_name' => $mechanical->name, 'company' => 'Kestrel Facilities Management', 'trade' => 'Mechanical'],
+                ['user_id' => $electrical->id, 'person_name' => $electrical->name, 'company' => 'Kestrel Facilities Management', 'trade' => 'Electrical'],
+                ['person_name' => 'Dean Marsh', 'company' => 'Marsh Interiors Ltd', 'trade' => 'Fit-out'],
+            ], $complianceHead, $this->workingDay(11, 8)->toDateTimeString());
+
+            // ------------------------------------------------- two tickets, one running out
+            $training->create([
+                'training_course_id' => $ipaf->id,
+                'user_id' => $mechanical->id,
+                'org_unit_id' => $unit['MNT-MEC']->id,
+                'completed_on' => now()->subMonths(19)->toDateString(),
+                'certificate_number' => 'IPAF/2024/88214',
+                'result' => 'pass',
+                'provider' => 'North West Access Training',
+                'cost' => 340,
+            ], $complianceHead);
+
+            $training->create([
+                'training_course_id' => $ipaf->id,
+                'user_id' => $electrical->id,
+                'org_unit_id' => $unit['MNT-ELE']->id,
+                'completed_on' => now()->subMonths(60)->addDays(24)->toDateString(),
+                'certificate_number' => 'IPAF/2021/61077',
+                'result' => 'pass',
+                'provider' => 'North West Access Training',
+                'cost' => 310,
+                'notes' => 'Renewal booked. Not to operate a MEWP after the expiry date.',
+            ], $complianceHead);
+        });
+    }
+
+    // ================================================================= HSE configuration helpers
+
+    /**
+     * Add a permit type, the way the configuration screen adds one.
+     *
+     * PERMIT TYPES AND TRAINING COURSES HAVE NO SERVICE CLASS, and that is not an oversight: they
+     * are configuration, not records. Nothing numbers them, nothing routes them for approval and
+     * nothing moves them through a status graph, so a RegisterService subclass would be four
+     * abstract methods returning nothing. Their controllers construct the model, stamp the tenant
+     * and record the activity, which is exactly what these two helpers do — if that ever stops being
+     * true the demo will drift from the application, so keep them next to each other.
+     *
+     * @param  array<string,mixed>  $attributes
+     */
+    private function permitType(User $actor, array $attributes): PermitType
+    {
+        $type = new PermitType($attributes);
+        $type->organization_id = $actor->organization_id;
+        $type->save();
+
+        app(ActivityRecorder::class)->record(
+            $type,
+            'created',
+            $actor->name.' added the '.$type->displayName().' permit type.',
+            ['precautions' => count($type->defaultPrecautions())],
+            $actor,
+        );
+
+        return $type;
+    }
+
+    /**
+     * Add a training course. See permitType() above for why this is a helper and not a service.
+     *
+     * @param  array<string,mixed>  $attributes
+     */
+    private function trainingCourse(User $actor, array $attributes): TrainingCourse
+    {
+        $course = new TrainingCourse($attributes);
+        $course->organization_id = $actor->organization_id;
+        $course->save();
+
+        app(ActivityRecorder::class)->record(
+            $course,
+            'created',
+            $actor->name.' added the '.$course->displayName().' course.',
+            ['validity_months' => $course->validity_months],
+            $actor,
+        );
+
+        return $course;
+    }
+
     // ----------------------------------------------------------------- document helpers
 
     /**
@@ -2434,19 +4248,24 @@ class DemoSeeder extends Seeder
     }
 
     /**
-     * Act on whatever stage the document is currently sitting at.
+     * Act on whatever stage the record is currently sitting at.
      *
      * Reads the pending stage instance back out of the database rather than remembering one, because
      * approving stage one ENTERS stage two: the id changes underneath, and a seeder holding the old
      * model would act on a stage that has already closed.
+     *
+     * TYPED TO `Model`, NOT `Document`. It was a document method until phase 4 gave incidents a
+     * route of their own, and the only thing it ever used was `HasWorkflow` — which is the whole
+     * argument for Engine 2 in one signature: the seeder approves an incident with the same call
+     * it approves a drawing register submission with, because the engine never knew which it had.
      */
-    private function decide(Document $document, User $actor, Decision $decision, string $comment): void
+    private function decide(Model $record, User $actor, Decision $decision, string $comment): void
     {
-        $instance = $document->currentWorkflowInstance();
+        $instance = $record->currentWorkflowInstance();
 
         if ($instance === null) {
             throw new \RuntimeException(
-                'The demo expected '.$document->number.' to be out for approval, and it is not.'
+                'The demo expected '.$record->number.' to be out for approval, and it is not.'
             );
         }
 
@@ -2454,7 +4273,7 @@ class DemoSeeder extends Seeder
 
         if ($stage === null) {
             throw new \RuntimeException(
-                'The route on '.$document->number.' has stalled: '
+                'The route on '.$record->number.' has stalled: '
                 .($instance->outcome_reason ?? 'no stage is current.')
             );
         }

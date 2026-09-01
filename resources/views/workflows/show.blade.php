@@ -12,7 +12,7 @@
     and it works on a touchscreen and with a keyboard, which dragging does not.
 
     Expects: $workflow, $stages, $problems, $conditionFields, $assigneeTypes, $stageActions,
-             $quorums, $operators, $autoActions, $timeline, $canEdit, $canPublish, $canVersion,
+             $quorums, $operators, $autoActions, $spawnableRecords, $timeline, $canEdit, $canPublish, $canVersion,
              $canDeactivate, $canDelete, $canAddStage
 --}}
 <x-layouts.app :title="$workflow->name">
@@ -184,8 +184,19 @@
                                                     @foreach ((array) $stage->auto_actions as $action)
                                                         <li class="text-xs text-[var(--text-muted)]">
                                                             {{ $autoActions[$action['verb'] ?? ''] ?? ($action['verb'] ?? 'does something') }}
-                                                            @if (filled($action['value'] ?? null))
-                                                                — <span class="font-mono">{{ $action['value'] }}</span>
+                                                            {{-- The named parameter, whichever one this verb uses. `value` was never a
+                                                                 key the request accepted, so the old branch here could never fire. --}}
+                                                            @php
+                                                                $detail = match ($action['verb'] ?? '') {
+                                                                    'create_record' => $spawnableRecords[$action['record'] ?? ''] ?? ($action['record'] ?? null),
+                                                                    'set_status' => $action['status'] ?? null,
+                                                                    'create_task' => $action['title'] ?? null,
+                                                                    'notify' => $action['message'] ?? null,
+                                                                    default => null,
+                                                                };
+                                                            @endphp
+                                                            @if (filled($detail))
+                                                                — <span class="font-mono">{{ Str::limit($detail, 60) }}</span>
                                                             @endif
                                                         </li>
                                                     @endforeach

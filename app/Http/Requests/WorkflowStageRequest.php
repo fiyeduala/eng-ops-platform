@@ -80,6 +80,15 @@ class WorkflowStageRequest extends TenantRequest
             'auto_actions.*.verb' => ['required_with:auto_actions', Rule::in(array_keys(WorkflowCatalogue::autoActions()))],
             'auto_actions.*.status' => ['nullable', 'string', 'max:100'],
             'auto_actions.*.title' => ['nullable', 'string', 'max:200'],
+
+            // The record type a `create_record` action opens. It has to be validated to exist at
+            // all: `validated()` returns only what the rules name, so an unlisted key is stripped
+            // between the form and the stage, and the action saves cleanly, reports success, and
+            // then throws "named no record type" on the first document that reaches the stage.
+            // Checked against the discovered list rather than accepted free, because the runner
+            // resolves it through the morph map and a typo would otherwise fail at the worst
+            // possible moment instead of at the form (§84).
+            'auto_actions.*.record' => ['nullable', Rule::in(array_keys(WorkflowCatalogue::spawnableRecords()))],
             'auto_actions.*.message' => ['nullable', 'string', 'max:500'],
             'auto_actions.*.due_in_days' => ['nullable', 'integer', 'min:0', 'max:365'],
             'auto_actions.*.assignee_type' => ['nullable', Rule::enum(AssigneeType::class)],

@@ -8,6 +8,7 @@ use App\Engines\Access\ScopeCompiler;
 use App\Engines\Audit\ActivityRecorder;
 use App\Engines\Configuration\NumberGenerator;
 use App\Engines\Configuration\StatusMachine;
+use App\Engines\Workflow\WorkflowEngine;
 use App\Models\OrgUnit;
 use App\Models\Project;
 use App\Models\Status;
@@ -193,6 +194,64 @@ abstract class RegisterController extends Controller
         }
 
         return back()->with('status', $this->name($record).' is now '.$to->label.'.');
+    }
+
+    /**
+     * Send this record into whatever approval route its module is configured with.
+     *
+     * WHY IT IS HERE AND NOT IN RegisterService. The service layer deliberately refuses a `submit()`
+     * — see its docblock — because submitting means something different on every register that has
+     * its own version of it: an RFI is issued to a party, a submittal goes to a reviewer. But
+     * ENTERING A WORKFLOW is not a register act at all. It is the engine's act, it is identical for
+     * every record that adopts HasWorkflow, and duplicating it per module is how one register ends
+     * up not checking `requiresWorkflow()` and routing correspondence nobody asked to approve.
+     *
+     * THIS IS THE PATH PHASE 4'S EXIT CRITERION RUNS ON. Until it existed, only documents could
+     * enter a route — the engine was general and its one caller was not — so "an HSE incident
+     * automatically spawns an investigation through configuration alone" was unreachable through
+     * the UI no matter how the workflow was configured (§90).
+     *
+     * `update` IS THE GATE, not a new `submit` permission. Putting your own record forward for
+     * review is an ordinary act of authorship, and inventing a second permission for it would mean
+     * every organization has to grant a right they did not know they needed before anything routes.
+     * The module policies that freeze a record — a closed incident — already refuse `update`, and
+     * that refusal carries here for free.
+     */
+    protected function submitForApproval(Request $request, Model $record): RedirectResponse
+    {
+        $this->authorize('update', $record);
+
+        if (! method_exists($record, 'isInWorkflow')) {
+            return back()->withErrors(['workflow' => $this->name($record).' is not a record that goes for approval.']);
+        }
+
+        if (! $record->requiresWorkflow()) {
+            return back()->withErrors(['workflow' => $this->name($record).' is not routed for approval.']);
+        }
+
+        if ($record->isInWorkflow()) {
+            return back()->withErrors(['workflow' => $this->name($record).' is already going through approval.']);
+        }
+
+        try {
+            // Resolved here rather than injected, because adding a sixth constructor argument would
+            // mean editing every register controller in the application to reach a method most of
+            // them will never call.
+            $instance = app(WorkflowEngine::class)->start($record, $request->user());
+        } catch (\DomainException $e) {
+            return back()->withErrors(['workflow' => $e->getMessage()]);
+        }
+
+        // NO ROUTE CONFIGURED IS NOT AN ERROR. A company that has not defined an approval for this
+        // module gets told so plainly; a company that has, and whose route stalls at the first
+        // stage, is told that too — by the engine, on the record's own timeline.
+        if ($instance === null) {
+            return back()->withErrors([
+                'workflow' => 'No approval route is configured for this register yet.',
+            ]);
+        }
+
+        return back()->with('status', $this->name($record).' has been sent for approval.');
     }
 
     // ------------------------------------------------------------------ options

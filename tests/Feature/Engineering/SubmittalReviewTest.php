@@ -9,6 +9,8 @@ use App\Models\OrgUnit;
 use App\Models\Project;
 use App\Models\Submittal;
 use App\Models\User;
+use App\Services\SubmittalService;
+use App\Support\Enums\Confidentiality;
 use App\Support\Enums\OrgUnitType;
 use Database\Seeders\PermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -344,6 +346,44 @@ final class SubmittalReviewTest extends TestCase
             ->assertForbidden();
 
         $this->assertSame(1, Submittal::query()->count());
+    }
+
+    #[Test]
+    public function a_new_package_carries_its_classification_in_memory_and_not_only_in_the_database(): void
+    {
+        $submittal = $this->makeSubmittal($this->org, $this->ifeanyi, 'Anchor bolt certificates', [
+            'project_id' => $this->project->id,
+        ]);
+
+        // THE MODEL, NOT THE ROW. `confidentiality` has a column default, so the row was always
+        // right and every test that reloaded the record passed. The object returned by create()
+        // carried no such key at all, and two things downstream read the object: the notification
+        // gate, which skips a subject whose classification it cannot see (§68), and resubmit(),
+        // which copies the parent's classification onto the next attempt — copying a null onto a
+        // NOT NULL column and taking the whole resubmittal down with it.
+        $this->assertSame(
+            Confidentiality::Internal,
+            $submittal->confidentiality,
+            'A record fresh from the service must know its own classification without a reload.'
+        );
+
+        // And the defect as it actually surfaced: a package assembled, coded and resubmitted
+        // WITHOUT EVER BEING RELOADED, which is how a seeder, an import and a queued job all use
+        // these services. `resubmit()` copies the parent's classification onto the new attempt, so
+        // before the fix this line died on a NOT NULL constraint while the identical journey made
+        // through HTTP — where the route model binding hands over a freshly loaded record — passed.
+        $next = $this->withinOrganization($this->org, function () use ($submittal) {
+            $submittals = app(SubmittalService::class);
+
+            $submittals->addItem($submittal, null, ['description' => 'Mill certificates'], $this->ifeanyi);
+            $submittals->submit($submittal, $this->ifeanyi);
+            $submittals->review($submittal, 'c_revise_and_resubmit', 'revise_resubmit', $this->helen);
+
+            return $submittals->resubmit($submittal, $this->ifeanyi);
+        });
+
+        $this->assertSame((int) $submittal->id, (int) $next->resubmittal_of_id);
+        $this->assertSame(Confidentiality::Internal, $next->confidentiality);
     }
 
     // ================================================================== fixtures

@@ -33,13 +33,17 @@ ORGANIZATION  →  DEPARTMENT / TEAM  →  PROJECT  →  ROLE / ASSIGNMENT
 
 ## Status
 
-Phases 1–3 of nine are complete: the access and organization foundation, the configuration and
-notification engines with memos, announcements, meetings and the calendar, and the document,
-workflow, approval and signature stack — including native in-browser authoring with .docx import and
-.docx/PDF export. Phase 3's exit criterion is pinned by a test that defines an approval route
-entirely through the same HTTP endpoints the builder screen posts to, then walks a real document
-through it. See [docs/14-roadmap.md](docs/14-roadmap.md) for what each phase covers and what is
-deliberately out of V1.
+Phases 1–4 of nine are complete: the access and organization foundation; the configuration and
+notification engines with memos, announcements, meetings and the calendar; the document, workflow,
+approval and signature stack — including native in-browser authoring with .docx import and
+.docx/PDF export; and the sixteen engineering, HSE and quality registers, from deliverables and
+drawings through permits-to-work to the NCR lifecycle. Phase 4's exit criterion is pinned by a test
+that configures a route through the same three HTTP endpoints the builder screen posts to, reports
+an incident against it, and watches the review stage open an investigation and raise a corrective
+action — neither of which the engine or the controller names. See
+[docs/14-roadmap.md](docs/14-roadmap.md) for what each phase covers and what is deliberately out of
+V1, and [docs/15-hse-quality-architecture.md](docs/15-hse-quality-architecture.md) for how the
+registers fit together.
 
 ---
 
@@ -63,6 +67,7 @@ Architecture and design documents live in [`docs/`](docs/):
 | [12-cpanel-deployment.md](docs/12-cpanel-deployment.md) | cPanel deployment architecture |
 | [13-vps-migration.md](docs/13-vps-migration.md) | VPS migration architecture |
 | [14-roadmap.md](docs/14-roadmap.md) | Phased development roadmap |
+| [15-hse-quality-architecture.md](docs/15-hse-quality-architecture.md) | Engineering, HSE & quality registers |
 
 ---
 
