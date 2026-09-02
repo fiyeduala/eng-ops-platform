@@ -106,7 +106,13 @@ final class PermissionCatalogue
             // ------------------------------------------------------------- procurement
             'purchase_request' => ['Procurement', 'Purchase Requests', [...self::CRUD, 'manage', 'submit', 'review', 'approve', 'reject']],
             'rfq' => ['Procurement', 'Requests for Quotation', [...self::CRUD, 'manage', 'issue']],
-            'quotation' => ['Procurement', 'Quotations', [...self::CRUD, 'manage', 'compare']],
+            // `quotation.view_confidential` is not optional garnish: the column defaults to
+            // `confidential`, and Gate 5 lets a confidential record through only for somebody
+            // holding this or named on an explicit ACL row. Without it in the catalogue the
+            // register would be unopenable by anybody at all, including the buyer who typed it in.
+            // It is separate from `quotation.view` so that "may read the enquiry" and "may read the
+            // prices" can be given to different people while a tender is live.
+            'quotation' => ['Procurement', 'Quotations', [...self::CRUD, 'manage', 'compare', 'view_confidential']],
             'purchase_order' => ['Procurement', 'Purchase Orders', [...self::CRUD, 'manage', 'submit', 'approve', 'reject', 'issue']],
             'goods_receipt' => ['Procurement', 'Goods Receipts', [...self::CRUD, 'manage', 'approve']],
 

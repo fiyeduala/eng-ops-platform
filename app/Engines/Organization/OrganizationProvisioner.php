@@ -220,6 +220,20 @@ class OrganizationProvisioner
             'contract.default_retention_percent' => '5',
             'contract.expiry_warning_days' => 90,
 
+            // --- procurement -------------------------------------------------------------
+            // Both separations default to ON. A company that needs to turn one off can, and the
+            // override is recorded where it is used — but the safe posture must be the one a
+            // company gets without knowing the setting exists.
+            'procurement.rfq_required_above' => '',
+            'procurement.minimum_quotations' => 3,
+            'procurement.separate_requester_and_approver' => true,
+            'procurement.separate_buyer_and_receiver' => true,
+            'procurement.evaluation_criteria' => '',
+            'procurement.score_out_of' => 10,
+            'purchase_request.priorities' => '',
+            'purchase_order.payment_terms' => '30 days from invoice',
+            'goods_receipt.conditions' => '',
+
             // --- notifications -----------------------------------------------------------
             'notify.channels' => ['database', 'mail'],
             'notify.digest_hour' => 7,

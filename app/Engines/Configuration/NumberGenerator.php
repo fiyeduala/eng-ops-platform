@@ -298,6 +298,27 @@ class NumberGenerator
             // Contracts DO reset, because a contract is an event with a year attached and every
             // commercial review is annual. "CTR-2026-0004" is how it is quoted in a meeting.
             'contract' => ['prefix' => 'CTR', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+
+            // --- Phase 5, part 2: the procurement chain -------------------------------
+            // ALL FIVE RESET YEARLY, because every one of them is an event with a date and every
+            // procurement review, audit and budget line is annual. "PO-2026-0184" answers "how many
+            // orders have we raised this year" by being read aloud, which is worth more than the
+            // continuity a non-resetting series would buy.
+            //
+            // FIVE PREFIXES, NOT ONE. It is tempting to number the whole chain PRC-2026-0001 and
+            // let the type disambiguate — and then a receipt and the order it arrived against share
+            // a number, and every conversation about either one needs a qualifier. Each register is
+            // quoted independently by a different person for a different reason, so each gets its
+            // own series.
+            'purchase_request' => ['prefix' => 'PR', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+            'rfq' => ['prefix' => 'RFQ', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+            // A quotation number is OURS, not the supplier's. Theirs is kept verbatim in
+            // `quotations.reference`, because a supplier chasing payment quotes their own number and
+            // a buyer chasing a decision quotes this one, and neither should have to translate.
+            'quotation' => ['prefix' => 'QTN', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+            'purchase_order' => ['prefix' => 'PO', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+            // GRN, not GR: the abbreviation every storekeeper already writes on the paper copy.
+            'goods_receipt' => ['prefix' => 'GRN', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
         ];
     }
 }

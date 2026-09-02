@@ -222,6 +222,28 @@ class Navigation
                 ],
             ],
             [
+                // Procurement, in the order the chain runs, because the order IS the mental model:
+                // somebody asks, somebody shops, suppliers answer, we order, the goods turn up. A
+                // person who has never used the module can read the sequence off the sidebar.
+                //
+                // Quotations sit between enquiries and orders even though most people reach one
+                // through its enquiry, because a supplier chasing "did you get our quote" is
+                // looking for a register, not for the enquiry it belonged to.
+                'label' => 'Procurement',
+                'items' => [
+                    ['label' => 'Purchase requests', 'route' => 'purchase-requests.index', 'icon' => 'clipboard',
+                        'permission' => 'purchase_request.view', 'active' => 'purchase-requests.*'],
+                    ['label' => 'Enquiries (RFQ)', 'route' => 'rfqs.index', 'icon' => 'megaphone',
+                        'permission' => 'rfq.view', 'active' => 'rfqs.*'],
+                    ['label' => 'Quotations', 'route' => 'quotations.index', 'icon' => 'coins',
+                        'permission' => 'quotation.view', 'active' => 'quotations.*'],
+                    ['label' => 'Purchase orders', 'route' => 'purchase-orders.index', 'icon' => 'cart',
+                        'permission' => 'purchase_order.view', 'active' => 'purchase-orders.*'],
+                    ['label' => 'Goods receipts', 'route' => 'goods-receipts.index', 'icon' => 'truck',
+                        'permission' => 'goods_receipt.view', 'active' => 'goods-receipts.*'],
+                ],
+            ],
+            [
                 'label' => 'Administration',
                 'items' => [
                     ['label' => 'User accounts', 'route' => 'users.index', 'icon' => 'key',

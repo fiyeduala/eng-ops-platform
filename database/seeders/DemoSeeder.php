@@ -6,6 +6,7 @@ namespace Database\Seeders;
 
 use App\Engines\Access\OrganizationContext;
 use App\Engines\Audit\ActivityRecorder;
+use App\Engines\Configuration\SettingsRepository;
 use App\Engines\Configuration\StatusMachine;
 use App\Engines\Document\PdfRenderer;
 use App\Engines\Organization\OrganizationProvisioner;
@@ -28,7 +29,10 @@ use App\Models\Position;
 use App\Models\Project;
 use App\Models\ProjectRole;
 use App\Models\ProjectType;
+use App\Models\PurchaseOrder;
+use App\Models\Quotation;
 use App\Models\Rfi;
+use App\Models\Rfq;
 use App\Models\Role;
 use App\Models\Status;
 use App\Models\Submittal;
@@ -49,6 +53,7 @@ use App\Services\DeliverableService;
 use App\Services\DocumentService;
 use App\Services\DocumentVersionService;
 use App\Services\DrawingService;
+use App\Services\GoodsReceiptService;
 use App\Services\HseInspectionService;
 use App\Services\HseObservationService;
 use App\Services\IncidentService;
@@ -59,8 +64,12 @@ use App\Services\NcrService;
 use App\Services\PermitService;
 use App\Services\ProjectService;
 use App\Services\ProjectTeamService;
+use App\Services\PurchaseOrderService;
+use App\Services\PurchaseRequestService;
 use App\Services\QualityInspectionService;
+use App\Services\QuotationService;
 use App\Services\RfiService;
+use App\Services\RfqService;
 use App\Services\RiskAssessmentService;
 use App\Services\SubmittalService;
 use App\Services\TaskChecklistService;
@@ -195,12 +204,17 @@ class DemoSeeder extends Seeder
         $this->seedMeridianHse($meridian);
         $this->seedMeridianQuality($meridian);
         $this->seedKestrelHse($kestrel);
-
-        // Commercial last of the registers, because it is the one that reaches back: it creates the
+        // Commercial before procurement, because it is the one that reaches back: it creates the
         // clients and contracts the earlier chapters have been naming in free text, then points the
         // projects and the correspondence at them. Running it earlier would leave nothing to link.
         $this->seedMeridianCommercial($meridian);
         $this->seedKestrelCommercial($kestrel);
+
+        // Procurement after commercial, and it has to be: an enquiry goes to vendors that must
+        // already exist, and an order is placed against a contract that must already have been
+        // signed. This is the chapter where the five registers become one chain.
+        $this->seedMeridianProcurement($meridian);
+        $this->seedKestrelProcurement($kestrel);
 
         // The rows above were written straight to the database, so nothing observed them happening.
         // A demo whose record timelines are all blank teaches the wrong lesson about Engine 4 — the
@@ -4789,6 +4803,703 @@ class DemoSeeder extends Seeder
             $this->linkProjectCommercially($job['TPA'] ?? null, $trafford, $ppm, $opsManager);
             $this->linkCorrespondence();
         });
+    }
+
+    /*
+     * Meridian buy things, and the chain that starts when they decide to.
+     *
+     * THIS IS THE CHAPTER THE EXIT CRITERION IS ABOUT. Somewhere below, one requisition becomes an
+     * approved requisition, becomes an enquiry to three suppliers, becomes two quotations, becomes
+     * an award, becomes an order, becomes two deliveries — and every join is made by the service
+     * that makes it in production, never by typing a foreign key into a `create()`. A demo that
+     * assembled the chain by hand would show the screens working while the thing they are screens
+     * onto was broken.
+     *
+     * FIVE THREADS, DELIBERATELY AT FIVE DIFFERENT STAGES, because a procurement register in which
+     * everything is finished is a register nobody recognises. Real ones are mostly middles: a
+     * requisition somebody has not looked at, an enquiry whose deadline has not passed, an order
+     * half delivered, a delivery in dispute. Only the first thread below runs all the way through.
+     *
+     * WHO DOES WHAT IS THE POINT AND NOT THE DECORATION. Daniel Mbeki asks for materials; Bisi
+     * Adeleke decides they may be bought; Uche Nnamdi goes to the market and raises the order;
+     * Sadiq Bello, in stores, is the one who says the lorry arrived. Four people, because
+     * `SeparatesDuties` refuses to let fewer do it — and the refusal is the control working, not an
+     * obstacle the demo routes around. See seedKestrelProcurement() for the company too small to
+     * afford four, and what the platform does for them instead.
+     */
+    private function seedMeridianProcurement(Organization $organization): void
+    {
+        $this->context->within($organization, function () {
+            $this->bootDelivery();
+
+            $requests = app(PurchaseRequestService::class);
+            $rfqs = app(RfqService::class);
+            $quotations = app(QuotationService::class);
+            $orders = app(PurchaseOrderService::class);
+            $receipts = app(GoodsReceiptService::class);
+
+            $staff = $this->staff();
+            $unit = $this->unitsByCode();
+            $place = $this->locationsByCode();
+            $job = Project::query()->get()->keyBy('code');
+            // The status eagerly, because Vendor::canBeUsed() reads it and the lazy-loading guard is on:
+            // whether a supplier may be invited is a question about their status, and asking it once
+            // per invitation off an unloaded relation is exactly what the guard exists to catch.
+            $vendor = Vendor::with('status')->get()->keyBy('code');
+            $contract = Contract::query()->get()->keyBy('reference');
+
+            $md = $this->accountOf($staff, 'MEI-0001');             // Adaeze Okonkwo
+            $projectManager = $this->accountOf($staff, 'MEI-0011'); // Daniel Mbeki
+            $siteManager = $this->accountOf($staff, 'MEI-0012');    // Kelechi Nwosu
+            $prcManager = $this->accountOf($staff, 'MEI-0019');     // Bisi Adeleke
+            $prcOfficer = $this->accountOf($staff, 'MEI-0020');     // Uche Nnamdi
+            $storeOfficer = $this->accountOf($staff, 'MEI-0021');   // Sadiq Bello
+
+            // ============================================================ thread 1: the whole chain
+            // Requisition → approval → enquiry → quotations → evaluation → award → order → issue →
+            // two deliveries → received in full → closed. §90, in one supply of pipe.
+            $spools = $requests->create([
+                'title' => 'Tie-in spool materials — Delta Terminal',
+                'justification' => 'The tie-in spools between the new tanks and the existing 12" '
+                    .'header cannot be fabricated until the pipe and fittings are on site. The '
+                    .'erection sequence has the first spool going in four weeks from now.',
+                'project_id' => $job['DTE']?->id,
+                'org_unit_id' => $unit['PMO']->id,
+                'location_id' => $place['SITE-DT']->id,
+                'priority' => 'high',
+                'required_by' => now()->addWeeks(3)->toDateString(),
+                'currency' => 'NGN',
+                'items' => [
+                    [
+                        'description' => '12" carbon steel pipe, API 5L Gr.B, schedule 40',
+                        'specification' => 'Seamless. Mill certificates to EN 10204 3.1 required '
+                            .'with the delivery, not after it.',
+                        'quantity' => 96,
+                        'uom' => 'm',
+                        'estimated_unit_price' => 46500,
+                    ],
+                    [
+                        'description' => '12" weld-neck flanges, ANSI 150, raised face',
+                        'specification' => 'Forged, ASTM A105. Bore to match schedule 40.',
+                        'quantity' => 24,
+                        'uom' => 'ea',
+                        'estimated_unit_price' => 78000,
+                    ],
+                    [
+                        'description' => '12" long-radius elbows, 90°, butt weld',
+                        'quantity' => 16,
+                        'uom' => 'ea',
+                        'estimated_unit_price' => 64000,
+                    ],
+                ],
+                'notes' => 'Quantities include the 5% cutting allowance the piping team asked for.',
+            ], $projectManager);
+
+            $requests->submit($spools, $projectManager);
+            $requests->approve($spools, $prcManager,
+                'Within the tie-in package allowance. Go to the market — do not single source this.');
+
+            // The enquiry is raised FROM the requisition, which is what carries the three lines
+            // across. Nobody retypes them, so nobody can retype them wrongly.
+            $enquiry = $rfqs->fromPurchaseRequest($spools, [
+                'title' => 'Tie-in spool materials — 12" pipe, flanges and fittings',
+                'scope' => 'Supply only, delivered to the Delta Terminal site laydown area in one '
+                    .'or two consignments. Offloading is ours. Mill certificates to accompany the '
+                    .'delivery note.',
+                'org_unit_id' => $unit['PRC']->id,
+                'closes_at' => now()->subDays(9)->setTime(16, 0),
+                'terms' => "Prices to be held for 30 days.\nDelivery to site, Warri.\n"
+                    ."Payment 30 days from receipt of a correct invoice.\n"
+                    .'Part offers accepted; alternatives to be priced separately and marked as such.',
+            ], $prcOfficer);
+
+            // PANAFRIC ARE NOT ON THIS LIST, AND NOT BY CHOICE. They are the obvious third
+            // invitation — the framework supplier for exactly these fittings — and RfqService will
+            // not send it, because their prequalification lapsed on 2 July and Vendor::canBeUsed()
+            // says so. The vendor register and the enquiry are the same system; this is what that
+            // means in practice, and it is why the award reason further down reads as it does.
+            $rfqs->invite($enquiry, $vendor['SSF'], $prcOfficer,
+                'Carry line pipe stock and are already on site for the plate work.');
+            $rfqs->invite($enquiry, $vendor['KIS'], $prcOfficer,
+                'Asked to quote on the strength of their pipe stock list.');
+            $rfqs->invite($enquiry, $vendor['CMS'], $prcOfficer,
+                'Third invitation to meet our own minimum. They are logistics rather than supply, '
+                    .'so this is a long shot.');
+
+            $rfqs->issue($enquiry, $prcOfficer);
+
+            // A DECLINE IS A RESPONSE. An enquiry that shows three invitations and two answers
+            // looks like a supplier who ignored us; recording the decline is the difference between
+            // a register and a list of things that did not happen.
+            $declined = $enquiry->invitations()->where('vendor_id', $vendor['CMS']->id)->first();
+
+            if ($declined !== null) {
+                $rfqs->recordDecline($declined, $prcOfficer,
+                    'We move materials to the jetty, we do not sell them. Happy to price the '
+                        .'haulage separately if whoever wins is ex works.');
+            }
+
+            $saharaQuote = $this->quoteFor($quotations, $enquiry, $vendor['SSF'], $prcOfficer, [
+                48900, 71000, 63500,
+            ], [
+                'reference' => 'SSF-TQ-1188',
+                'quoted_on' => now()->subDays(12)->toDateString(),
+                'valid_until' => now()->addDays(18)->toDateString(),
+                'lead_time_days' => 12,
+                'currency' => 'NGN',
+                'payment_terms' => '30 days from a correct invoice, as tendered.',
+                'delivery_terms' => 'Delivered to site, Warri. One consignment, possibly two.',
+                'notes' => 'Mill certificates confirmed to accompany the delivery, not to follow it.',
+            ]);
+
+            $kanoQuote = $this->quoteFor($quotations, $enquiry, $vendor['KIS'], $prcOfficer, [
+                46200, 74500, 61000,
+            ], [
+                'reference' => 'KIS/Q/26-0418',
+                'quoted_on' => now()->subDays(11)->toDateString(),
+                'valid_until' => now()->addDays(10)->toDateString(),
+                'lead_time_days' => 21,
+                'currency' => 'NGN',
+                'payment_terms' => '14 days, or 30 against a proforma.',
+                'delivery_terms' => 'Ex works Kano.',
+                'notes' => 'Cheaper on two lines. Ex works Kano is 1,100 km from Warri and the '
+                    .'haulage is ours to arrange and pay for.',
+            ]);
+
+            // TWO PEOPLE SCORE, SEPARATELY, and each writes only their own marks. The evaluation
+            // screen adds them up; nobody's opinion overwrites anybody else's.
+            $quotations->recordScores($saharaQuote, $prcOfficer, [
+                'price' => ['score' => 7, 'comment' => 'Dearer on pipe and elbows, cheaper on flanges.'],
+                'delivery' => ['score' => 10, 'comment' => 'Twelve days, delivered. Nobody else is close.'],
+                'technical_compliance' => ['score' => 9, 'comment' => 'Fully compliant. Certificates with the delivery.'],
+                'commercial_terms' => ['score' => 9, 'comment' => 'Took our terms as issued, delivered to site.'],
+            ]);
+
+            $quotations->recordScores($saharaQuote, $prcManager, [
+                'price' => ['score' => 7],
+                'delivery' => ['score' => 10, 'comment' => 'They are already on site for the plate work.'],
+                'technical_compliance' => ['score' => 9],
+                'commercial_terms' => ['score' => 10, 'comment' => 'Delivered to site is worth more than the price gap.'],
+            ]);
+
+            $quotations->recordScores($kanoQuote, $prcOfficer, [
+                'price' => ['score' => 9, 'comment' => 'Lowest on pipe and elbows before haulage.'],
+                'delivery' => ['score' => 4, 'comment' => 'Twenty-one days, and then a lorry from Kano.'],
+                'technical_compliance' => ['score' => 6, 'comment' => 'Certificates offered "on request", which is not the same as with the delivery.'],
+                'commercial_terms' => ['score' => 5, 'comment' => 'Ex works Kano. The haulage lands back on us and is not in the price.'],
+            ]);
+
+            $quotations->recordScores($kanoQuote, $prcManager, [
+                'price' => ['score' => 8, 'comment' => 'Not lowest once the haulage from Kano is added.'],
+                'delivery' => ['score' => 4],
+                'technical_compliance' => ['score' => 5, 'comment' => 'No prequalification pack from them yet either.'],
+                'commercial_terms' => ['score' => 5],
+            ]);
+
+            // CLOSED BY THE MANAGER, NOT THE OFFICER. Closing an enquiry for responses is
+            // `rfq.manage`, which the procurement-officer template does not carry — the person who
+            // ran the exercise is not the person who decides the market has finished speaking.
+            $this->moveCommercial($enquiry, 'rfq', 'closed', $prcManager,
+                'Deadline passed. Two responses and one decline.');
+            $this->moveCommercial($enquiry, 'rfq', 'under_evaluation', $prcManager,
+                'Scoring with the piping lead on technical compliance.');
+
+            // A WRITTEN REASON, BECAUSE TWO IS NOT THREE. `procurement.minimum_quotations` is set
+            // to three, only two arrived, and RfqService refuses a silent award below the company's
+            // own threshold. The exception is not an obstacle here — it is the reason the sentence
+            // below exists at all, and in six months it is the only record of why.
+            $rfqs->award($enquiry, $saharaQuote, $prcManager,
+                'Two responses against three invitations. PanAfric would have been the natural '
+                    .'third and the register would not let us invite them — their prequalification '
+                    .'lapsed on 2 July and it is still not back. Coastal Marine declined in '
+                    .'writing and the decline is on the enquiry. Kano are lower on two lines before '
+                    .'haulage from Kano to Warri, which is not in their price, and offer '
+                    .'certificates on request rather than with the delivery. Sahara are nine days '
+                    .'faster, delivered to site, certificates in hand, and already mobilised here.');
+
+            // The order comes FROM the winning quotation: the prices, the currency and the lines are
+            // carried across by the service, so what we commit to is what they quoted.
+            $spoolOrder = $orders->fromQuotation($saharaQuote, [
+                'title' => 'Tie-in spool materials — 12" pipe, flanges and fittings',
+                'project_id' => $job['DTE']?->id,
+                'org_unit_id' => $unit['PRC']->id,
+                'location_id' => $place['SITE-DT']->id,
+                // NO CONTRACT. Sahara have a subcontract with us for the tank plate, and this is
+                // not it: a supply order won on a tender stands on its own. Pointing it at the
+                // fabrication subcontract because the same company happens to be on both would
+                // quietly add ₦11m of pipe to a subcontract value nobody agreed to change.
+                'ordered_on' => now()->subDays(7)->toDateString(),
+                'required_by' => now()->addDays(14)->toDateString(),
+                'delivery_terms' => 'Delivered to the Delta Terminal site laydown area, Warri. '
+                    .'Offloading by us. Mill certificates to accompany the delivery note.',
+                'payment_terms' => '30 days from receipt of a correct invoice.',
+                'notes' => 'Supply only, against the tender. Separate from their plate '
+                    .'fabrication subcontract and to be invoiced separately.',
+            ], $prcOfficer);
+
+            $orders->submit($spoolOrder, $prcOfficer);
+            $orders->approve($spoolOrder, $prcManager, 'Competitively tendered. Award reason on the enquiry.');
+            $orders->issue($spoolOrder, $prcManager);
+
+            // ---------------------------------------------------------------- the deliveries
+            // TWO OF THEM, because that is how pipe arrives. The first is short and the order goes
+            // to `part_received` by arithmetic rather than by anybody deciding it did; the second
+            // completes it and the order reads `received` for the same reason.
+            //
+            // Sadiq Bello receives, and he must: `procurement.separate_buyer_and_receiver` is on,
+            // and Uche raised, submitted and would otherwise be certifying his own order.
+            $firstDrop = $receipts->create([
+                'purchase_order_id' => $spoolOrder->getKey(),
+                'location_id' => $place['SITE-DT']->id,
+                'delivery_note_ref' => 'SSF/DN/4471',
+                'carrier' => 'Sahara own fleet',
+                'vehicle_ref' => 'LAG-441-XA',
+                'notes' => 'Pipe and elbows. Flanges to follow — they were short on the raised face.',
+                'items' => $this->receiptLines($spoolOrder, [1 => 96.0, 3 => 16.0], 'Good'),
+            ], $storeOfficer);
+
+            $receipts->confirm($firstDrop, $storeOfficer);
+            $receipts->inspect($firstDrop, $siteManager,
+                'Pipe measured and marked off against the delivery note. Mill certificates present '
+                    .'for both heat numbers. Two elbows scuffed in transit; coating only, no dents.');
+            $receipts->accept($firstDrop, $projectManager, 'Accepted. Elbows to be touched up on site.');
+
+            $secondDrop = $receipts->create([
+                'purchase_order_id' => $spoolOrder->getKey(),
+                'location_id' => $place['SITE-DT']->id,
+                'delivery_note_ref' => 'SSF/DN/4488',
+                'carrier' => 'Sahara own fleet',
+                'vehicle_ref' => 'LAG-208-KJ',
+                'notes' => 'Balance of the flanges, six days after the pipe.',
+                'items' => $this->receiptLines($spoolOrder, [2 => 24.0], 'Good'),
+            ], $storeOfficer);
+
+            $receipts->confirm($secondDrop, $storeOfficer);
+            $receipts->accept($secondDrop, $projectManager, 'Count and certificates agree.');
+
+            // The order is `received` because the arithmetic says so. Closing it is a decision, and
+            // it is somebody's — the register is finished with it, and finance can see that.
+            $this->moveCommercial($spoolOrder->refresh(), 'purchase_order', 'closed', $prcManager,
+                'Delivered in full over two consignments. Invoice passed to finance.');
+
+            // =========================================================== thread 2: nobody has looked
+            // The commonest row in any procurement register, and the one a demo full of finished
+            // work never shows: submitted, sitting there, waiting for a decision.
+            $scaffold = $requests->create([
+                'title' => 'Scaffold hire — tank 2 shell course 3 and above',
+                'justification' => 'The hired scaffold comes off tank 1 next week and tank 2 needs '
+                    .'it from the third course. Eight weeks, three lifts.',
+                'project_id' => $job['DTE']?->id,
+                'org_unit_id' => $unit['CON-DT']->id,
+                'location_id' => $place['SITE-DT']->id,
+                'priority' => 'normal',
+                'required_by' => now()->addDays(11)->toDateString(),
+                'currency' => 'NGN',
+                'items' => [
+                    [
+                        'description' => 'Scaffold hire, erected and struck, tank 2 shell',
+                        'specification' => 'Three lifts to 14 m. Handover certificate and weekly '
+                            .'inspection tags included. Ironclad have ceased trading, so this needs '
+                            .'a new supplier.',
+                        'quantity' => 8,
+                        'uom' => 'week',
+                        'estimated_unit_price' => 1450000,
+                    ],
+                ],
+            ], $siteManager);
+
+            $requests->submit($scaffold, $siteManager);
+
+            // ============================================================ thread 3: the answer was no
+            $cabin = $requests->create([
+                'title' => 'Site office air conditioning replacement',
+                'justification' => 'The unit in the site office has been failing since March and '
+                    .'the meeting room is unusable in the afternoons.',
+                'project_id' => $job['DTE']?->id,
+                'org_unit_id' => $unit['CON-DT']->id,
+                'location_id' => $place['SITE-DT']->id,
+                'priority' => 'low',
+                'currency' => 'NGN',
+                'items' => [
+                    [
+                        'description' => '2.5 hp split air conditioning unit, supplied and installed',
+                        'quantity' => 2,
+                        'uom' => 'ea',
+                        'estimated_unit_price' => 690000,
+                    ],
+                ],
+            ], $siteManager);
+
+            $requests->submit($cabin, $siteManager);
+            $requests->reject($cabin, $prcManager,
+                'The cabins are on hire and the hirer is contractually responsible for the air '
+                    .'conditioning. Raise it with them under the hire agreement rather than buying '
+                    .'units we then leave behind. Happy to fund a temporary unit for the meeting '
+                    .'room if they will not move.');
+
+            // ========================================================= thread 4: an enquiry still open
+            // Issued, deadline next week, one supplier in and one still to answer. No award, no
+            // order, and nothing to close — the state an enquiry spends most of its life in.
+            $coating = $requests->create([
+                'title' => 'External coating system — tank 2',
+                'justification' => 'Tank 1 was coated by the shell contractor under the old scope. '
+                    .'Tank 2 is ours to place and the erection finishes in six weeks.',
+                'project_id' => $job['DTE']?->id,
+                'org_unit_id' => $unit['PMO']->id,
+                'location_id' => $place['SITE-DT']->id,
+                'priority' => 'normal',
+                'required_by' => now()->addWeeks(6)->toDateString(),
+                'currency' => 'NGN',
+                'items' => [
+                    [
+                        'description' => 'Blast and coat tank 2 external shell and roof',
+                        'specification' => 'Sa 2½ blast, three-coat epoxy system to the client '
+                            .'specification. Approximately 2,400 m².',
+                        'quantity' => 2400,
+                        'uom' => 'm²',
+                        'estimated_unit_price' => 18500,
+                    ],
+                ],
+            ], $projectManager);
+
+            $requests->submit($coating, $projectManager);
+            $requests->approve($coating, $prcManager, 'In the budget. Three quotations please.');
+
+            $coatingEnquiry = $rfqs->fromPurchaseRequest($coating, [
+                'title' => 'External coating system — Delta Terminal tank 2',
+                'scope' => 'Surface preparation and application of the three-coat epoxy system to '
+                    .'the tank 2 external shell and roof, including access, containment and '
+                    .'inspection hold points.',
+                'org_unit_id' => $unit['PRC']->id,
+                'closes_at' => now()->addDays(6)->setTime(16, 0),
+                'terms' => "Prices to be held for 45 days.\nAccess and containment are the "
+                    ."contractor's.\nOur QA inspector holds the blast and each coat.\n"
+                    .'Payment 30 days from a correct invoice against measured work.',
+            ], $prcOfficer);
+
+            $rfqs->invite($coatingEnquiry, $vendor['AIC'], $prcOfficer,
+                'Provisionally approved only. If they win, the prequalification pack has to be '
+                    .'completed before an order goes out.');
+            $rfqs->invite($coatingEnquiry, $vendor['SSF'], $prcOfficer, 'They have a paint shop.');
+
+            $rfqs->issue($coatingEnquiry, $prcOfficer);
+
+            $this->quoteFor($quotations, $coatingEnquiry, $vendor['AIC'], $prcOfficer, [17900], [
+                'reference' => 'AIC/2026/Q-311',
+                'quoted_on' => now()->subDays(1)->toDateString(),
+                'valid_until' => now()->addDays(44)->toDateString(),
+                'lead_time_days' => 30,
+                'currency' => 'NGN',
+                'payment_terms' => 'Monthly against measured work, 30 days.',
+                'delivery_terms' => 'Site works. Access and containment included.',
+                'notes' => 'First in. Sahara have asked for two more days and the deadline has not '
+                    .'passed, so nothing is being compared yet.',
+            ]);
+
+            // ======================================================= thread 5: bought without a tender
+            // Small, urgent, single-sourced, and the platform lets it happen while making sure it
+            // cannot happen quietly: below the enquiry threshold the order still needs a decision,
+            // and the approver's comment is the record of why nobody went to the market.
+            $gaskets = $requests->create([
+                'title' => 'Replacement gaskets — 12" ANSI 150 flanged joints',
+                'justification' => 'The gaskets that came with the valve package are the wrong '
+                    .'rating. Hydrotest is Thursday.',
+                'project_id' => $job['DTE']?->id,
+                'org_unit_id' => $unit['CON-DT']->id,
+                'location_id' => $place['SITE-DT']->id,
+                'priority' => 'urgent',
+                'required_by' => now()->subDays(4)->toDateString(),
+                'currency' => 'NGN',
+                'items' => [
+                    [
+                        'description' => '12" spiral wound gaskets, ANSI 150, 316L/graphite',
+                        'quantity' => 40,
+                        'uom' => 'ea',
+                        'estimated_unit_price' => 14500,
+                    ],
+                ],
+            ], $siteManager);
+
+            $requests->submit($gaskets, $siteManager);
+            $requests->approve($gaskets, $prcManager,
+                'Urgent and small. Kano hold them and can courier tomorrow — place it with them.');
+
+            $gasketOrder = $orders->create([
+                'title' => 'Replacement gaskets — hydrotest',
+                'vendor_id' => $vendor['KIS']->id,
+                'project_id' => $job['DTE']?->id,
+                'org_unit_id' => $unit['PRC']->id,
+                'location_id' => $place['SITE-DT']->id,
+                'ordered_on' => now()->subDays(5)->toDateString(),
+                'required_by' => now()->subDays(3)->toDateString(),
+                'currency' => 'NGN',
+                'payment_terms' => '14 days, as quoted.',
+                'delivery_terms' => 'Overnight courier to site.',
+                'items' => [
+                    [
+                        'description' => '12" spiral wound gaskets, ANSI 150, 316L/graphite',
+                        'quantity' => 40,
+                        'uom' => 'ea',
+                        'unit_price' => 13800,
+                    ],
+                ],
+                'notes' => 'No enquiry — see the approval comment. Kano have no prequalification '
+                    .'pack with us yet, which the officer has been asked to chase.',
+            ], $prcOfficer);
+
+            $orders->submit($gasketOrder, $prcOfficer);
+            $orders->approve($gasketOrder, $prcManager,
+                'Single sourced deliberately. Forty gaskets against a hydrotest on Thursday; a '
+                    .'three-quotation exercise costs more in delay than the whole order is worth. '
+                    .'Kano were the only supplier holding stock and could courier the same night.');
+            $orders->issue($gasketOrder, $prcManager);
+
+            // A DISPUTE, AND THE ORDER DOES NOT READ AS SATISFIED. Half the delivery is the wrong
+            // rating; the rejected quantity stays outstanding on the order line, which is the whole
+            // reason `quantity_rejected` is a separate column from a note in the margin.
+            $gasketDrop = $receipts->create([
+                'purchase_order_id' => $gasketOrder->getKey(),
+                'location_id' => $place['SITE-DT']->id,
+                'delivery_note_ref' => 'KIS/DN/0212',
+                'carrier' => 'Courier',
+                'notes' => 'Opened on the bench with the piping supervisor before signing.',
+                'items' => [
+                    [
+                        'purchase_order_item_id' => $gasketOrder->items()->orderBy('line_no')->value('id'),
+                        'quantity_accepted' => 22,
+                        'quantity_rejected' => 18,
+                        'rejection_reason' => 'Eighteen are ANSI 300 ring type, not 150 spiral '
+                            .'wound. Marked up on the box and on the gasket itself.',
+                        'condition' => 'Wrong item',
+                    ],
+                ],
+            ], $storeOfficer);
+
+            $receipts->confirm($gasketDrop, $storeOfficer);
+            $receipts->dispute($gasketDrop, $prcOfficer,
+                'Eighteen of forty are the wrong rating. Raised with Kano the same afternoon; '
+                    .'they are sending the balance and collecting the ANSI 300 set. The order stays '
+                    .'part received until they do.');
+        });
+    }
+
+    /*
+     * Kestrel buy things too, with eight people and no procurement department at all.
+     *
+     * THE SAME ENGINE, TOLD TO STOP DOING ONE THING. Meridian's four-handed chain is not a feature
+     * of the software; it is a setting Meridian have switched on. Kestrel switch
+     * `procurement.separate_buyer_and_receiver` OFF, because in a company of eight the maintenance
+     * manager specifies the unit, orders the unit and is standing in the plant room when the lorry
+     * arrives, and a platform that refused to let him sign for it would be telling him to lie about
+     * who was there.
+     *
+     * IT IS SWITCHED OFF, NOT ABSENT. GoodsReceiptService still notices that the buyer received
+     * their own order and writes `duties_waived` onto the trail, so the auditor who asks the
+     * question in March gets an honest answer instead of a silence. That difference — the control
+     * relaxed and recorded, rather than never applied — is the whole argument for configuration
+     * over branching the code per customer.
+     *
+     * NO ENQUIRY EITHER. `procurement.minimum_quotations` comes down to one. They have bought the
+     * same air handling unit from the same supplier twice before, the controls have to match the
+     * two already on the roof, and going to the market for a third would be a ritual rather than a
+     * decision. The order still needs approving, and the managing director still approves it.
+     */
+    private function seedKestrelProcurement(Organization $organization): void
+    {
+        $this->context->within($organization, function () use ($organization) {
+            $this->bootDelivery();
+
+            $settings = app(SettingsRepository::class);
+            $requests = app(PurchaseRequestService::class);
+            $orders = app(PurchaseOrderService::class);
+            $receipts = app(GoodsReceiptService::class);
+
+            // Written before anything is bought, because these are the rules the chapter below
+            // runs under and a setting applied afterwards would be a setting nothing obeyed.
+            $settings->set('procurement.separate_buyer_and_receiver', false, $organization->id, 'procurement');
+            $settings->set('procurement.minimum_quotations', 1, $organization->id, 'procurement');
+
+            $staff = $this->staff();
+            $unit = $this->unitsByCode();
+            $place = $this->locationsByCode();
+            $job = Project::query()->get()->keyBy('code');
+            // The status eagerly, because Vendor::canBeUsed() reads it and the lazy-loading guard is on:
+            // whether a supplier may be invited is a question about their status, and asking it once
+            // per invitation off an unloaded relation is exactly what the guard exists to catch.
+            $vendor = Vendor::with('status')->get()->keyBy('code');
+            $contract = Contract::query()->get()->keyBy('reference');
+
+            $md = $this->accountOf($staff, 'KFM-001');              // Rowan Calder
+            $opsManager = $this->accountOf($staff, 'KFM-002');      // Priti Shah
+            $maintenanceHead = $this->accountOf($staff, 'KFM-003'); // Duncan Reilly
+            $electrician = $this->accountOf($staff, 'KFM-006');     // Erin Doyle
+
+            // ------------------------------------------------------------------ the AHU itself
+            $ahu = $requests->create([
+                'title' => 'AHU-3 replacement unit — Trafford Point',
+                'justification' => 'AHU-3 has failed twice since November and the second repair '
+                    .'was a bearing set we had to make up. The client has agreed to fund a '
+                    .'replacement as an additional work under the PPM contract.',
+                'project_id' => $job['TPA']?->id,
+                'org_unit_id' => $unit['MNT']->id,
+                'location_id' => $place['MCR']->id,
+                'priority' => 'high',
+                'required_by' => now()->addWeeks(2)->toDateString(),
+                'currency' => 'GBP',
+                'items' => [
+                    [
+                        'description' => 'Air handling unit, 4.2 m³/s, thermal wheel, to match AHU-1 and AHU-2',
+                        'specification' => 'Same frame, same controls interface as the 2023 units. '
+                            .'Delivered in sections through the goods lift — the plant room door is '
+                            .'1,100 mm and this has caught people out before.',
+                        'quantity' => 1,
+                        'uom' => 'ea',
+                        'estimated_unit_price' => 18400,
+                    ],
+                    [
+                        'description' => 'Commissioning and controls integration',
+                        'quantity' => 1,
+                        'uom' => 'visit',
+                        'estimated_unit_price' => 1850,
+                    ],
+                ],
+            ], $maintenanceHead);
+
+            $requests->submit($ahu, $maintenanceHead);
+            // Two people, even here: `separate_requester_and_approver` is left ON, because
+            // "somebody else says yes to the money" is the one control a company of eight can
+            // still afford. It is the receiving control they cannot.
+            $requests->approve($ahu, $opsManager,
+                'Client has confirmed in writing that they will fund it under the PPM contract.');
+
+            $ahuOrder = $orders->create([
+                'title' => 'AHU-3 replacement — supply and commissioning',
+                'vendor_id' => $vendor['NAH']->id,
+                'purchase_request_id' => $ahu->getKey(),
+                // NO CONTRACT ON THE ORDER, and the refusal that taught us so is worth keeping.
+                // TPE/PPM/2026/03 is the contract under which the CLIENT is paying for this unit;
+                // it is not a contract with Northern Air, and PurchaseOrderService checks that the
+                // contract named on an order is actually with the supplier being ordered from.
+                // The link that belongs here is the project — which does point at the PPM contract,
+                // one hop away, where it is true.
+                'project_id' => $job['TPA']?->id,
+                'org_unit_id' => $unit['MNT']->id,
+                'location_id' => $place['MCR']->id,
+                'ordered_on' => now()->subDays(10)->toDateString(),
+                'required_by' => now()->addDays(4)->toDateString(),
+                'currency' => 'GBP',
+                'payment_terms' => '30 days from invoice, as usual with them.',
+                'delivery_terms' => 'Delivered in sections to the fourth floor plant room. '
+                    .'Booking through the building manager, weekday mornings only.',
+                'items' => [
+                    [
+                        'description' => 'Air handling unit, 4.2 m³/s, thermal wheel, to match AHU-1 and AHU-2',
+                        'specification' => 'Sectional delivery. 1,100 mm maximum section width.',
+                        'quantity' => 1,
+                        'uom' => 'ea',
+                        'unit_price' => 18150,
+                    ],
+                    [
+                        'description' => 'Commissioning and controls integration',
+                        'quantity' => 1,
+                        'uom' => 'visit',
+                        'unit_price' => 1850,
+                    ],
+                ],
+                'notes' => 'Third unit from them and the same specification as the other two. No '
+                    .'enquiry — the controls have to match what is already on the roof.',
+            ], $maintenanceHead);
+
+            $orders->submit($ahuOrder, $maintenanceHead);
+            $orders->approve($ahuOrder, $md,
+                'Agreed. Same unit as the other two, price is £250 under the requisition estimate, '
+                    .'and the client is paying. No enquiry needed for a matched replacement.');
+            $orders->issue($ahuOrder, $maintenanceHead);
+
+            // AND HERE IS THE WHOLE POINT. Duncan raised this order, submitted it and issued it,
+            // and Duncan is the one signing for the lorry. Meridian's copy of this line would throw.
+            // Kestrel's writes a `duties_waived` entry onto the delivery instead, which is the
+            // honest record of a small company doing the only thing it can.
+            $ahuDrop = $receipts->create([
+                'purchase_order_id' => $ahuOrder->getKey(),
+                'location_id' => $place['MCR']->id,
+                'delivery_note_ref' => 'NAH-DN-40188',
+                'carrier' => "Supplier's own vehicle",
+                'notes' => 'Unit only. Commissioning is booked for the week after the install.',
+                'items' => $this->receiptLines($ahuOrder, [1 => 1.0], 'Good'),
+            ], $maintenanceHead);
+
+            $receipts->confirm($ahuDrop, $maintenanceHead);
+            $receipts->inspect($ahuDrop, $electrician,
+                'Six sections, all through the goods lift without stripping the frame. Serial and '
+                    .'controls card checked against the order. Isolator and cable route already in '
+                    .'from the survey, so nothing to change on the electrical side.');
+            $receipts->accept($ahuDrop, $opsManager,
+                'Accepted. Commissioning visit still outstanding, so the order stays open.');
+        });
+    }
+
+    // ================================================================ procurement helpers
+
+    /**
+     * A quotation priced line for line against the enquiry it answers.
+     *
+     * THE LINES COME FROM THE ENQUIRY, not from the caller, which is what makes a comparison
+     * possible at all: two suppliers answering the same three lines can be laid side by side, and
+     * two suppliers who each typed their own description cannot. The caller supplies prices in
+     * line order and nothing else, so a demo quotation cannot silently answer a different question
+     * from the one that was asked.
+     *
+     * @param  array<int,float>  $unitPrices  in line order, one per line on the enquiry
+     * @param  array<string,mixed>  $attributes
+     */
+    private function quoteFor(
+        QuotationService $quotations,
+        Rfq $rfq,
+        Vendor $vendor,
+        User $actor,
+        array $unitPrices,
+        array $attributes = [],
+    ): Quotation {
+        $items = $rfq->items()->orderBy('line_no')->get()->values()->map(fn ($item, $index) => [
+            'rfq_item_id' => $item->getKey(),
+            'description' => $item->description,
+            'quantity' => $item->quantity,
+            'uom' => $item->uom,
+            'unit_price' => $unitPrices[$index] ?? end($unitPrices),
+        ])->all();
+
+        return $quotations->create([
+            'rfq_id' => $rfq->getKey(),
+            'vendor_id' => $vendor->getKey(),
+            'items' => $items,
+            ...$attributes,
+        ], $actor);
+    }
+
+    /**
+     * Delivery lines for named lines of an order, by the order's own line numbers.
+     *
+     * KEYED BY LINE NUMBER RATHER THAN BY POSITION, because a short delivery is the normal case and
+     * "line 1 and line 3 came, line 2 follows" is how the storekeeper reads the delivery note. A
+     * line the caller does not name simply is not on this receipt, which is exactly what an
+     * outstanding quantity means.
+     *
+     * @param  array<int,float>  $quantities  order line_no => quantity accepted
+     * @return array<int,array<string,mixed>>
+     */
+    private function receiptLines(PurchaseOrder $order, array $quantities, ?string $condition = null): array
+    {
+        return $order->items()
+            ->whereIn('line_no', array_keys($quantities))
+            ->orderBy('line_no')
+            ->get()
+            ->map(fn ($item) => [
+                'purchase_order_item_id' => $item->getKey(),
+                'quantity_accepted' => $quantities[(int) $item->line_no],
+                'condition' => $condition,
+            ])
+            ->all();
     }
 
     // ================================================================= commercial helpers

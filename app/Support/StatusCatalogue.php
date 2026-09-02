@@ -656,6 +656,172 @@ final class StatusCatalogue
                     ['suspended', 'terminated', 'Terminate', 'contract.manage', true],
                 ],
             ],
+
+            /*
+             * --- Phase 5, part 2: the procurement chain ------------------------------
+             *
+             * FIVE GRAPHS, ONE CHAIN. Each register below has its own vocabulary, and the joins
+             * between them are made by the services rather than by a shared status: a purchase
+             * request does not become a purchase order, it CAUSES one, and the request's own
+             * status records what happened to the request. Collapsing the five into one lifecycle
+             * would mean a rejected receipt somehow set the state of the order it arrived against.
+             *
+             * WHERE THE PERMISSION SITS IS THE DESIGN. `submit` is held by the person who wrote the
+             * thing; `approve` and `reject` are held by somebody else entirely. That separation is
+             * the whole of segregation of duties as far as the status graph is concerned — the
+             * services add the second half, which is that the two must not be the same person.
+             */
+
+            /*
+             * A REQUEST THAT NOBODY ACTED ON IS THE COMMONEST STATE IN ANY PROCUREMENT SYSTEM, so
+             * `submitted` is a resting place with a name rather than an instant between two others.
+             *
+             * `ordered` IS SET BY THE SERVICE, NOT BY A PERSON. It means "a purchase order now
+             * exists for this", which is a fact about another record and not a decision anybody
+             * takes — so it has no transition anybody can click, and PurchaseOrderService moves it
+             * when an order is raised from the request.
+             */
+            'purchase_request' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'submitted' => ['label' => 'Submitted', 'color' => 'brand'],
+                    'approved' => ['label' => 'Approved', 'color' => 'success'],
+                    'ordered' => ['label' => 'Ordered', 'color' => 'success'],
+                    'rejected' => ['label' => 'Rejected', 'color' => 'danger', 'terminal' => true],
+                    'cancelled' => ['label' => 'Cancelled', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['draft', 'submitted', 'Submit for approval', 'purchase_request.submit'],
+                    // Returning it is not rejecting it. "We will not buy this" ends the request;
+                    // "tell me the size of the flange" sends it back to somebody who can answer.
+                    ['submitted', 'draft', 'Return to the requester', 'purchase_request.review', true],
+                    ['submitted', 'approved', 'Approve', 'purchase_request.approve'],
+                    ['submitted', 'rejected', 'Reject', 'purchase_request.reject', true],
+                    // Approval is reversible while nothing has been ordered against it — after
+                    // that the order is the commitment and withdrawing the request changes nothing.
+                    ['approved', 'submitted', 'Withdraw the approval', 'purchase_request.approve', true],
+                    [null, 'cancelled', 'Cancel', 'purchase_request.manage', true],
+                ],
+            ],
+
+            /*
+             * `closed` AND `awarded` ARE NOT THE SAME EVENT. An enquiry closes when the deadline
+             * passes and quotations stop being accepted; it is awarded when somebody decides. Weeks
+             * separate the two, and the gap is where the evaluation lives.
+             *
+             * An enquiry that closes with nothing worth buying is `cancelled` WITH A REASON, not
+             * left open forever — the suppliers who quoted are entitled to know it ended.
+             */
+            'rfq' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'issued' => ['label' => 'Issued', 'color' => 'brand'],
+                    'closed' => ['label' => 'Closed', 'color' => 'warning'],
+                    'under_evaluation' => ['label' => 'Under evaluation', 'color' => 'brand'],
+                    'awarded' => ['label' => 'Awarded', 'color' => 'success', 'terminal' => true],
+                    'cancelled' => ['label' => 'Cancelled', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['draft', 'issued', 'Issue to the invited suppliers', 'rfq.issue'],
+                    ['issued', 'closed', 'Close for responses', 'rfq.manage'],
+                    // Reopening happens: a supplier asks for two more days and the buyer agrees.
+                    // It is recorded rather than hidden, because the other suppliers had a deadline.
+                    ['closed', 'issued', 'Reopen for responses', 'rfq.manage', true],
+                    ['closed', 'under_evaluation', 'Begin evaluation', 'quotation.compare'],
+                    ['issued', 'under_evaluation', 'Begin evaluation', 'quotation.compare'],
+                    [null, 'cancelled', 'Cancel the enquiry', 'rfq.manage', true],
+                ],
+            ],
+
+            /*
+             * A QUOTATION'S STATUS IS ABOUT OUR HANDLING OF IT, not the supplier's intent. It
+             * arrives, it is evaluated, and it either wins or does not. `withdrawn` is the one
+             * state the supplier controls, and it is theirs to declare rather than ours to infer.
+             *
+             * `expired` IS ABSENT DELIBERATELY, for the same reason the contract graph has no
+             * expiry: `valid_until` is a date, and a quotation is out of date whether or not
+             * anybody clicked anything. See Quotation::hasExpired().
+             */
+            'quotation' => [
+                'statuses' => [
+                    'received' => ['label' => 'Received', 'color' => 'neutral', 'initial' => true],
+                    'under_evaluation' => ['label' => 'Under evaluation', 'color' => 'brand'],
+                    'accepted' => ['label' => 'Accepted', 'color' => 'success', 'terminal' => true],
+                    'unsuccessful' => ['label' => 'Unsuccessful', 'color' => 'neutral', 'terminal' => true],
+                    'withdrawn' => ['label' => 'Withdrawn by the supplier', 'color' => 'warning', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['received', 'under_evaluation', 'Take into evaluation', 'quotation.compare'],
+                    // Accepting and marking unsuccessful are both done BY THE AWARD, through
+                    // RfqService::award(), which sets every quotation on the enquiry in one act so
+                    // the winner and the losers can never disagree. Listed here so the chips exist.
+                    ['received', 'withdrawn', 'Record as withdrawn', 'quotation.edit', true],
+                    ['under_evaluation', 'withdrawn', 'Record as withdrawn', 'quotation.edit', true],
+                ],
+            ],
+
+            /*
+             * THE LONGEST GRAPH IN THE PLATFORM, because a purchase order genuinely has that many
+             * distinct positions and each one is somebody's answer to "where is my order".
+             *
+             * `approved` AND `issued` ARE SEPARATE, as the migration says: approval is internal
+             * authority, issue is the moment the supplier has it. `part_received` and `received`
+             * are set by GoodsReceiptService from the arithmetic of the receipts, never clicked —
+             * a person deciding an order is fully received is a person overriding the count.
+             *
+             * `closed` IS NOT `received`. Orders close short: five of the six items arrived, the
+             * sixth was cancelled by agreement, and somebody has to say the order is finished with.
+             */
+            'purchase_order' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'submitted' => ['label' => 'Awaiting approval', 'color' => 'brand'],
+                    'approved' => ['label' => 'Approved', 'color' => 'success'],
+                    'issued' => ['label' => 'Issued to the supplier', 'color' => 'brand'],
+                    'part_received' => ['label' => 'Partly received', 'color' => 'warning'],
+                    'received' => ['label' => 'Received in full', 'color' => 'success'],
+                    'closed' => ['label' => 'Closed', 'color' => 'neutral', 'terminal' => true],
+                    'rejected' => ['label' => 'Rejected', 'color' => 'danger', 'terminal' => true],
+                    'cancelled' => ['label' => 'Cancelled', 'color' => 'danger', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['draft', 'submitted', 'Submit for approval', 'purchase_order.submit'],
+                    ['submitted', 'draft', 'Return for amendment', 'purchase_order.approve', true],
+                    ['submitted', 'approved', 'Approve', 'purchase_order.approve'],
+                    ['submitted', 'rejected', 'Reject', 'purchase_order.reject', true],
+                    ['approved', 'issued', 'Issue to the supplier', 'purchase_order.issue'],
+                    // An issued order is a commitment somebody else is acting on, so cancelling it
+                    // is a narrower permission than raising it and always carries a reason.
+                    ['issued', 'cancelled', 'Cancel the order', 'purchase_order.manage', true],
+                    ['approved', 'cancelled', 'Cancel the order', 'purchase_order.manage', true],
+                    ['part_received', 'closed', 'Close short', 'purchase_order.manage', true],
+                    ['received', 'closed', 'Close the order', 'purchase_order.manage'],
+                ],
+            ],
+
+            /*
+             * A RECEIPT IS AN OBSERVATION, so its graph is short and mostly about who has checked
+             * it. `disputed` is the state that earns its place: goods arrived, they are not what
+             * was ordered, and the order must not read as satisfied while that is unresolved.
+             */
+            'goods_receipt' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Being entered', 'color' => 'neutral', 'initial' => true],
+                    'received' => ['label' => 'Received', 'color' => 'brand'],
+                    'inspected' => ['label' => 'Inspected', 'color' => 'brand'],
+                    'accepted' => ['label' => 'Accepted', 'color' => 'success', 'terminal' => true],
+                    'disputed' => ['label' => 'Disputed with the supplier', 'color' => 'danger'],
+                ],
+                'transitions' => [
+                    ['draft', 'received', 'Confirm the delivery', 'goods_receipt.edit'],
+                    ['received', 'inspected', 'Record the inspection', 'goods_receipt.edit'],
+                    ['received', 'accepted', 'Accept', 'goods_receipt.approve'],
+                    ['inspected', 'accepted', 'Accept', 'goods_receipt.approve'],
+                    ['received', 'disputed', 'Raise a dispute', 'goods_receipt.edit', true],
+                    ['inspected', 'disputed', 'Raise a dispute', 'goods_receipt.edit', true],
+                    ['disputed', 'accepted', 'Resolve and accept', 'goods_receipt.approve', true],
+                ],
+            ],
         ];
     }
 

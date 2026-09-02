@@ -9,6 +9,7 @@ use App\Models\Contract;
 use App\Models\CorrectiveAction;
 use App\Models\Deliverable;
 use App\Models\Drawing;
+use App\Models\GoodsReceipt;
 use App\Models\HseInspection;
 use App\Models\HseInspectionItem;
 use App\Models\HseObservation;
@@ -16,8 +17,10 @@ use App\Models\Incident;
 use App\Models\IncidentPerson;
 use App\Models\Investigation;
 use App\Models\Ncr;
+use App\Models\PurchaseRequest;
 use App\Models\QualityInspection;
 use App\Models\QualityInspectionItem;
+use App\Models\Quotation;
 use App\Models\RiskAssessment;
 use App\Models\Submittal;
 use App\Models\TrainingCourse;
@@ -220,6 +223,40 @@ final class SettingsCatalogue
                     'contract.types' => ['label' => 'Contract types', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'How the money is measured, which is the only classification that matters commercially. Leave blank to use: '.implode(', ', Contract::DEFAULT_TYPES)],
                     'contract.default_retention_percent' => ['label' => 'Usual retention', 'type' => 'string', 'rules' => ['nullable', 'numeric', 'between:0,50'], 'help' => 'Percent, used only to suggest a figure on a new contract. The contract governs, not this setting.'],
                     'contract.expiry_warning_days' => ['label' => 'Warn about expiring contracts', 'type' => 'integer', 'rules' => ['required', 'integer', 'between:7,365'], 'help' => 'Days ahead. Renewal negotiations start long before the end date, so this is usually set wider than it feels.'],
+                ],
+            ],
+            /*
+             * Procurement.
+             *
+             * Three of these settings are POLICY, not vocabulary, which makes this group different
+             * in kind from the ones above it. `rfq_required_above` decides whether a purchase order
+             * may be raised without competition; the two `separate_*` flags decide whether one
+             * person may authorise their own request or sign for their own order. They are settings
+             * rather than hard rules because a four-person facilities company physically cannot
+             * separate the duties a hundred-person contractor must — and refusing to work for the
+             * small company is not an improvement in its controls.
+             *
+             * WHAT IS DELIBERATELY NOT HERE IS A WAY TO TURN THE SEPARATION OFF QUIETLY. Both flags
+             * default to on, the override is recorded in the activity trail wherever it is used,
+             * and only somebody with `setting.manage` can move them.
+             */
+            'procurement' => [
+                'label' => 'Procurement',
+                'description' => 'How buying works here: when competition is required, who may approve what, and the words your requests and receipts use. Separate each list entry with a comma.',
+                'settings' => [
+                    'procurement.rfq_required_above' => ['label' => 'Require competitive quotations above', 'type' => 'string', 'rules' => ['nullable', 'numeric', 'min:0'], 'help' => 'In your base currency. A purchase order above this figure warns unless it came from an awarded enquiry. Leave blank to never require competition.'],
+                    'procurement.minimum_quotations' => ['label' => 'Quotations expected on an enquiry', 'type' => 'integer', 'rules' => ['required', 'integer', 'between:1,10'], 'help' => 'How many responses an enquiry should have before it is awarded. Awarding with fewer is allowed and asks for a reason.'],
+                    'procurement.separate_requester_and_approver' => ['label' => 'A request may not be approved by the person who raised it', 'type' => 'boolean'],
+                    'procurement.separate_buyer_and_receiver' => ['label' => 'Goods may not be received by the person who raised the order', 'type' => 'boolean'],
+                    // The criteria are a LIST OF WORDS, not columns, so a company can score on three
+                    // things or seven without a migration. QuotationScore stores the label it was
+                    // shown alongside the key, so renaming one next year does not retitle a decision
+                    // taken this year.
+                    'procurement.evaluation_criteria' => ['label' => 'Quotations are scored on', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'One criterion per comma. Leave blank to use: '.implode(', ', Quotation::DEFAULT_CRITERIA)],
+                    'procurement.score_out_of' => ['label' => 'Each criterion is scored out of', 'type' => 'integer', 'rules' => ['required', 'integer', 'between:1,100'], 'help' => 'Ten is the usual scale. Marks already given keep the scale they were given on, so changing this does not restate a completed evaluation.'],
+                    'purchase_request.priorities' => ['label' => 'Purchase request priorities', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:400'], 'help' => 'Leave blank to use: '.implode(', ', PurchaseRequest::DEFAULT_PRIORITIES)],
+                    'purchase_order.payment_terms' => ['label' => 'Usual payment terms', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:255'], 'help' => 'Suggested on a new order. The order governs, not this setting.'],
+                    'goods_receipt.conditions' => ['label' => 'Condition on arrival', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:400'], 'help' => 'What a storekeeper records about how the goods looked. Leave blank to use: '.implode(', ', GoodsReceipt::DEFAULT_CONDITIONS)],
                 ],
             ],
             'notify' => [

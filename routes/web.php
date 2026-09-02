@@ -21,6 +21,7 @@ use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\DocumentVersionController;
 use App\Http\Controllers\DrawingController;
 use App\Http\Controllers\EmployeeController;
+use App\Http\Controllers\GoodsReceiptController;
 use App\Http\Controllers\HseInspectionController;
 use App\Http\Controllers\HseObservationController;
 use App\Http\Controllers\IncidentController;
@@ -39,8 +40,12 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\ProjectDepartmentController;
 use App\Http\Controllers\ProjectMemberController;
+use App\Http\Controllers\PurchaseOrderController;
+use App\Http\Controllers\PurchaseRequestController;
 use App\Http\Controllers\QualityInspectionController;
+use App\Http\Controllers\QuotationController;
 use App\Http\Controllers\RfiController;
+use App\Http\Controllers\RfqController;
 use App\Http\Controllers\RiskAssessmentController;
 use App\Http\Controllers\RoleController;
 use App\Http\Controllers\SettingController;
@@ -1511,6 +1516,220 @@ Route::middleware(['auth', 'password.current'])->group(function () {
         // eventually be paid — and the service refuses to release more than is held.
         Route::post('contracts/{contract}/retention', [ContractController::class, 'moveRetention'])
             ->middleware('permission:contract.manage')->name('contracts.retention.move');
+    });
+
+    // --- purchase requests ---------------------------------------------------------------------
+    //
+    // The first link in the chain, and the shape every register below repeats: `view` reaches the
+    // pages, `create` reaches the form, and the DECISIONS get routes and permissions of their own.
+    // Submit, approve and reject are separate endpoints rather than a generic status move because
+    // each does more than change a word — it stamps who and when, and those stamps are what the
+    // segregation rule is later measured against. A single `transition` route still exists for the
+    // moves that are only moves (§6, §84).
+
+    Route::middleware('permission:purchase_request.view')->group(function () {
+        Route::get('purchase-requests', [PurchaseRequestController::class, 'index'])
+            ->name('purchase-requests.index');
+        Route::get('purchase-requests/{purchase_request}', [PurchaseRequestController::class, 'show'])
+            ->whereNumber('purchase_request')->name('purchase-requests.show');
+    });
+
+    Route::get('purchase-requests/create', [PurchaseRequestController::class, 'create'])
+        ->middleware('permission:purchase_request.create')->name('purchase-requests.create');
+    Route::post('purchase-requests', [PurchaseRequestController::class, 'store'])
+        ->middleware('permission:purchase_request.create')->name('purchase-requests.store');
+
+    Route::whereNumber('purchase_request')->group(function () {
+        Route::get('purchase-requests/{purchase_request}/edit', [PurchaseRequestController::class, 'edit'])
+            ->middleware('permission:purchase_request.edit')->name('purchase-requests.edit');
+        Route::put('purchase-requests/{purchase_request}', [PurchaseRequestController::class, 'update'])
+            ->middleware('permission:purchase_request.edit')->name('purchase-requests.update');
+        Route::delete('purchase-requests/{purchase_request}', [PurchaseRequestController::class, 'destroy'])
+            ->middleware('permission:purchase_request.delete')->name('purchase-requests.destroy');
+
+        Route::post('purchase-requests/{purchase_request}/submit', [PurchaseRequestController::class, 'submit'])
+            ->middleware('permission:purchase_request.submit')->name('purchase-requests.submit');
+        // `approve` and `reject` are held by somebody other than the requester. That is the whole
+        // of segregation of duties as far as routing is concerned; the service adds the rest.
+        Route::post('purchase-requests/{purchase_request}/approve', [PurchaseRequestController::class, 'approve'])
+            ->middleware('permission:purchase_request.approve')->name('purchase-requests.approve');
+        Route::post('purchase-requests/{purchase_request}/reject', [PurchaseRequestController::class, 'reject'])
+            ->middleware('permission:purchase_request.reject')->name('purchase-requests.reject');
+        Route::post('purchase-requests/{purchase_request}/transition', [PurchaseRequestController::class, 'transition'])
+            ->middleware('permission:purchase_request.edit')->name('purchase-requests.transition');
+    });
+
+    // --- enquiries (RFQ) -----------------------------------------------------------------------
+    //
+    // The invitation list gets endpoints of its own rather than riding on the enquiry form, because
+    // each addition and removal is an event with a time on it and an unsuccessful bidder is
+    // entitled to ask when they were asked. The route only reaches the area; RfqPolicy::invite()
+    // makes the distinction that matters — editing the list before issue is ordinary editing, while
+    // adding a supplier AFTER issue gives them less time than everybody else and takes `manage`.
+
+    Route::middleware('permission:rfq.view')->group(function () {
+        Route::get('rfqs', [RfqController::class, 'index'])->name('rfqs.index');
+        Route::get('rfqs/{rfq}', [RfqController::class, 'show'])
+            ->whereNumber('rfq')->name('rfqs.show');
+    });
+
+    Route::get('rfqs/create', [RfqController::class, 'create'])
+        ->middleware('permission:rfq.create')->name('rfqs.create');
+    Route::post('rfqs', [RfqController::class, 'store'])
+        ->middleware('permission:rfq.create')->name('rfqs.store');
+
+    Route::whereNumber('rfq')->group(function () {
+        Route::get('rfqs/{rfq}/edit', [RfqController::class, 'edit'])
+            ->middleware('permission:rfq.edit')->name('rfqs.edit');
+        Route::put('rfqs/{rfq}', [RfqController::class, 'update'])
+            ->middleware('permission:rfq.edit')->name('rfqs.update');
+        Route::delete('rfqs/{rfq}', [RfqController::class, 'destroy'])
+            ->middleware('permission:rfq.delete')->name('rfqs.destroy');
+
+        Route::post('rfqs/{rfq}/issue', [RfqController::class, 'issue'])
+            ->middleware('permission:rfq.issue')->name('rfqs.issue');
+        Route::post('rfqs/{rfq}/award', [RfqController::class, 'award'])
+            ->middleware('permission:rfq.manage')->name('rfqs.award');
+
+        Route::middleware('permission:rfq.edit,rfq.manage')->group(function () {
+            Route::post('rfqs/{rfq}/invitations', [RfqController::class, 'invite'])
+                ->name('rfqs.invitations.store');
+            Route::delete('rfqs/{rfq}/invitations/{invitation}', [RfqController::class, 'uninvite'])
+                ->whereNumber('invitation')->name('rfqs.invitations.destroy');
+            Route::post('rfqs/{rfq}/invitations/{invitation}/decline', [RfqController::class, 'decline'])
+                ->whereNumber('invitation')->name('rfqs.invitations.decline');
+        });
+
+        Route::post('rfqs/{rfq}/transition', [RfqController::class, 'transition'])
+            ->middleware('permission:rfq.edit')->name('rfqs.transition');
+
+        // The comparison hangs off the enquiry but belongs to the quotation register: it is a
+        // reading of quotations, gated on `quotation.compare`, and the controller re-checks both
+        // that the reader may open THIS enquiry and that each quotation is one they may see (§61).
+        Route::get('rfqs/{rfq}/comparison', [QuotationController::class, 'compare'])
+            ->middleware('permission:quotation.compare')->name('rfqs.comparison');
+    });
+
+    // --- quotations ----------------------------------------------------------------------------
+    //
+    // A quotation defaults to CONFIDENTIAL, so `quotation.view` here is the outermost of three
+    // filters: the route, then the policy on each record, then Gate 5 on confidentiality.
+    //
+    // Scoring and comparing share `quotation.compare`, because they are one job: an evaluation
+    // panel reads the table and writes its marks in the same sitting, and a permission that let
+    // somebody mark a bid they could not see beside the others would be worse than useless.
+
+    Route::middleware('permission:quotation.view')->group(function () {
+        Route::get('quotations', [QuotationController::class, 'index'])->name('quotations.index');
+        Route::get('quotations/{quotation}', [QuotationController::class, 'show'])
+            ->whereNumber('quotation')->name('quotations.show');
+    });
+
+    Route::get('quotations/create', [QuotationController::class, 'create'])
+        ->middleware('permission:quotation.create')->name('quotations.create');
+    Route::post('quotations', [QuotationController::class, 'store'])
+        ->middleware('permission:quotation.create')->name('quotations.store');
+
+    Route::whereNumber('quotation')->group(function () {
+        Route::get('quotations/{quotation}/edit', [QuotationController::class, 'edit'])
+            ->middleware('permission:quotation.edit')->name('quotations.edit');
+        Route::put('quotations/{quotation}', [QuotationController::class, 'update'])
+            ->middleware('permission:quotation.edit')->name('quotations.update');
+        Route::delete('quotations/{quotation}', [QuotationController::class, 'destroy'])
+            ->middleware('permission:quotation.delete')->name('quotations.destroy');
+
+        // The evaluator is the signed-in user and nothing else. There is no field on this form that
+        // could name somebody, and the service writes only rows already belonging to them (§84).
+        Route::post('quotations/{quotation}/scores', [QuotationController::class, 'score'])
+            ->middleware('permission:quotation.compare')->name('quotations.scores.store');
+
+        Route::post('quotations/{quotation}/transition', [QuotationController::class, 'transition'])
+            ->middleware('permission:quotation.edit')->name('quotations.transition');
+    });
+
+    // --- purchase orders -----------------------------------------------------------------------
+    //
+    // `issue` is its own permission rather than something `approve` grants for free: approval is
+    // internal authority and issue is the moment the supplier has the document, and a company that
+    // wants one person to do both says so by granting both. Cancelling an issued order is
+    // `purchase_order.manage`, narrower than raising one, because somebody outside the company is
+    // already acting on it.
+
+    Route::middleware('permission:purchase_order.view')->group(function () {
+        Route::get('purchase-orders', [PurchaseOrderController::class, 'index'])
+            ->name('purchase-orders.index');
+        Route::get('purchase-orders/{purchase_order}', [PurchaseOrderController::class, 'show'])
+            ->whereNumber('purchase_order')->name('purchase-orders.show');
+    });
+
+    Route::get('purchase-orders/create', [PurchaseOrderController::class, 'create'])
+        ->middleware('permission:purchase_order.create')->name('purchase-orders.create');
+    Route::post('purchase-orders', [PurchaseOrderController::class, 'store'])
+        ->middleware('permission:purchase_order.create')->name('purchase-orders.store');
+
+    Route::whereNumber('purchase_order')->group(function () {
+        Route::get('purchase-orders/{purchase_order}/edit', [PurchaseOrderController::class, 'edit'])
+            ->middleware('permission:purchase_order.edit')->name('purchase-orders.edit');
+        Route::put('purchase-orders/{purchase_order}', [PurchaseOrderController::class, 'update'])
+            ->middleware('permission:purchase_order.edit')->name('purchase-orders.update');
+        Route::delete('purchase-orders/{purchase_order}', [PurchaseOrderController::class, 'destroy'])
+            ->middleware('permission:purchase_order.delete')->name('purchase-orders.destroy');
+
+        Route::post('purchase-orders/{purchase_order}/submit', [PurchaseOrderController::class, 'submit'])
+            ->middleware('permission:purchase_order.submit')->name('purchase-orders.submit');
+        Route::post('purchase-orders/{purchase_order}/approve', [PurchaseOrderController::class, 'approve'])
+            ->middleware('permission:purchase_order.approve')->name('purchase-orders.approve');
+        Route::post('purchase-orders/{purchase_order}/reject', [PurchaseOrderController::class, 'reject'])
+            ->middleware('permission:purchase_order.reject')->name('purchase-orders.reject');
+        Route::post('purchase-orders/{purchase_order}/issue', [PurchaseOrderController::class, 'issue'])
+            ->middleware('permission:purchase_order.issue')->name('purchase-orders.issue');
+        Route::post('purchase-orders/{purchase_order}/cancel', [PurchaseOrderController::class, 'cancel'])
+            ->middleware('permission:purchase_order.manage')->name('purchase-orders.cancel');
+
+        Route::post('purchase-orders/{purchase_order}/transition', [PurchaseOrderController::class, 'transition'])
+            ->middleware('permission:purchase_order.edit')->name('purchase-orders.transition');
+    });
+
+    // --- goods receipts ------------------------------------------------------------------------
+    //
+    // `goods_receipt.edit` covers entering, confirming, inspecting and disputing, because all four
+    // are the storekeeper's own account of what turned up. Accepting is `goods_receipt.approve`:
+    // it is the point at which the company says the supplier has performed, and it is the figure
+    // an invoice will later be matched against.
+
+    Route::middleware('permission:goods_receipt.view')->group(function () {
+        Route::get('goods-receipts', [GoodsReceiptController::class, 'index'])
+            ->name('goods-receipts.index');
+        Route::get('goods-receipts/{goods_receipt}', [GoodsReceiptController::class, 'show'])
+            ->whereNumber('goods_receipt')->name('goods-receipts.show');
+    });
+
+    Route::get('goods-receipts/create', [GoodsReceiptController::class, 'create'])
+        ->middleware('permission:goods_receipt.create')->name('goods-receipts.create');
+    Route::post('goods-receipts', [GoodsReceiptController::class, 'store'])
+        ->middleware('permission:goods_receipt.create')->name('goods-receipts.store');
+
+    Route::whereNumber('goods_receipt')->group(function () {
+        Route::get('goods-receipts/{goods_receipt}/edit', [GoodsReceiptController::class, 'edit'])
+            ->middleware('permission:goods_receipt.edit')->name('goods-receipts.edit');
+        Route::put('goods-receipts/{goods_receipt}', [GoodsReceiptController::class, 'update'])
+            ->middleware('permission:goods_receipt.edit')->name('goods-receipts.update');
+        Route::delete('goods-receipts/{goods_receipt}', [GoodsReceiptController::class, 'destroy'])
+            ->middleware('permission:goods_receipt.delete')->name('goods-receipts.destroy');
+
+        Route::middleware('permission:goods_receipt.edit')->group(function () {
+            Route::post('goods-receipts/{goods_receipt}/confirm', [GoodsReceiptController::class, 'confirm'])
+                ->name('goods-receipts.confirm');
+            Route::post('goods-receipts/{goods_receipt}/inspect', [GoodsReceiptController::class, 'inspect'])
+                ->name('goods-receipts.inspect');
+            Route::post('goods-receipts/{goods_receipt}/dispute', [GoodsReceiptController::class, 'dispute'])
+                ->name('goods-receipts.dispute');
+            Route::post('goods-receipts/{goods_receipt}/transition', [GoodsReceiptController::class, 'transition'])
+                ->name('goods-receipts.transition');
+        });
+
+        Route::post('goods-receipts/{goods_receipt}/accept', [GoodsReceiptController::class, 'accept'])
+            ->middleware('permission:goods_receipt.approve')->name('goods-receipts.accept');
     });
 
     // --- approvals -----------------------------------------------------------------------------

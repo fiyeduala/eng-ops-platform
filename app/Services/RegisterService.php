@@ -265,6 +265,12 @@ abstract class RegisterService
      * Silently does nothing when the tenant has deleted the status, because a company that removed
      * "answered" from its vocabulary has said it does not use it — and refusing to record the
      * answer would be a worse answer than leaving the status where it was.
+     *
+     * THE RELATION IS RESET ALONG WITH THE KEY. `statusKey()` reads `$this->status?->key`, so a
+     * record that has already loaded its status would keep answering with the old one for the rest
+     * of the request — and every guard written as "only a submitted request can be approved" would
+     * then be asking about a status the record left two lines ago. Setting the relation rather than
+     * unsetting it also keeps the record safe under preventLazyLoading().
      */
     protected function moveTo(Model $record, string $statusKey): void
     {
@@ -272,6 +278,7 @@ abstract class RegisterService
 
         if ($status !== null) {
             $record->setAttribute('status_id', $status->getKey());
+            $record->setRelation('status', $status);
         }
     }
 
@@ -298,15 +305,27 @@ abstract class RegisterService
      * acts, after the policy has authorized them, and a form that could set them directly would
      * skip the check entirely.
      *
+     * THE LINE ITEMS ARE STRIPPED TOO, and they are not a security matter — they are a relation.
+     * Every register in the procurement chain posts its rows under the relation's own name in the
+     * same array as the header's fields, and a relation name reaching a model constructor is a
+     * MassAssignmentException rather than a saved row. The lines are written by
+     * ManagesLineItems::syncItems() in `afterCreate`, because they need the header's id first.
+     *
      * @param  array<string,mixed>  $attributes
      * @return array<string,mixed>
      */
     protected function safeAttributes(array $attributes): array
     {
-        return array_diff_key($attributes, array_flip(array_merge([
+        $denied = array_merge([
             'id', 'organization_id', 'number', 'created_by',
             'created_at', 'updated_at', 'deleted_at',
-        ], $this->protectedAttributes())));
+        ], $this->protectedAttributes());
+
+        if (method_exists($this, 'itemRelation')) {
+            $denied[] = $this->itemRelation();
+        }
+
+        return array_diff_key($attributes, array_flip($denied));
     }
 
     /**

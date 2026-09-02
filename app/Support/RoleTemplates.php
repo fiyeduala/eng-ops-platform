@@ -753,6 +753,24 @@ final class RoleTemplates
                     'rfq.edit' => 'department',
                     'rfq.view' => 'department',
                     'rfq.issue' => 'department',
+                    // SPELLED OUT, BECAUSE `manage` IMPLIES NOTHING ELSE. ScopedPolicy matches the
+                    // exact ability or the '*' wildcard and nothing in between, so an officer
+                    // holding only `quotation.manage` could not open the register whose whole
+                    // description is that they collect it.
+                    //
+                    // `view_confidential` is the one that would go unnoticed: the quotations table
+                    // defaults to `confidential`, so Gate 5 closes every row to anybody without
+                    // this ability or an explicit ACL entry. The manager picks it up free through
+                    // `quotation.*`; the officer, who is the person actually typing the prices in,
+                    // has to be given it by name.
+                    //
+                    // `compare` is here because the officer prepares the comparison sheet. It is
+                    // the manager who awards on it — that is `rfq.manage`, and it stays above.
+                    'quotation.view' => 'department',
+                    'quotation.create' => 'department',
+                    'quotation.edit' => 'department',
+                    'quotation.compare' => 'department',
+                    'quotation.view_confidential' => 'department',
                     'quotation.manage' => 'department',
                     'purchase_order.create' => 'department',
                     'purchase_order.edit' => 'department',

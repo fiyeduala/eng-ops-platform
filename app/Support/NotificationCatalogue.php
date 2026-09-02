@@ -257,6 +257,60 @@ final class NotificationCatalogue
             'An engineering decision was recorded on an NCR you raised or responded to.',
             'high', true, [true, true, false],
         ],
+
+        // --- procurement --------------------------------------------------------------------
+        // WHAT IS WAITING ON SOMEBODY IS MANDATORY; what merely happened is not. An approver who
+        // muted "a requisition is waiting for you" and then held up a site for a fortnight would
+        // fairly say the system never told them. An enquiry going out to suppliers is news.
+        //
+        // NO PRICE IS EVER IN A BODY. A requisition's estimate, a quotation's total and an order's
+        // value are all on records with their own confidentiality, and the bell reaches people the
+        // subject line has to be safe for even though the dispatcher filters on `view` (§68).
+        'purchase_request.submitted' => [
+            'purchase_request', 'Procurement', 'A requisition is waiting for you',
+            'Somebody submitted a purchase requisition that needs a decision.',
+            'high', true, [true, true, false],
+        ],
+        'purchase_request.decided' => [
+            'purchase_request', 'Procurement', 'Your requisition was answered',
+            'A requisition you raised was approved, returned or rejected.',
+            'high', true, [true, true, false],
+        ],
+        'rfq.issued' => [
+            'rfq', 'Procurement', 'An enquiry went out',
+            'A request for quotation was issued to suppliers on work you follow.',
+            'normal', false, [true, false, false],
+        ],
+        'rfq.awarded' => [
+            'rfq', 'Procurement', 'An enquiry was awarded',
+            'A supplier was chosen on an enquiry you raised or are following.',
+            'high', true, [true, true, false],
+        ],
+        'purchase_order.submitted' => [
+            'purchase_order', 'Procurement', 'An order is waiting for your approval',
+            'A purchase order was submitted and needs to be approved before it can be issued.',
+            'high', true, [true, true, false],
+        ],
+        'purchase_order.decided' => [
+            'purchase_order', 'Procurement', 'An order you raised was answered',
+            'A purchase order you raised was approved, returned or rejected.',
+            'high', true, [true, true, false],
+        ],
+        'purchase_order.issued' => [
+            'purchase_order', 'Procurement', 'An order reached the supplier',
+            'A purchase order was issued. The commitment is now live.',
+            'normal', false, [true, false, false],
+        ],
+        'goods_receipt.received' => [
+            'goods_receipt', 'Procurement', 'Goods arrived against your order',
+            'A delivery was booked in against an order you raised or approved.',
+            'normal', false, [true, false, false],
+        ],
+        'goods_receipt.disputed' => [
+            'goods_receipt', 'Procurement', 'A delivery is disputed',
+            'Goods arrived wrong, short or damaged and the supplier has to be taken up on it.',
+            'high', true, [true, true, false],
+        ],
     ];
 
     /**

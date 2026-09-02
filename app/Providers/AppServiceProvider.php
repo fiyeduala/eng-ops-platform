@@ -20,6 +20,8 @@ use App\Events\ChangeRequestDecided;
 use App\Events\CorrectiveActionAssigned;
 use App\Events\DocumentApproved;
 use App\Events\DocumentRevisionRequested;
+use App\Events\GoodsReceiptConfirmed;
+use App\Events\GoodsReceiptDisputed;
 use App\Events\IncidentReported;
 use App\Events\InvestigationAssigned;
 use App\Events\MeetingCancelled;
@@ -31,9 +33,16 @@ use App\Events\NcrDispositioned;
 use App\Events\NcrIssued;
 use App\Events\PermitIssued;
 use App\Events\PermitSuspended;
+use App\Events\PurchaseOrderDecided;
+use App\Events\PurchaseOrderIssued;
+use App\Events\PurchaseOrderSubmitted;
+use App\Events\PurchaseRequestDecided;
+use App\Events\PurchaseRequestSubmitted;
 use App\Events\QualityInspectionCompleted;
 use App\Events\QualityInspectionRequested;
 use App\Events\RfiAnswered;
+use App\Events\RfqAwarded;
+use App\Events\RfqIssued;
 use App\Events\SubmittalReviewed;
 use App\Events\TaskAssigned;
 use App\Events\TransmittalIssued;
@@ -45,6 +54,8 @@ use App\Listeners\NotifyChangeRequestDecided;
 use App\Listeners\NotifyCorrectiveActionAssigned;
 use App\Listeners\NotifyDocumentApproved;
 use App\Listeners\NotifyDocumentRevisionRequested;
+use App\Listeners\NotifyGoodsReceiptConfirmed;
+use App\Listeners\NotifyGoodsReceiptDisputed;
 use App\Listeners\NotifyIncidentReported;
 use App\Listeners\NotifyInvestigationAssigned;
 use App\Listeners\NotifyMeetingCancelled;
@@ -56,9 +67,16 @@ use App\Listeners\NotifyNcrDispositioned;
 use App\Listeners\NotifyNcrIssued;
 use App\Listeners\NotifyPermitIssued;
 use App\Listeners\NotifyPermitSuspended;
+use App\Listeners\NotifyPurchaseOrderDecided;
+use App\Listeners\NotifyPurchaseOrderIssued;
+use App\Listeners\NotifyPurchaseOrderSubmitted;
+use App\Listeners\NotifyPurchaseRequestDecided;
+use App\Listeners\NotifyPurchaseRequestSubmitted;
 use App\Listeners\NotifyQualityInspectionCompleted;
 use App\Listeners\NotifyQualityInspectionRequested;
 use App\Listeners\NotifyRfiAnswered;
+use App\Listeners\NotifyRfqAwarded;
+use App\Listeners\NotifyRfqIssued;
 use App\Listeners\NotifySubmittalReviewed;
 use App\Listeners\NotifyTaskAssignee;
 use App\Listeners\NotifyTransmittalIssued;
@@ -80,6 +98,8 @@ use App\Models\DocumentVersion;
 use App\Models\Drawing;
 use App\Models\Employee;
 use App\Models\Follower;
+use App\Models\GoodsReceipt;
+use App\Models\GoodsReceiptItem;
 use App\Models\HseInspection;
 use App\Models\HseInspectionItem;
 use App\Models\HseObservation;
@@ -108,10 +128,20 @@ use App\Models\ProjectDepartment;
 use App\Models\ProjectMember;
 use App\Models\ProjectRole;
 use App\Models\ProjectType;
+use App\Models\PurchaseOrder;
+use App\Models\PurchaseOrderItem;
+use App\Models\PurchaseRequest;
+use App\Models\PurchaseRequestItem;
 use App\Models\QualityInspection;
 use App\Models\QualityInspectionItem;
+use App\Models\Quotation;
+use App\Models\QuotationItem;
+use App\Models\QuotationScore;
 use App\Models\RecordPermission;
 use App\Models\Rfi;
+use App\Models\Rfq;
+use App\Models\RfqItem;
+use App\Models\RfqVendor;
 use App\Models\RiskAssessment;
 use App\Models\RiskAssessmentHazard;
 use App\Models\Role;
@@ -154,6 +184,8 @@ use App\Policies\DocumentVersionPolicy;
 use App\Policies\DrawingPolicy;
 use App\Policies\EmployeePolicy;
 use App\Policies\FollowerPolicy;
+use App\Policies\GoodsReceiptItemPolicy;
+use App\Policies\GoodsReceiptPolicy;
 use App\Policies\HseInspectionItemPolicy;
 use App\Policies\HseInspectionPolicy;
 use App\Policies\HseObservationPolicy;
@@ -181,9 +213,19 @@ use App\Policies\ProjectMemberPolicy;
 use App\Policies\ProjectPolicy;
 use App\Policies\ProjectRolePolicy;
 use App\Policies\ProjectTypePolicy;
+use App\Policies\PurchaseOrderItemPolicy;
+use App\Policies\PurchaseOrderPolicy;
+use App\Policies\PurchaseRequestItemPolicy;
+use App\Policies\PurchaseRequestPolicy;
 use App\Policies\QualityInspectionItemPolicy;
 use App\Policies\QualityInspectionPolicy;
+use App\Policies\QuotationItemPolicy;
+use App\Policies\QuotationPolicy;
+use App\Policies\QuotationScorePolicy;
 use App\Policies\RfiPolicy;
+use App\Policies\RfqItemPolicy;
+use App\Policies\RfqPolicy;
+use App\Policies\RfqVendorPolicy;
 use App\Policies\RiskAssessmentHazardPolicy;
 use App\Policies\RiskAssessmentPolicy;
 use App\Policies\RolePolicy;
@@ -392,6 +434,25 @@ class AppServiceProvider extends ServiceProvider
             'client' => Client::class,
             'client_contact' => ClientContact::class,
             'contract' => Contract::class,
+
+            // --- Phase 5: the procurement chain ---------------------------------------
+            // The line-item models are here as well as the headers, and not for tidiness: the audit
+            // engine writes a morph row for every model it touches, so a quotation line edited
+            // during evaluation is as much a subject as the quotation is. A missing key here is not
+            // a cosmetic gap — it is an exception thrown on save, which is how this list was found
+            // to be short in the first place.
+            'purchase_request' => PurchaseRequest::class,
+            'purchase_request_item' => PurchaseRequestItem::class,
+            'rfq' => Rfq::class,
+            'rfq_item' => RfqItem::class,
+            'rfq_vendor' => RfqVendor::class,
+            'quotation' => Quotation::class,
+            'quotation_item' => QuotationItem::class,
+            'quotation_score' => QuotationScore::class,
+            'purchase_order' => PurchaseOrder::class,
+            'purchase_order_item' => PurchaseOrderItem::class,
+            'goods_receipt' => GoodsReceipt::class,
+            'goods_receipt_item' => GoodsReceiptItem::class,
         ]);
     }
 
@@ -543,6 +604,26 @@ class AppServiceProvider extends ServiceProvider
             Client::class => ClientPolicy::class,
             ClientContact::class => ClientContactPolicy::class,
             Contract::class => ContractPolicy::class,
+
+            // --- Phase 5: the procurement chain ---------------------------------------
+            // Seven of these extend LineItemPolicy, which delegates every ability to the parent
+            // record: a line has no reach of its own, and giving it one is how a form that posts
+            // somebody else's order line ends up authorised. QuotationScorePolicy is the
+            // exception worth reading — nobody may edit another person's mark, including the
+            // organization owner, because an evaluation a manager can adjust is a signature
+            // collection rather than an evaluation.
+            PurchaseRequest::class => PurchaseRequestPolicy::class,
+            PurchaseRequestItem::class => PurchaseRequestItemPolicy::class,
+            Rfq::class => RfqPolicy::class,
+            RfqItem::class => RfqItemPolicy::class,
+            RfqVendor::class => RfqVendorPolicy::class,
+            Quotation::class => QuotationPolicy::class,
+            QuotationItem::class => QuotationItemPolicy::class,
+            QuotationScore::class => QuotationScorePolicy::class,
+            PurchaseOrder::class => PurchaseOrderPolicy::class,
+            PurchaseOrderItem::class => PurchaseOrderItemPolicy::class,
+            GoodsReceipt::class => GoodsReceiptPolicy::class,
+            GoodsReceiptItem::class => GoodsReceiptItemPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {
@@ -706,6 +787,40 @@ class AppServiceProvider extends ServiceProvider
             ],
             NcrDispositioned::class => [
                 NotifyNcrDispositioned::class,
+            ],
+
+            // --- procurement ---------------------------------------------------------
+            // The chain announces itself at the four points where somebody downstream is left
+            // waiting: a requisition needing a decision, an order needing one, an order reaching
+            // the supplier, and goods turning up (or turning up wrong). The steps in between —
+            // an enquiry closing, a quotation being scored — are visible on the register and are
+            // nobody's interruption.
+            PurchaseRequestSubmitted::class => [
+                NotifyPurchaseRequestSubmitted::class,
+            ],
+            PurchaseRequestDecided::class => [
+                NotifyPurchaseRequestDecided::class,
+            ],
+            RfqIssued::class => [
+                NotifyRfqIssued::class,
+            ],
+            RfqAwarded::class => [
+                NotifyRfqAwarded::class,
+            ],
+            PurchaseOrderSubmitted::class => [
+                NotifyPurchaseOrderSubmitted::class,
+            ],
+            PurchaseOrderDecided::class => [
+                NotifyPurchaseOrderDecided::class,
+            ],
+            PurchaseOrderIssued::class => [
+                NotifyPurchaseOrderIssued::class,
+            ],
+            GoodsReceiptConfirmed::class => [
+                NotifyGoodsReceiptConfirmed::class,
+            ],
+            GoodsReceiptDisputed::class => [
+                NotifyGoodsReceiptDisputed::class,
             ],
         ];
 
