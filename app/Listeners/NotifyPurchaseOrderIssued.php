@@ -33,7 +33,7 @@ class NotifyPurchaseOrderIssued
     public function handle(PurchaseOrderIssued $event): void
     {
         $order = $event->purchaseOrder;
-        $order->loadMissing('vendor:id,name');
+        $order->loadMissing('vendor');
 
         $audience = Audience::followers($order);
 
@@ -42,7 +42,7 @@ class NotifyPurchaseOrderIssued
         }
 
         if ($order->purchase_request_id !== null) {
-            $order->loadMissing('purchaseRequest:id,created_by');
+            $order->loadMissing('purchaseRequest');
 
             if ($order->purchaseRequest?->created_by !== null) {
                 $audience = $audience->orUser((int) $order->purchaseRequest->created_by);

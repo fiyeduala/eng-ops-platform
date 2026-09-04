@@ -118,9 +118,25 @@ final class PermissionCatalogue
 
             // ------------------------------------------------------------- inventory
             'material_request' => ['Inventory', 'Material Requests', [...self::CRUD, 'manage', 'submit', 'approve', 'issue']],
-            'warehouse' => ['Inventory', 'Warehouses', [...self::CRUD, 'manage']],
-            'inventory_item' => ['Inventory', 'Inventory Items', [...self::CRUD, 'manage']],
-            'stock' => ['Inventory', 'Stock Movements', [...self::CRUD, 'manage', 'adjust', 'transfer']],
+            'warehouse' => ['Inventory', 'Warehouses', [...self::CRUD, 'manage', 'suspend']],
+            'stock_item' => ['Inventory', 'Stock Catalogue', [...self::CRUD, 'manage']],
+
+            /*
+             * NO `edit` AND NO `delete` ON `stock`, and their absence is the catalogue saying what
+             * the ledger is. A movement cannot be amended by anybody at any grant level (§59), so
+             * an ability to amend one would be a permission that grants nothing — and a permission
+             * that grants nothing is one an administrator ticks believing it does.
+             *
+             * `adjust` is the stocktake: changing the count without a movement having happened, and
+             * the one act in inventory that creates stock from nothing. It is separated from
+             * `create` because the person who receives deliveries all day should not also be able
+             * to write the shortfall off at the end of the month.
+             *
+             * `reverse` is separated from `adjust` for the same reason in the other direction: the
+             * correction of somebody else's mistake is a supervisor's act, and it is the one that
+             * leaves the clearest trail.
+             */
+            'stock' => ['Inventory', 'Stock Movements', ['view', 'create', 'manage', 'adjust', 'transfer', 'reverse', 'view_value']],
 
             // ------------------------------------------------------------- assets & fleet
             'asset' => ['Assets', 'Assets', [...self::CRUD, 'manage', 'assign', 'transfer', 'dispose']],

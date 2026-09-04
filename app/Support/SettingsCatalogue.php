@@ -16,16 +16,19 @@ use App\Models\HseObservation;
 use App\Models\Incident;
 use App\Models\IncidentPerson;
 use App\Models\Investigation;
+use App\Models\MaterialRequest;
 use App\Models\Ncr;
 use App\Models\PurchaseRequest;
 use App\Models\QualityInspection;
 use App\Models\QualityInspectionItem;
 use App\Models\Quotation;
 use App\Models\RiskAssessment;
+use App\Models\StockItem;
 use App\Models\Submittal;
 use App\Models\TrainingCourse;
 use App\Models\TrainingRecord;
 use App\Models\Vendor;
+use App\Models\Warehouse;
 
 /**
  * How each configurable setting is presented and validated (§72, §86).
@@ -257,6 +260,34 @@ final class SettingsCatalogue
                     'purchase_request.priorities' => ['label' => 'Purchase request priorities', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:400'], 'help' => 'Leave blank to use: '.implode(', ', PurchaseRequest::DEFAULT_PRIORITIES)],
                     'purchase_order.payment_terms' => ['label' => 'Usual payment terms', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:255'], 'help' => 'Suggested on a new order. The order governs, not this setting.'],
                     'goods_receipt.conditions' => ['label' => 'Condition on arrival', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:400'], 'help' => 'What a storekeeper records about how the goods looked. Leave blank to use: '.implode(', ', GoodsReceipt::DEFAULT_CONDITIONS)],
+                ],
+            ],
+
+            /*
+             * How the store works here.
+             *
+             * THE FIRST TWO SETTINGS ARE THE SAME ARGUMENT THE PROCUREMENT GROUP MAKES, applied to
+             * a different pair of hands. A storekeeper who can both approve a material request and
+             * issue against it is a storekeeper who can walk out with the stock and leave a tidy
+             * paper trail saying it was authorised. In a company of eight that is unavoidable and
+             * the switch goes off knowingly; in a company of eight hundred it is the control.
+             *
+             * `allow_negative_stock` IS PER WAREHOUSE, NOT HERE, and that is worth saying in the
+             * place an administrator will look for it. A transit store legitimately shows goods
+             * leaving before the paperwork that put them there has been entered; a main store never
+             * does. One switch for both would have to be set to the looser of the two.
+             */
+            'inventory' => [
+                'label' => 'Inventory',
+                'description' => 'How your stores work: who may approve and issue, what happens when a count runs low, and the words your catalogue uses. Separate each list entry with a comma.',
+                'settings' => [
+                    'inventory.separate_approver_and_issuer' => ['label' => 'Stock may not be issued by the person who approved the request', 'type' => 'boolean'],
+                    'inventory.separate_counter_and_adjuster' => ['label' => 'A stocktake variance may not be posted by the person who counted', 'type' => 'boolean'],
+                    'inventory.reserve_on_approval' => ['label' => 'Approving a material request reserves the stock', 'type' => 'boolean', 'help' => 'Reserved stock stays on the shelf but stops being offered to anybody else. Turn this off if your store approves far ahead of issuing and the reservations would never clear.'],
+                    'inventory.notify_below_reorder_level' => ['label' => 'Tell the storekeeper when an item falls to its reorder level', 'type' => 'boolean'],
+                    'stock_item.categories' => ['label' => 'Stock categories', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Leave blank to use: '.implode(', ', StockItem::DEFAULT_CATEGORIES)],
+                    'warehouse.types' => ['label' => 'Kinds of store', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:400'], 'help' => 'Leave blank to use: '.implode(', ', Warehouse::DEFAULT_TYPES)],
+                    'material_request.priorities' => ['label' => 'Material request priorities', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:400'], 'help' => 'Leave blank to use: '.implode(', ', MaterialRequest::DEFAULT_PRIORITIES)],
                 ],
             ],
             'notify' => [

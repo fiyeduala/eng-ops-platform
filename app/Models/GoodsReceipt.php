@@ -78,6 +78,19 @@ class GoodsReceipt extends Model
         return $this->belongsTo(Location::class);
     }
 
+    /**
+     * The store the delivery went into, when it went into one (Phase 5 part 3).
+     *
+     * NULLABLE, because a delivery to site that is consumed the same afternoon never enters a
+     * store, and inventing a warehouse to satisfy a NOT NULL would put stock in a place that does
+     * not exist. When it IS set, accepting this receipt posts the ledger rows — the middle link of
+     * the chain the phase exits on (§90).
+     */
+    public function warehouse(): BelongsTo
+    {
+        return $this->belongsTo(Warehouse::class);
+    }
+
     public function receiver(): BelongsTo
     {
         return $this->belongsTo(User::class, 'received_by');

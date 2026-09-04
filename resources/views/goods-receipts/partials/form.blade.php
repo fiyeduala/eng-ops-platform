@@ -116,6 +116,23 @@
                             <x-input name="vehicle_ref" :value="$goodsReceipt->vehicle_ref"/>
                         </x-field>
                     </div>
+
+                    {{--
+                        THE FIELD THAT PUTS THE GOODS ON A SHELF. Naming a store here is what makes
+                        acceptance post to the stock ledger; leaving it empty records the delivery
+                        without one, which is the right answer for anything going straight to site.
+                        Only stores that are open are offered — see the controller.
+                    --}}
+                    @if (! empty($warehouses))
+                        <x-field label="Into which store" name="warehouse_id"
+                                 help="Accepting this delivery will add the accepted quantities to
+                                       this store's stock. Leave it empty for goods going straight
+                                       to site.">
+                            <x-select name="warehouse_id" :options="$warehouses"
+                                      :selected="$goodsReceipt->warehouse_id"
+                                      placeholder="Not going into a store"/>
+                        </x-field>
+                    @endif
                 </div>
             </div>
 

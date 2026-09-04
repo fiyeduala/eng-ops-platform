@@ -311,6 +311,24 @@ final class NotificationCatalogue
             'Goods arrived wrong, short or damaged and the supplier has to be taken up on it.',
             'high', true, [true, true, false],
         ],
+        'material_request.submitted' => [
+            'material_request', 'Inventory', 'A store request needs your decision',
+            'Somebody asked the stores for material and it is waiting to be approved.',
+            'normal', false, [true, false, false],
+        ],
+        'material_request.decided' => [
+            'material_request', 'Inventory', 'Your store request was answered',
+            'A request you raised was approved, cut down or refused.',
+            'normal', false, [true, false, false],
+        ],
+        // NOT MANDATORY, and off by email by default. A company with two hundred catalogue items
+        // crossing their levels weekly would drown, and the ones that matter are watched by
+        // following them. The setting `inventory.notify_below_reorder_level` turns it off wholesale.
+        'stock.below_reorder_level' => [
+            'stock', 'Inventory', 'An item fell to its reorder level',
+            'A store\'s holding of an item dropped to or below the level it should be reordered at.',
+            'normal', false, [true, false, false],
+        ],
     ];
 
     /**

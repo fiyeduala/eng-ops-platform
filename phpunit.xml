@@ -18,6 +18,18 @@
         </include>
     </source>
     <php>
+        <!--
+            THE SUITE NEEDS MORE THAN PHP SHIPS WITH. It peaks around 150 MB and the default
+            memory_limit is 128 MB, so on a stock install the run dies partway through with a
+            fatal that names a compiled Blade file and explains nothing.
+
+            It is set HERE rather than in php.ini because it is a fact about this test suite,
+            not about the machine: a contributor who clones the repository gets it for free,
+            cPanel and CI get it for free, and nobody has to be told. `php -d memory_limit=...`
+            on the command line does NOT reach the child process `artisan test` spawns, which
+            is why raising it there looks like it works and does not.
+        -->
+        <ini name="memory_limit" value="1G"/>
         <env name="APP_ENV" value="testing"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>

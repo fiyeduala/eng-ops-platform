@@ -25,6 +25,10 @@ use Illuminate\Validation\Rule;
  * service — not here. Validation can say "that is not an integer"; only a scoped lookup through the
  * order can say "that line is not on this order" (§84, §94).
  *
+ * A STORE IS OPTIONAL AND IS ALSO THE WHOLE POINT. `warehouse_id` is what carries an accepted
+ * delivery into the stock ledger, and it is nullable because a great many deliveries never see a
+ * store at all. Both facts are true at once, which is why the field is offered rather than demanded.
+ *
  * NOT ACCEPTED: `number`, `status_id`, `received_by`, `received_at`, `inspected_by`,
  * `inspected_at`. Confirming a delivery and inspecting it are acts with permissions behind them.
  */
@@ -41,6 +45,21 @@ class GoodsReceiptRequest extends TenantRequest
             'purchase_order_id' => ['required', 'integer', $this->existsInTenant('purchase_orders')],
 
             'location_id' => ['nullable', 'integer', $this->existsInTenant('locations')],
+
+            /*
+             * THE FIELD THAT MAKES THE CHAIN ONE CHAIN (§90).
+             *
+             * Naming a store here is what turns an accepted delivery into stock: acceptance walks
+             * the lines, and every one that carries a catalogue item posts a receipt to the ledger
+             * against this warehouse. Leave it empty and the receipt is still a complete record of
+             * what arrived — plenty of deliveries go straight to a site and are consumed the same
+             * week — it simply never reaches a shelf. See GoodsReceiptService::postToStock().
+             *
+             * Scoped, because a posted id is a posted id: another company's store must not be
+             * findable from this form, and the service re-resolves it for the doors that are not
+             * this one (§84, §75).
+             */
+            'warehouse_id' => ['nullable', 'integer', $this->existsInTenant('warehouses')],
 
             'delivery_note_ref' => ['nullable', 'string', 'max:120'],
             'carrier' => ['nullable', 'string', 'max:200'],
@@ -90,7 +109,7 @@ class GoodsReceiptRequest extends TenantRequest
     protected function prepareForValidation(): void
     {
         $this->nullifyBlanks([
-            'location_id', 'delivery_note_ref', 'carrier', 'vehicle_ref',
+            'location_id', 'warehouse_id', 'delivery_note_ref', 'carrier', 'vehicle_ref',
             'inspection_notes', 'notes',
         ]);
     }

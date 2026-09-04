@@ -71,7 +71,15 @@ abstract class RegisterService
             // Set after filling, never from the payload. See the class docblock.
             $record->setAttribute('organization_id', $actor->organization_id);
             $record->setAttribute('created_by', $actor->getKey());
-            $record->setAttribute('number', $this->resolveNumber($attributes));
+
+            // NOT EVERY REGISTER HAS A GENERATED IDENTIFIER. A warehouse and a stock item are
+            // named by the storekeeper — "MAIN", "LAG-SITE", "CBL-4C-16" — and those codes are
+            // typed because they have to mean something to the person reading a shelf label.
+            // Registers like that return null from `numberColumn()` and have no `number` column at
+            // all, so stamping one here would be a write to a column that does not exist.
+            if (($numberColumn = $this->numberColumn()) !== null) {
+                $record->setAttribute($numberColumn, $this->resolveNumber($attributes));
+            }
             $record->setAttribute('status_id', $this->statuses->initialFor($this->entityType())?->id);
 
             // Classification is stamped here, never left to the column default. The database would
@@ -91,7 +99,14 @@ abstract class RegisterService
                 $record,
                 'created',
                 $this->creationNarrative($record, $actor),
-                ['number' => $record->getAttribute('number')],
+                // The identifier, where the register has one. `array_filter` rather than a literal
+                // because a null under a key named "number" reads, to whoever queries the activity
+                // log later, as a record whose numbering failed.
+                array_filter([
+                    'number' => ($column = $this->numberColumn()) === null
+                        ? null
+                        : $record->getAttribute($column),
+                ]),
                 $actor,
                 $this->projectIdOf($record),
             );
@@ -232,6 +247,25 @@ abstract class RegisterService
             $this->numberingEntityType($attributes),
             $this->numberTokens($attributes),
         );
+    }
+
+    /**
+     * Which column carries the generated identifier, or null where there is not one.
+     *
+     * Almost every register has `number`, and the answer is the same everywhere it does. The hook
+     * exists because two registers genuinely have no such thing: warehouses and stock items are
+     * identified by a `code` that a storekeeper types, and typing it is the point — "MAIN",
+     * "CBL-4C-16" and "PPE-GLV-L" are read off shelf labels and spoken down a radio, and a
+     * generated "WH-2026-0004" would be a second identifier nobody uses sitting beside the one
+     * everybody does. Returning null says so, rather than adding a column to hold a number the
+     * organization will never quote.
+     *
+     * It is NOT a way to opt a register out of numbering it should have. A register whose users
+     * merely dislike the pattern changes the pattern, in the numbering engine, per tenant.
+     */
+    protected function numberColumn(): ?string
+    {
+        return 'number';
     }
 
     /** Whether a user may name this record themselves. False everywhere but the drawing register. */

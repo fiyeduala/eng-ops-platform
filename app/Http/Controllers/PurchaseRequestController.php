@@ -13,6 +13,7 @@ use App\Http\Requests\PurchaseRequestRequest;
 use App\Models\Location;
 use App\Models\PurchaseRequest;
 use App\Models\Rfq;
+use App\Models\StockItem;
 use App\Services\PurchaseRequestService;
 use App\Support\Enums\Confidentiality;
 use App\Support\OptionList;
@@ -291,6 +292,24 @@ class PurchaseRequestController extends RegisterController
                 ->orderBy('name')->pluck('name', 'id')->all(),
             'priorities' => $this->lists->for('purchase_request.priorities', PurchaseRequest::DEFAULT_PRIORITIES),
             'nextNumber' => $this->numbers->preview('purchase_request'),
+            /*
+             * The catalogue, for the lines that name one.
+             *
+             * OFFERED ONLY TO PEOPLE WHO MAY READ IT (§61). Somebody with `purchase_request.create`
+             * and nothing else still gets the free-text line they have always had — the picker
+             * simply is not there, and the form works exactly as before.
+             *
+             * Stocked items in use only: a draft or discontinued item cannot be received into a
+             * store, so putting one on a requisition is asking for a delivery that will refuse to
+             * post two months later, at the gate, with a lorry waiting.
+             */
+            'stockItems' => $this->compiler->apply(StockItem::query(), $user, 'stock_item.view')
+                ->stocked()->statusKey('active')
+                ->orderBy('name')
+                ->limit(500)
+                ->get(['id', 'name', 'code', 'uom'])
+                ->mapWithKeys(fn (StockItem $i) => [$i->id => $i->code.' — '.$i->name.' ('.$i->uom.')'])
+                ->all(),
         ];
     }
 }

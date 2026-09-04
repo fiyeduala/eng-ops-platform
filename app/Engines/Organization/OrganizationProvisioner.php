@@ -234,6 +234,19 @@ class OrganizationProvisioner
             'purchase_order.payment_terms' => '30 days from invoice',
             'goods_receipt.conditions' => '',
 
+            // --- inventory ---------------------------------------------------------------
+            // The same posture as procurement above: both separations on, because the company that
+            // most needs them is the company that has never heard of them. `reserve_on_approval` is
+            // on for a different reason — a store that approves without reserving will promise the
+            // same forty metres of cable to three sites and be right every time it checks.
+            'inventory.separate_approver_and_issuer' => true,
+            'inventory.separate_counter_and_adjuster' => true,
+            'inventory.reserve_on_approval' => true,
+            'inventory.notify_below_reorder_level' => true,
+            'stock_item.categories' => '',
+            'warehouse.types' => '',
+            'material_request.priorities' => '',
+
             // --- notifications -----------------------------------------------------------
             'notify.channels' => ['database', 'mail'],
             'notify.digest_hour' => 7,

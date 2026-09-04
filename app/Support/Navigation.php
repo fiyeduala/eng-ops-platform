@@ -244,6 +244,24 @@ class Navigation
                 ],
             ],
             [
+                // Inventory reads in the order a storekeeper's day runs: what we hold, what is on
+                // the shelf, what somebody has asked for, and finally the ledger — which is put
+                // last on purpose, because it is the answer to "what happened" rather than a place
+                // anybody starts. It is also the only entry here gated on `stock.view` alone: the
+                // value columns inside it are gated separately on `stock.view_value` (§68).
+                'label' => 'Inventory',
+                'items' => [
+                    ['label' => 'Stock catalogue', 'route' => 'stock-items.index', 'icon' => 'archive',
+                        'permission' => 'stock_item.view', 'active' => 'stock-items.*'],
+                    ['label' => 'Stores', 'route' => 'warehouses.index', 'icon' => 'building',
+                        'permission' => 'warehouse.view', 'active' => 'warehouses.*'],
+                    ['label' => 'Material requests', 'route' => 'material-requests.index', 'icon' => 'clipboard',
+                        'permission' => 'material_request.view', 'active' => 'material-requests.*'],
+                    ['label' => 'Stock movements', 'route' => 'stock.index', 'icon' => 'truck',
+                        'permission' => 'stock.view', 'active' => 'stock.*'],
+                ],
+            ],
+            [
                 'label' => 'Administration',
                 'items' => [
                     ['label' => 'User accounts', 'route' => 'users.index', 'icon' => 'key',

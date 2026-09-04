@@ -42,7 +42,7 @@ class NotifyRfqIssued
         // The person whose requisition caused it. Resolved through the relation so the tenant scope
         // applies, and skipped silently when the enquiry was raised from nothing.
         if ($rfq->purchase_request_id !== null) {
-            $rfq->loadMissing('purchaseRequest:id,created_by');
+            $rfq->loadMissing('purchaseRequest');
 
             if ($rfq->purchaseRequest?->created_by !== null) {
                 $audience = $audience->orUser((int) $rfq->purchaseRequest->created_by);

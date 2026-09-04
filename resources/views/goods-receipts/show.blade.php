@@ -75,6 +75,11 @@
                     <x-register.fact label="Received at" :value="$goodsReceipt->location?->name"/>
                     <x-register.fact label="Carrier" :value="$goodsReceipt->carrier"/>
                     <x-register.fact label="Vehicle" :value="$goodsReceipt->vehicle_ref" mono/>
+                    {{-- Where the goods ended up, which is a different question from where the
+                         lorry stopped. Shown to everybody who can read the receipt: the store's
+                         NAME is not a value, and somebody chasing a delivery needs to know which
+                         shelf to look on. --}}
+                    <x-register.fact label="Into store" :value="$goodsReceipt->warehouse?->name"/>
                 </dl>
             </div>
 

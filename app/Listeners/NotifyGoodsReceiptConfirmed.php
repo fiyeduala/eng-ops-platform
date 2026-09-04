@@ -35,7 +35,7 @@ class NotifyGoodsReceiptConfirmed
     public function handle(GoodsReceiptConfirmed $event): void
     {
         $receipt = $event->goodsReceipt;
-        $receipt->loadMissing('purchaseOrder.vendor:id,name', 'purchaseOrder.status:id,key,label');
+        $receipt->loadMissing('purchaseOrder.vendor', 'purchaseOrder.status');
 
         $order = $receipt->purchaseOrder;
 

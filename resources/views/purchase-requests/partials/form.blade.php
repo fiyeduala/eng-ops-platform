@@ -74,13 +74,18 @@
                     budget against it.
                 </p>
 
-                <x-line-items
-                    :rows="$purchaseRequest->items ?? []"
-                    quantity-key="quantity"
-                    rate-key="estimated_unit_price"
-                    :currency="old('currency', $purchaseRequest->currency)"
-                    add-label="Add a line"
-                    :columns="[
+                @php
+                    /*
+                     * THE CATALOGUE COLUMN IS ADDED, NOT ALWAYS PRESENT. A person who cannot read
+                     * the stock catalogue gets the form exactly as it has always been — seven
+                     * free-text columns and no picker — because a column of empty selects would be
+                     * a worse form and a list they may not see would be a leak (§61).
+                     *
+                     * It goes FIRST because it is the shortcut: choose the item and the description
+                     * and unit follow from it; type past it and the line is free text, which is
+                     * what most lines are.
+                     */
+                    $lineColumns = [
                         ['key' => 'description', 'label' => 'Description', 'type' => 'text', 'width' => 'w-[26%]', 'placeholder' => 'Galvanised U-bolt, M16'],
                         ['key' => 'specification', 'label' => 'Specification', 'type' => 'textarea', 'width' => 'w-[20%]', 'placeholder' => 'Standard, grade, drawing ref'],
                         ['key' => 'quantity', 'label' => 'Qty', 'type' => 'number', 'step' => 'any', 'min' => '0', 'width' => 'w-24'],
@@ -88,7 +93,27 @@
                         ['key' => 'estimated_unit_price', 'label' => 'Est. rate', 'type' => 'number', 'step' => '0.01', 'min' => '0', 'width' => 'w-28'],
                         ['key' => 'required_by', 'label' => 'Needed by', 'type' => 'date', 'width' => 'w-36'],
                         ['key' => 'notes', 'label' => 'Note', 'type' => 'text', 'width' => 'w-[14%]'],
-                    ]"/>
+                    ];
+
+                    if (! empty($stockItems ?? [])) {
+                        array_unshift($lineColumns, [
+                            'key' => 'stock_item_id',
+                            'label' => 'Stock item',
+                            'type' => 'select',
+                            'options' => $stockItems,
+                            'width' => 'w-[18%]',
+                            'placeholder' => 'Not a stock item',
+                        ]);
+                    }
+                @endphp
+
+                <x-line-items
+                    :rows="$purchaseRequest->items ?? []"
+                    quantity-key="quantity"
+                    rate-key="estimated_unit_price"
+                    :currency="old('currency', $purchaseRequest->currency)"
+                    add-label="Add a line"
+                    :columns="$lineColumns"/>
             </div>
         </div>
 

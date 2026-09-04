@@ -24,6 +24,8 @@ use App\Events\GoodsReceiptConfirmed;
 use App\Events\GoodsReceiptDisputed;
 use App\Events\IncidentReported;
 use App\Events\InvestigationAssigned;
+use App\Events\MaterialRequestDecided;
+use App\Events\MaterialRequestSubmitted;
 use App\Events\MeetingCancelled;
 use App\Events\MeetingInvited;
 use App\Events\MeetingMinutesCirculated;
@@ -43,6 +45,7 @@ use App\Events\QualityInspectionRequested;
 use App\Events\RfiAnswered;
 use App\Events\RfqAwarded;
 use App\Events\RfqIssued;
+use App\Events\StockFellBelowReorderLevel;
 use App\Events\SubmittalReviewed;
 use App\Events\TaskAssigned;
 use App\Events\TransmittalIssued;
@@ -58,6 +61,8 @@ use App\Listeners\NotifyGoodsReceiptConfirmed;
 use App\Listeners\NotifyGoodsReceiptDisputed;
 use App\Listeners\NotifyIncidentReported;
 use App\Listeners\NotifyInvestigationAssigned;
+use App\Listeners\NotifyMaterialRequestDecided;
+use App\Listeners\NotifyMaterialRequestSubmitted;
 use App\Listeners\NotifyMeetingCancelled;
 use App\Listeners\NotifyMeetingMinutes;
 use App\Listeners\NotifyMeetingParticipants;
@@ -77,6 +82,7 @@ use App\Listeners\NotifyQualityInspectionRequested;
 use App\Listeners\NotifyRfiAnswered;
 use App\Listeners\NotifyRfqAwarded;
 use App\Listeners\NotifyRfqIssued;
+use App\Listeners\NotifyStockBelowReorderLevel;
 use App\Listeners\NotifySubmittalReviewed;
 use App\Listeners\NotifyTaskAssignee;
 use App\Listeners\NotifyTransmittalIssued;
@@ -107,6 +113,8 @@ use App\Models\Incident;
 use App\Models\IncidentPerson;
 use App\Models\Investigation;
 use App\Models\Location;
+use App\Models\MaterialRequest;
+use App\Models\MaterialRequestItem;
 use App\Models\Meeting;
 use App\Models\MeetingDecision;
 use App\Models\MeetingParticipant;
@@ -149,6 +157,9 @@ use App\Models\Setting;
 use App\Models\Signature;
 use App\Models\Status;
 use App\Models\StatusTransition;
+use App\Models\StockBalance;
+use App\Models\StockItem;
+use App\Models\StockTransaction;
 use App\Models\Submittal;
 use App\Models\SubmittalItem;
 use App\Models\Task;
@@ -164,6 +175,7 @@ use App\Models\TransmittalItem;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Models\VendorContact;
+use App\Models\Warehouse;
 use App\Models\Workflow;
 use App\Models\WorkflowInstance;
 use App\Models\WorkflowStage;
@@ -193,6 +205,8 @@ use App\Policies\IncidentPersonPolicy;
 use App\Policies\IncidentPolicy;
 use App\Policies\InvestigationPolicy;
 use App\Policies\LocationPolicy;
+use App\Policies\MaterialRequestItemPolicy;
+use App\Policies\MaterialRequestPolicy;
 use App\Policies\MeetingDecisionPolicy;
 use App\Policies\MeetingParticipantPolicy;
 use App\Policies\MeetingPolicy;
@@ -233,6 +247,9 @@ use App\Policies\SettingPolicy;
 use App\Policies\SignaturePolicy;
 use App\Policies\StatusPolicy;
 use App\Policies\StatusTransitionPolicy;
+use App\Policies\StockBalancePolicy;
+use App\Policies\StockItemPolicy;
+use App\Policies\StockTransactionPolicy;
 use App\Policies\SubmittalItemPolicy;
 use App\Policies\SubmittalPolicy;
 use App\Policies\TaskChecklistItemPolicy;
@@ -248,6 +265,7 @@ use App\Policies\TransmittalPolicy;
 use App\Policies\UserPolicy;
 use App\Policies\VendorContactPolicy;
 use App\Policies\VendorPolicy;
+use App\Policies\WarehousePolicy;
 use App\Policies\WorkflowInstancePolicy;
 use App\Policies\WorkflowPolicy;
 use App\Policies\WorkflowStageConditionPolicy;
@@ -453,6 +471,18 @@ class AppServiceProvider extends ServiceProvider
             'purchase_order_item' => PurchaseOrderItem::class,
             'goods_receipt' => GoodsReceipt::class,
             'goods_receipt_item' => GoodsReceiptItem::class,
+
+            // --- Phase 5: inventory ----------------------------------------------------
+            // `stock_transaction` is in this list even though nothing morphs TO it, because the
+            // audit engine morphs FROM everything it touches and a ledger row is the most
+            // audit-relevant object in the module. The balance is here for the same reason: a
+            // stocktake adjustment writes to it, and "who changed the count" must be answerable.
+            'warehouse' => Warehouse::class,
+            'stock_item' => StockItem::class,
+            'stock_balance' => StockBalance::class,
+            'stock_transaction' => StockTransaction::class,
+            'material_request' => MaterialRequest::class,
+            'material_request_item' => MaterialRequestItem::class,
         ]);
     }
 
@@ -624,6 +654,17 @@ class AppServiceProvider extends ServiceProvider
             PurchaseOrderItem::class => PurchaseOrderItemPolicy::class,
             GoodsReceipt::class => GoodsReceiptPolicy::class,
             GoodsReceiptItem::class => GoodsReceiptItemPolicy::class,
+
+            // Phase 5, part 3 — inventory. StockTransaction has a policy that permits no write of
+            // any kind: the model itself refuses edits, and the policy says the same thing at the
+            // HTTP door so a missing route is not the only thing standing between a curious user
+            // and a ledger row.
+            Warehouse::class => WarehousePolicy::class,
+            StockItem::class => StockItemPolicy::class,
+            StockBalance::class => StockBalancePolicy::class,
+            StockTransaction::class => StockTransactionPolicy::class,
+            MaterialRequest::class => MaterialRequestPolicy::class,
+            MaterialRequestItem::class => MaterialRequestItemPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {
@@ -821,6 +862,15 @@ class AppServiceProvider extends ServiceProvider
             ],
             GoodsReceiptDisputed::class => [
                 NotifyGoodsReceiptDisputed::class,
+            ],
+            MaterialRequestSubmitted::class => [
+                NotifyMaterialRequestSubmitted::class,
+            ],
+            MaterialRequestDecided::class => [
+                NotifyMaterialRequestDecided::class,
+            ],
+            StockFellBelowReorderLevel::class => [
+                NotifyStockBelowReorderLevel::class,
             ],
         ];
 

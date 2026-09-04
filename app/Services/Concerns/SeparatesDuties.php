@@ -44,10 +44,10 @@ trait SeparatesDuties
      * to a manager to issue.
      *
      * @param  int|array<int,int|null>|null  $originatorId  who raised the thing — null when nobody
-     *                                  is recorded, which is not a violation: a record with no
-     *                                  author cannot conflict with anybody, and treating it as one
-     *                                  would block the approval of everything imported before this
-     *                                  column existed
+     *                                                      is recorded, which is not a violation: a record with no
+     *                                                      author cannot conflict with anybody, and treating it as one
+     *                                                      would block the approval of everything imported before this
+     *                                                      column existed
      * @param  string  $message  what the person actually needs to be told, in a sentence
      * @return bool true when the rule WOULD have refused but the company has switched it off —
      *              the caller records that waiver on the activity entry

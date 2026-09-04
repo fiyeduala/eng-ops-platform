@@ -238,6 +238,14 @@ final class RoleTemplates
                     'contract.view_confidential' => 'organization',
                     'purchase_request.approve' => 'organization',
                     'material_request.approve' => 'organization',
+                    // Approving without reading is signing a blank sheet, so the approver gets the
+                    // register, the catalogue and the stores that the request is drawn against.
+                    'material_request.view' => 'organization',
+                    'stock_item.view' => 'organization',
+                    'warehouse.view' => 'organization',
+                    'stock.view' => 'organization',
+                    // Operations sees WHAT moved and not WHAT IT COST. Value is a finance question
+                    // and it is behind its own permission for that reason (§68).
                     'employee.view' => 'organization',
                     'dashboard.view' => 'organization',
                     'report.view' => 'organization',
@@ -329,6 +337,16 @@ final class RoleTemplates
                     'purchase_request.submit' => 'project',
                     'purchase_request.create' => 'project',
                     'material_request.create' => 'project',
+                    'material_request.view' => 'project',
+                    'material_request.edit' => 'project',
+                    'material_request.submit' => 'project',
+                    // The manager who owns the budget line decides what leaves the store for it.
+                    'material_request.approve' => 'project',
+                    'stock_item.view' => 'organization',
+                    // Reading the ledger, not writing to it: "has the cable arrived on site yet"
+                    // is a project question, and it is answered by the movements against the job.
+                    'stock.view' => 'project',
+                    'warehouse.view' => 'organization',
                     'hse_incident.view' => 'project',
                     'quality_inspection.view' => 'project',
                     'ncr.view' => 'project',
@@ -469,6 +487,15 @@ final class RoleTemplates
                     'timesheet.submit' => 'own',
                     'attendance.create' => 'own',
                     'material_request.create' => 'own',
+                    // A CREATE GRANT ON ITS OWN IS A TRAP. Without `view` the engineer writes a
+                    // request and cannot open it again; without `submit` it sits in draft forever
+                    // and the store never hears about it. The three travel together everywhere.
+                    'material_request.view' => 'own',
+                    'material_request.edit' => 'own',
+                    'material_request.submit' => 'own',
+                    // Every line on the form names a catalogue item, so the catalogue has to be
+                    // readable by the person filling it in.
+                    'stock_item.view' => 'organization',
                 ],
             ],
 
@@ -733,7 +760,7 @@ final class RoleTemplates
                     'contract.view_confidential' => 'organization',
                     'client.view' => 'organization',
                     'material_request.view' => 'organization',
-                    'inventory_item.view' => 'organization',
+                    'stock_item.view' => 'organization',
                     'budget.view' => 'organization',
                     'project.view' => 'organization',
                     'report.export' => 'organization',
@@ -786,7 +813,7 @@ final class RoleTemplates
                     // so the person who brings a supplier in is never the person who passes them.
                     'vendor.edit' => 'organization',
                     'goods_receipt.view' => 'department',
-                    'inventory_item.view' => 'organization',
+                    'stock_item.view' => 'organization',
                 ],
             ],
 
@@ -799,7 +826,7 @@ final class RoleTemplates
                 'grants' => [
                     'warehouse.*' => 'organization',
                     'stock.*' => 'organization',
-                    'inventory_item.*' => 'organization',
+                    'stock_item.*' => 'organization',
                     'goods_receipt.*' => 'organization',
                     'material_request.*' => 'organization',
                     'asset.view' => 'organization',
@@ -818,12 +845,21 @@ final class RoleTemplates
                 'grants' => [
                     'stock.create' => 'team',
                     'stock.view' => 'team',
-                    'stock.edit' => 'team',
+                    // A transfer is two postings the officer could already make one at a time; the
+                    // permission exists so the pair is made as one act and cannot half-happen.
+                    'stock.transfer' => 'team',
+                    // Entering a receipt means typing what was paid, so the value the officer
+                    // writes is a value the officer may read back.
+                    'stock.view_value' => 'team',
+                    // DELIBERATELY WITHOUT `stock.adjust` AND `stock.reverse`. Counting the shelf
+                    // against the book, and undoing a posting, are the two ways stock moves with no
+                    // document behind it. They belong to the person the officer answers to.
                     'goods_receipt.create' => 'team',
                     'goods_receipt.view' => 'team',
+                    'goods_receipt.edit' => 'team',
                     'material_request.view' => 'team',
                     'material_request.issue' => 'team',
-                    'inventory_item.view' => 'organization',
+                    'stock_item.view' => 'organization',
                     'warehouse.view' => 'organization',
                     'attendance.create' => 'own',
                 ],

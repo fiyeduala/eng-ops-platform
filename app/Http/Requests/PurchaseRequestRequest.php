@@ -54,6 +54,18 @@ class PurchaseRequestRequest extends TenantRequest
             // trait for why an unrecognised id becomes a new line instead of an error.
             'items' => ['nullable', 'array', 'max:200'],
             'items.*.id' => ['nullable', 'integer'],
+
+            /*
+             * THE OTHER HALF OF THE CHAIN (§90), and the reason a delivery can ever become stock.
+             *
+             * A requisition line is free text first and a catalogue reference second, in that
+             * order and never the other way round: "one off machined bush, drawing 4471-B" is a
+             * perfectly good thing to ask for and will never be in a catalogue. Where the line
+             * DOES name a catalogue item, that item travels through the enquiry, the order and the
+             * delivery, and acceptance knows which balance to move. See
+             * GoodsReceiptItem::stockItem() for the chain it makes.
+             */
+            'items.*.stock_item_id' => ['nullable', 'integer', $this->existsInTenant('stock_items')],
             'items.*.description' => ['nullable', 'string', 'max:500'],
             'items.*.specification' => ['nullable', 'string', 'max:5000'],
             'items.*.quantity' => ['nullable', 'numeric', 'gt:0', 'max:99999999999999'],

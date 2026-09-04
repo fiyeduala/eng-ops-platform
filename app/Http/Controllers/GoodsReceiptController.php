@@ -13,6 +13,7 @@ use App\Http\Requests\ProcurementDecisionRequest;
 use App\Models\GoodsReceipt;
 use App\Models\Location;
 use App\Models\PurchaseOrder;
+use App\Models\Warehouse;
 use App\Services\GoodsReceiptService;
 use App\Support\Enums\Confidentiality;
 use App\Support\OptionList;
@@ -142,7 +143,7 @@ class GoodsReceiptController extends RegisterController
         $user = $request->user();
 
         $goodsReceipt->loadMissing([
-            'status', 'location', 'receiver:id,name', 'inspector:id,name',
+            'status', 'location', 'warehouse:id,name', 'receiver:id,name', 'inspector:id,name',
             'creator:id,name',
             'purchaseOrder.vendor:id,name', 'purchaseOrder.status:id,label,color',
             'items.purchaseOrderItem',
@@ -360,6 +361,20 @@ class GoodsReceiptController extends RegisterController
                 ->mapWithKeys(fn (PurchaseOrder $o) => [$o->id => $o->number.' — '.($o->vendor?->name ?? 'Supplier')])
                 ->all(),
             'nextNumber' => $this->numbers->preview('goods_receipt'),
+            /*
+             * Only stores this person may see AND that will take goods. A suspended store in the
+             * picker is a delivery that will be refused at acceptance, three days after the
+             * storekeeper made the choice; a store belonging to somebody else's department that
+             * this reader cannot open has no business being read out to them (§61).
+             *
+             * An empty list is normal — a company that keeps no stores never sees the field.
+             */
+            'warehouses' => $this->compiler->apply(Warehouse::query(), $user, 'warehouse.view')
+                ->acceptingMovements()
+                ->orderBy('name')
+                ->get(['id', 'name', 'code'])
+                ->mapWithKeys(fn (Warehouse $w) => [$w->id => $w->name.' ('.$w->code.')'])
+                ->all(),
         ];
     }
 }

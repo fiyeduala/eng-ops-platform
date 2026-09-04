@@ -36,7 +36,7 @@ class NotifyRfqAwarded
         $rfq = $event->rfq;
         $quotation = $event->quotation;
 
-        $quotation->loadMissing('vendor:id,name');
+        $quotation->loadMissing('vendor');
 
         $audience = Audience::followers($rfq);
 
@@ -45,7 +45,7 @@ class NotifyRfqAwarded
         }
 
         if ($rfq->purchase_request_id !== null) {
-            $rfq->loadMissing('purchaseRequest:id,created_by');
+            $rfq->loadMissing('purchaseRequest');
 
             if ($rfq->purchaseRequest?->created_by !== null) {
                 $audience = $audience->orUser((int) $rfq->purchaseRequest->created_by);

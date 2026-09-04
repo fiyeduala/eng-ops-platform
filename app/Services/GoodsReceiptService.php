@@ -14,6 +14,7 @@ use App\Models\GoodsReceipt;
 use App\Models\GoodsReceiptItem;
 use App\Models\PurchaseOrder;
 use App\Models\User;
+use App\Models\Warehouse;
 use App\Services\Concerns\ManagesLineItems;
 use App\Services\Concerns\SeparatesDuties;
 use App\Support\OptionList;
@@ -38,10 +39,11 @@ use Illuminate\Support\Facades\DB;
  * PurchaseOrderService::refreshReceiptProgress(), which adds up the accepted quantities and decides
  * between issued, part_received and received. Nobody clicks either of the last two.
  *
- * WHAT IS DELIBERATELY ABSENT UNTIL PART C: the stock movement. An accepted receipt line is what
- * will post to the stock ledger, and the ledger does not exist yet. Writing half of it now — a
- * balance with no transactions behind it — would be worse than the honest gap, because the first
- * number it produced would look authoritative.
+ * AND THE GOODS BECOME STOCK HERE. `postToStock()` is the middle link of the §90 chain — purchase
+ * request, order, delivery, ledger, and eventually a project cost — and it fires on ACCEPTANCE
+ * rather than on confirmation, because stock the company has not agreed to keep is not stock. It
+ * runs inside the acceptance transaction and only for lines that can be traced back to a catalogue
+ * item, which is a smaller set than "every line" and is explained in full on the method.
  */
 class GoodsReceiptService extends RegisterService
 {
@@ -54,6 +56,8 @@ class GoodsReceiptService extends RegisterService
         private readonly SettingsRepository $settings,
         private readonly OptionList $options,
         private readonly PurchaseOrderService $orders,
+        private readonly StockService $stock,
+        private readonly StockItemService $catalogue,
     ) {
         parent::__construct($numbers, $statuses, $activity);
     }
@@ -117,6 +121,9 @@ class GoodsReceiptService extends RegisterService
             $record->location_id = $order->location_id;
         }
 
+        // Named here so a store that cannot take the goods is refused while the receipt is still
+        // being written, rather than three days later in the middle of accepting it.
+        $record->warehouse_id = $this->resolveWarehouse($attributes)?->getKey();
     }
 
     /** @param  array<string,mixed>  $attributes */
@@ -149,6 +156,13 @@ class GoodsReceiptService extends RegisterService
         // quiet edit of the figure the supplier was told (§84 — the policy says this too).
         if (! $record->isEditable()) {
             throw new \DomainException('A confirmed delivery record cannot be edited.');
+        }
+
+        // The same door on the way back in. `warehouse_id` is an ordinary attribute as far as the
+        // base class is concerned, so an edit could otherwise move the delivery into a store the
+        // create path would have refused (§84).
+        if (array_key_exists('warehouse_id', $attributes)) {
+            $attributes['warehouse_id'] = $this->resolveWarehouse($attributes)?->getKey();
         }
 
         $record = parent::update($record, $attributes, $actor);
@@ -302,7 +316,7 @@ class GoodsReceiptService extends RegisterService
     }
 
     /**
-     * Take it. This is the line the stock ledger will hang off in part C.
+     * Take it — and, where the receipt names a store, put it on the shelf. See postToStock().
      */
     public function accept(GoodsReceipt $receipt, User $actor, ?string $comment = null): GoodsReceipt
     {
@@ -328,6 +342,11 @@ class GoodsReceiptService extends RegisterService
             );
 
             $this->refreshOrder($receipt, $actor);
+
+            // AND HERE THE GOODS BECOME STOCK. Inside the same transaction as the acceptance, so
+            // there is no state in which the receipt reads accepted and the store has not been
+            // told — which was the whole risk of leaving this to an event listener.
+            $this->postToStock($receipt, $actor);
 
             return $receipt;
         });
@@ -370,6 +389,115 @@ class GoodsReceiptService extends RegisterService
         });
     }
 
+    /**
+     * Which job this delivery belongs to.
+     *
+     * A RECEIPT HAS NO PROJECT COLUMN, on purpose — see postToStock(). Without this override every
+     * activity entry a delivery makes would be recorded against no project, and a project timeline
+     * would show the order being raised and then nothing at all until the invoice. The order is
+     * where the commitment was made, so the order is what answers the question.
+     */
+    protected function projectIdOf(Model $record): ?int
+    {
+        /** @var GoodsReceipt $record */
+        $id = $record->purchaseOrder?->project_id;
+
+        return $id === null ? null : (int) $id;
+    }
+
+    // ================================================================== into the store
+
+    /**
+     * Put the accepted quantities onto the shelf.
+     *
+     * FOUR REASONS A LINE PRODUCES NO MOVEMENT, and all four are ordinary rather than exceptional:
+     *
+     *   1. The receipt names no store. Plenty of deliveries go straight to a site and are consumed
+     *      the same week; forcing every one of them through a warehouse would mean inventing
+     *      warehouses that do not exist so the software will let people work.
+     *   2. Nothing was accepted on the line — it all came off the lorry damaged.
+     *   3. Nobody catalogued what was bought. See GoodsReceiptItem::stockItem(): the chain back to
+     *      a catalogue item runs through the requisition, and a direct order for a one-off machined
+     *      part has no requisition and never will.
+     *   4. The line has already been posted. See the same model's `movements()`.
+     *
+     * None of the four is an error and none stops the acceptance. The receipt is a record of what
+     * arrived; the ledger is a record of what the store now holds; a delivery that never reached a
+     * store is a true statement about both.
+     *
+     * THE COST CARRIED IN IS THE ORDER PRICE, not the receipt's own idea of one, because the order
+     * is what will be paid. It is the number the weighted average is computed from — see
+     * StockService::post() — and taking it from anywhere else would let the value of stock on hand
+     * drift away from what the company was invoiced.
+     */
+    private function postToStock(GoodsReceipt $receipt, User $actor): void
+    {
+        $warehouse = $receipt->warehouse;
+
+        if ($warehouse === null) {
+            return;
+        }
+
+        $receipt->unsetRelation('items');
+
+        /*
+         * WHAT JOB IT WAS BOUGHT FOR COMES FROM THE ORDER, because a receipt has no project of its
+         * own and never should: goods are committed to a job when the order is placed, and a
+         * storekeeper counting a lorry is in no position to reassign them. Carrying it onto the
+         * movement is what lets the cost of a job be answered from the ledger rather than from the
+         * pile of orders somebody has to remember (§90).
+         */
+        $order = $receipt->purchaseOrder;
+        $projectId = $order?->project_id === null ? null : (int) $order->project_id;
+        $orgUnitId = $order?->org_unit_id === null ? null : (int) $order->org_unit_id;
+
+        $posted = 0;
+
+        foreach ($receipt->items()->with('purchaseOrderItem.requestItem.stockItem.status', 'movements')->get() as $line) {
+            /** @var GoodsReceiptItem $line */
+            $quantity = (float) $line->quantity_accepted;
+            $item = $line->stockItem();
+
+            if ($quantity <= 0 || $item === null || $line->movements->isNotEmpty()) {
+                continue;
+            }
+
+            $unitPrice = (float) ($line->purchaseOrderItem?->unit_price ?? 0);
+
+            $this->stock->receive($warehouse, $item, $quantity, $actor, [
+                'unit_cost' => $unitPrice,
+                'project_id' => $projectId,
+                'org_unit_id' => $orgUnitId,
+                'source_type' => 'goods_receipt_item',
+                'source_id' => $line->getKey(),
+                'batch_ref' => $line->batch_ref,
+                'expires_on' => $line->expires_on,
+                'reason' => 'Received on '.$receipt->number,
+                'occurred_at' => $receipt->received_at ?? now(),
+            ]);
+
+            // What the company last actually paid for this, kept on the catalogue entry so the next
+            // requisition can be estimated from evidence rather than from memory.
+            $this->catalogue->recordPurchasePrice($item, $unitPrice);
+
+            $posted++;
+        }
+
+        if ($posted === 0) {
+            return;
+        }
+
+        $this->activity->record(
+            $receipt,
+            'stocked',
+            $posted.' '.($posted === 1 ? 'line' : 'lines').' from '.$this->label($receipt)
+            .' went into the '.$warehouse->name.' store.',
+            ['lines' => $posted, 'warehouse' => $warehouse->code],
+            $actor,
+            $this->projectIdOf($receipt),
+        );
+    }
+
     // ================================================================== helpers
 
     /**
@@ -405,6 +533,48 @@ class GoodsReceiptService extends RegisterService
         }
 
         return $order;
+    }
+
+    /**
+     * Which store the goods are going into, if any.
+     *
+     * NULL IS AN ANSWER, NOT A FAILURE. A delivery that never sees a store is ordinary, and the
+     * receipt is complete without one; see postToStock() for the four ways a line produces no
+     * movement.
+     *
+     * BUT A NAMED STORE IS CHECKED TWICE. The form request already scoped the id to the tenant;
+     * this repeats the lookup because the form is one door and a seeder, an import or another
+     * service is another, and the rule belongs where the data is written (§84).
+     *
+     * A STORE THAT WILL NOT TAKE MOVEMENTS IS REFUSED HERE rather than at acceptance. Acceptance is
+     * one transaction — status, order recount, ledger — and a refusal from StockService in the
+     * middle of it rolls the whole acceptance back, so the storekeeper is told at the moment they
+     * are still able to do something about it.
+     *
+     * @param  array<string,mixed>  $attributes
+     */
+    private function resolveWarehouse(array $attributes): ?Warehouse
+    {
+        $id = (int) ($attributes['warehouse_id'] ?? 0);
+
+        if ($id <= 0) {
+            return null;
+        }
+
+        // Tenant-scoped, so another organization's store is simply not there (§75).
+        $warehouse = Warehouse::query()->with('status')->whereKey($id)->first();
+
+        if ($warehouse === null) {
+            throw new \DomainException('That store could not be found.');
+        }
+
+        if (! $warehouse->acceptsMovements()) {
+            throw new \DomainException(
+                $warehouse->name.': '.($warehouse->movementRefusalReason() ?? 'that store is not taking goods.')
+            );
+        }
+
+        return $warehouse;
     }
 
     /**

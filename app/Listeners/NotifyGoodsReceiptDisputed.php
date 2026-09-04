@@ -34,7 +34,7 @@ class NotifyGoodsReceiptDisputed
     public function handle(GoodsReceiptDisputed $event): void
     {
         $receipt = $event->goodsReceipt;
-        $receipt->loadMissing('purchaseOrder.vendor:id,name');
+        $receipt->loadMissing('purchaseOrder.vendor');
 
         $order = $receipt->purchaseOrder;
 

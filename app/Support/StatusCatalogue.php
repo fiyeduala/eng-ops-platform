@@ -822,6 +822,109 @@ final class StatusCatalogue
                     ['disputed', 'accepted', 'Resolve and accept', 'goods_receipt.approve', true],
                 ],
             ],
+
+            /*
+             * --- Phase 5, part 3: inventory ------------------------------------------
+             *
+             * TWO OF THESE THREE ARE CATALOGUE GRAPHS, which is unusual and deliberate. A warehouse
+             * and a stock item are reference data, and reference data normally gets a boolean. Both
+             * have a third state that a boolean cannot say, and in both cases it is the state the
+             * ledger has to be told about.
+             */
+
+            /*
+             * `suspended` IS WHY THIS IS NOT `is_active`. A store frozen for a stocktake is open,
+             * staffed, and refusing every movement until the count is signed off. That is not
+             * inactive and it is not closed, and a system that models it as either will either let
+             * movements through during a count — making the count worthless — or make people close
+             * the store, which loses the distinction between "counting" and "gone".
+             *
+             * `closed` IS NOT TERMINAL. Stores reopen: a site store shuts between phases and comes
+             * back when the next one mobilises, holding the same stock it held before.
+             */
+            'warehouse' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Being set up', 'color' => 'neutral', 'initial' => true],
+                    'active' => ['label' => 'Active', 'color' => 'success'],
+                    'suspended' => ['label' => 'Suspended for stocktake', 'color' => 'warning'],
+                    'closed' => ['label' => 'Closed', 'color' => 'neutral'],
+                ],
+                'transitions' => [
+                    ['draft', 'active', 'Open the store', 'warehouse.manage'],
+                    // Its own permission, not `manage`: freezing a store stops other people working
+                    // and is exactly the act a stock supervisor needs without also being able to
+                    // rename the warehouse or change its keeper.
+                    ['active', 'suspended', 'Suspend for stocktake', 'warehouse.suspend'],
+                    ['suspended', 'active', 'Reopen after the count', 'warehouse.suspend'],
+                    ['active', 'closed', 'Close the store', 'warehouse.manage', true],
+                    ['closed', 'active', 'Reopen the store', 'warehouse.manage', true],
+                ],
+            ],
+
+            /*
+             * `discontinued` IS NOT `deleted`, and that is the whole reason this graph exists. A
+             * line the company has stopped buying still has forty of itself on a shelf, appears on
+             * every historic movement, and must keep being issuable until it runs out. Deleting it
+             * would orphan four years of ledger; a boolean would have to mean both "cannot be
+             * ordered" and "cannot be issued", which are different facts.
+             */
+            'stock_item' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'active' => ['label' => 'Active', 'color' => 'success'],
+                    'discontinued' => ['label' => 'Discontinued', 'color' => 'warning'],
+                ],
+                'transitions' => [
+                    ['draft', 'active', 'Add to the catalogue', 'stock_item.manage'],
+                    ['active', 'discontinued', 'Discontinue', 'stock_item.manage', true],
+                    // Reinstated rather than re-created, so the movement history stays attached to
+                    // the same row and the code is not issued twice to two different things.
+                    ['discontinued', 'active', 'Reinstate', 'stock_item.manage', true],
+                ],
+            ],
+
+            /*
+             * THE STORE'S SIDE OF THE CHAIN, and the graph that says partial issue is normal rather
+             * than exceptional. `part_issued` is a resting place with a name: four of the eight
+             * approved went out this morning, the rest when the delivery lands, and in between the
+             * request is neither approved-and-untouched nor finished. Without it a storekeeper has
+             * to choose between two wrong answers, and will choose `issued`, and the register will
+             * then claim a request was satisfied that was not.
+             *
+             * `part_issued` AND `issued` ARE BOTH SET BY THE SERVICE from the arithmetic of the
+             * ledger, exactly as a purchase order's receipt states are. Neither is clickable: a
+             * person declaring a request fully issued is a person overriding the count.
+             *
+             * `closed` IS THE HUMAN ACT the other two are not. It means "the store is finished with
+             * this", and it exists because requests close short — three of eight issued, the rest
+             * cancelled because the job moved on, and somebody has to say so.
+             */
+            'material_request' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'submitted' => ['label' => 'Submitted', 'color' => 'brand'],
+                    'approved' => ['label' => 'Approved', 'color' => 'success'],
+                    'part_issued' => ['label' => 'Partly issued', 'color' => 'warning'],
+                    'issued' => ['label' => 'Issued in full', 'color' => 'success'],
+                    'closed' => ['label' => 'Closed', 'color' => 'neutral', 'terminal' => true],
+                    'rejected' => ['label' => 'Rejected', 'color' => 'danger', 'terminal' => true],
+                    'cancelled' => ['label' => 'Cancelled', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['draft', 'submitted', 'Submit to the store', 'material_request.submit'],
+                    // Sending it back is not refusing it: "which of the two sizes do you want" is a
+                    // question, and the requester is the only person who can answer it.
+                    ['submitted', 'draft', 'Return to the requester', 'material_request.approve', true],
+                    ['submitted', 'approved', 'Approve', 'material_request.approve'],
+                    ['submitted', 'rejected', 'Reject', 'material_request.approve', true],
+                    // Approval reserves stock, so withdrawing it releases the reservation — which
+                    // is why it stays available right up until something has physically gone out.
+                    ['approved', 'submitted', 'Withdraw the approval', 'material_request.approve', true],
+                    ['part_issued', 'closed', 'Close short', 'material_request.manage', true],
+                    ['issued', 'closed', 'Close', 'material_request.manage'],
+                    [null, 'cancelled', 'Cancel', 'material_request.manage', true],
+                ],
+            ],
         ];
     }
 

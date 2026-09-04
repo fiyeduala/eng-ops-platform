@@ -70,4 +70,16 @@ class PurchaseRequestItem extends Model
     {
         return trim(Quantity::withUnit($this->quantity, $this->uom).' — '.(string) $this->description);
     }
+
+    /**
+     * The catalogue entry this line is asking for, when the requester knew one.
+     *
+     * NULLABLE ON PURPOSE (Phase 5 part 3). A site engineer types what they need; insisting on a
+     * catalogue code before anybody may raise a requisition is how requisition systems get filled
+     * in wrongly. When it IS set, the buyer can see the yard already holds forty of it.
+     */
+    public function stockItem(): BelongsTo
+    {
+        return $this->belongsTo(StockItem::class);
+    }
 }

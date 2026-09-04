@@ -35,12 +35,14 @@ use App\Models\Rfi;
 use App\Models\Rfq;
 use App\Models\Role;
 use App\Models\Status;
+use App\Models\StockItem;
 use App\Models\Submittal;
 use App\Models\Task;
 use App\Models\TrainingCourse;
 use App\Models\Transmittal;
 use App\Models\User;
 use App\Models\Vendor;
+use App\Models\Warehouse;
 use App\Models\Workflow;
 use App\Models\WorkflowStage;
 use App\Models\WorkflowStageInstance;
@@ -58,6 +60,7 @@ use App\Services\HseInspectionService;
 use App\Services\HseObservationService;
 use App\Services\IncidentService;
 use App\Services\InvestigationService;
+use App\Services\MaterialRequestService;
 use App\Services\MeetingService;
 use App\Services\MemoService;
 use App\Services\NcrService;
@@ -71,6 +74,8 @@ use App\Services\QuotationService;
 use App\Services\RfiService;
 use App\Services\RfqService;
 use App\Services\RiskAssessmentService;
+use App\Services\StockItemService;
+use App\Services\StockService;
 use App\Services\SubmittalService;
 use App\Services\TaskChecklistService;
 use App\Services\TaskDependencyService;
@@ -80,6 +85,7 @@ use App\Services\ToolboxTalkService;
 use App\Services\TrainingRecordService;
 use App\Services\TransmittalService;
 use App\Services\VendorService;
+use App\Services\WarehouseService;
 use App\Services\WorkflowDefinitionService;
 use App\Support\Enums\ChangeDisposition;
 use App\Support\Enums\Decision;
@@ -209,6 +215,16 @@ class DemoSeeder extends Seeder
         // projects and the correspondence at them. Running it earlier would leave nothing to link.
         $this->seedMeridianCommercial($meridian);
         $this->seedKestrelCommercial($kestrel);
+
+        // Stores before procurement, and the order is forced by the code rather than chosen. A
+        // delivery reaches a shelf only if the shelf already exists and the requisition line named
+        // a catalogue item: GoodsReceiptService refuses a store that is not open at the moment the
+        // receipt is written, and GoodsReceiptItem::stockItem() reads the catalogue reference back
+        // through the order to the requisition. Seed the stores afterwards and the procurement
+        // chapter below still runs — and quietly puts nothing on any shelf, which is precisely the
+        // half-connected system §90 exists to forbid.
+        $this->seedMeridianInventory($meridian);
+        $this->seedKestrelInventory($kestrel);
 
         // Procurement after commercial, and it has to be: an enquiry goes to vendors that must
         // already exist, and an order is placed against a contract that must already have been
@@ -361,6 +377,7 @@ class DemoSeeder extends Seeder
                 ['Finance Manager', 'FINM', $finance, 3, true],
                 ['Procurement Manager', 'PRCM', $procurement, 3, true],
                 ['Procurement Officer', 'PRCO', $procurement, 5, false],
+                ['Stores Manager', 'STRM', $stores, 3, true],
                 ['Store Officer', 'STRO', $stores, 5, false],
                 ['Fleet Manager', 'FLTM', $fleet, 4, true],
                 ['Driver', 'DRV', $fleet, 7, false],
@@ -427,8 +444,20 @@ class DemoSeeder extends Seeder
             $this->person($organization, 'MEI-0020', 'Uche', 'Nnamdi', $procurement, $positions['PRCO'],
                 $prcManager, $locations['HQ'], $roles['procurement-officer'], 'u.nnamdi');
 
+            // THE TWO HALVES OF A STORE, and the reason there are two people here rather than one.
+            // `store-manager` holds `warehouse.*`, `stock.adjust` and `stock.reverse`; `store-officer`
+            // deliberately holds none of the three. Opening a store, correcting a count against the
+            // shelf and undoing a posting are the three ways stock moves with no document behind
+            // them, and the person who moves the goods is not the person who may do them (§9).
+            //
+            // Her employee number is higher than his because she was hired after him. Employee
+            // numbers are issue order and nothing else — the hierarchy is `supervisor_id`, which is
+            // why a later hire supervising an earlier one costs nothing to represent (§86).
+            $storesManager = $this->person($organization, 'MEI-0026', 'Halima', 'Yakubu', $stores,
+                $positions['STRM'], $opsDirector, $locations['WH-01'], $roles['store-manager'], 'h.yakubu');
+
             $this->person($organization, 'MEI-0021', 'Sadiq', 'Bello', $stores, $positions['STRO'],
-                $prcManager, $locations['WH-01'], $roles['store-officer'], 's.bello');
+                $storesManager, $locations['WH-01'], $roles['store-officer'], 's.bello');
 
             $fleetManager = $this->person($organization, 'MEI-0022', 'Tunde', 'Ogunleye', $fleet, $positions['FLTM'],
                 $opsDirector, $locations['YARD-IK'], $roles['fleet-manager'], 't.ogunleye');
@@ -453,6 +482,7 @@ class DemoSeeder extends Seeder
                 $hse->id => $hseManager->id,
                 $quality->id => $qaManager->id,
                 $procurement->id => $prcManager->id,
+                $stores->id => $storesManager->id,
                 $fleet->id => $fleetManager->id,
                 $civil->id => $leadEngineer->id,
                 $structural->id => $leadEngineer->id,
@@ -526,6 +556,15 @@ class DemoSeeder extends Seeder
 
             $maintManager = $this->person($organization, 'KFM-003', 'Duncan', 'Reilly', $maintenance, $positions['MM'],
                 $md, $locations['LDS'], $roles['department-head'], 'd.reilly');
+
+            // The spares cage at Leeds is his, because in a company of eight there is nobody else
+            // for it to belong to. Meridian split the store across two people precisely so neither
+            // could both move the goods and correct the count; Kestrel cannot, and the platform's
+            // answer is to let them say so out loud rather than to pretend. The waiver is recorded
+            // on every movement it touches — see `inventory.separate_approver_and_issuer` in the
+            // stores chapter — which is the difference between a control relaxed and a control
+            // absent (§73).
+            $maintManager->user?->assignRole($roles['store-manager']);
 
             $complianceManager = $this->person($organization, 'KFM-004', 'Nadia', 'Osei', $compliance, $positions['CM'],
                 $md, $locations['MCR'], $roles['hse-manager'], 'n.osei');
@@ -4806,6 +4845,647 @@ class DemoSeeder extends Seeder
     }
 
     /*
+     * Meridian's stores: four of them, ten catalogue lines, and a ledger that agrees with itself.
+     *
+     * THE CHAPTER EXISTS SO THE NEXT ONE CAN JOIN UP. Procurement runs immediately after this and
+     * puts pipe on a shelf; it can only do that because the shelf is opened here, the catalogue
+     * line is created here, and the requisition below names it. Everything else in this chapter is
+     * the store's own life — an opening balance, a transfer between two of the stores, a count
+     * that disagreed with the book, and a site asking for consumables — which is what makes the
+     * stock a delivery lands in look like stock rather than a single row from a demo.
+     *
+     * THREE THINGS ARE HERE TO BE DEMONSTRATED rather than merely populated:
+     *
+     *   - A SUSPENDED STORE WITH GOODS IN IT. The Ikeja yard is mid-stocktake: fully stocked,
+     *     staffed, and refusing every receipt and issue until the count is signed off. That is the
+     *     state an `is_active` boolean cannot express, and the reason warehouses carry a status.
+     *   - A DISCONTINUED ITEM WITH SIX OF ITSELF ON THE SHELF. The CAF gaskets are superseded and
+     *     nobody may order more; the six that exist stay issuable until they are gone. Deleting the
+     *     row would orphan the ledger and a boolean would have to mean both things at once.
+     *   - A REQUEST THAT CLOSES SHORT. Two lines went out, the third was never in the store, and
+     *     the job moved on. `part_issued` then `closed` is the honest record; `issued` would be a
+     *     lie the arithmetic would have to be overridden to tell.
+     *
+     * WHO DOES WHAT IS THE POINT, as everywhere else. Sadiq moves goods and may not correct a
+     * count; Halima corrects counts, opens stores and suspends them, and does not stand at the
+     * goods-out counter. Neither arrangement is in the code — it is two role templates, and a
+     * company that wants one person doing both says so in its own roles (§9, §73).
+     */
+    private function seedMeridianInventory(Organization $organization): void
+    {
+        $this->context->within($organization, function () {
+            $this->bootDelivery();
+
+            $warehouses = app(WarehouseService::class);
+            $catalogue = app(StockItemService::class);
+            $stock = app(StockService::class);
+            $requests = app(MaterialRequestService::class);
+
+            $staff = $this->staff();
+            $unit = $this->unitsByCode();
+            $place = $this->locationsByCode();
+            $job = Project::query()->get()->keyBy('code');
+
+            $storesManager = $this->accountOf($staff, 'MEI-0026');  // Halima Yakubu
+            $storeOfficer = $this->accountOf($staff, 'MEI-0021');   // Sadiq Bello
+            $siteManager = $this->accountOf($staff, 'MEI-0012');    // Kelechi Nwosu
+            $projectManager = $this->accountOf($staff, 'MEI-0011'); // Daniel Mbeki
+
+            // ==================================================================== the stores
+            // Opened by the manager, kept by the officer. `warehouse.manage` is hers and the
+            // create call below would throw for him, which is the separation working rather than
+            // an accident of who was to hand.
+            $central = $warehouses->create([
+                'code' => 'WH-CENTRAL',
+                'name' => 'Central Warehouse, Lagos',
+                'type' => 'Store',
+                'location_id' => $place['WH-01']->id,
+                'org_unit_id' => $unit['STR']->id,
+                'keeper_id' => $storeOfficer->getKey(),
+                'notes' => 'Main holding store. Everything that is not consumed straight off a '
+                    .'lorry comes through here first.',
+            ], $storesManager);
+
+            $siteStore = $warehouses->create([
+                'code' => 'WH-DT',
+                'name' => 'Delta Terminal Site Store',
+                'type' => 'Site store',
+                'location_id' => $place['SITE-DT']->id,
+                'org_unit_id' => $unit['CON-DT']->id,
+                'project_id' => $job['DTE']?->id,
+                'keeper_id' => $siteManager->getKey(),
+                'notes' => 'Container store in the laydown area. Issues to the tank erection and '
+                    .'piping fronts.',
+            ], $storesManager);
+
+            $yard = $warehouses->create([
+                'code' => 'WH-IK',
+                'name' => 'Ikeja Yard Store',
+                'type' => 'Store',
+                'location_id' => $place['YARD-IK']->id,
+                'org_unit_id' => $unit['STR']->id,
+                'keeper_id' => $storeOfficer->getKey(),
+                'notes' => 'Fabrication yard consumables and the harness stock.',
+            ], $storesManager);
+
+            // A QUARANTINE CAGE IS A STORE, not a flag on a movement. Goods that failed inspection
+            // are physically somewhere, they are somebody's until they are collected, and a system
+            // that models them as an attribute of a receipt loses them the moment the receipt is
+            // filed. The eighteen wrong-rating gaskets in the procurement chapter are the kind of
+            // thing that ends up in here — although those never came out of `disputed`, so nothing
+            // was ever posted for them, which is itself the correct answer.
+            $quarantine = $warehouses->create([
+                'code' => 'WH-QUAR',
+                'name' => 'Quarantine Cage — Central',
+                'type' => 'Quarantine',
+                'location_id' => $place['WH-01']->id,
+                'org_unit_id' => $unit['STR']->id,
+                'keeper_id' => $storeOfficer->getKey(),
+                'notes' => 'Rejected and held material awaiting supplier collection or a '
+                    .'concession. Nothing leaves here on an ordinary issue.',
+            ], $storesManager);
+
+            foreach ([$central, $siteStore, $yard, $quarantine] as $store) {
+                $warehouses->activate($store, $storesManager);
+            }
+
+            // ================================================================= the catalogue
+            // TEN LINES, WHICH IS THE POINT. A catalogue is not a copy of everything the company
+            // buys — procurement runs on free text precisely so it does not have to be — it is the
+            // list of things worth counting. Scaffold hire and third-party radiography appear in
+            // the procurement chapter and will never appear here, except for the one below that is
+            // catalogued deliberately WITHOUT being stocked.
+            $item = [];
+
+            $item['PIPE'] = $catalogue->create([
+                'code' => 'MAT-PIPE-12-S40',
+                'name' => '12" carbon steel pipe, API 5L Gr.B, schedule 40',
+                'category' => 'Raw material',
+                'uom' => 'm',
+                'specification' => 'Seamless. Mill certificates to EN 10204 3.1 held with the '
+                    .'heat number against every length.',
+                'reorder_level' => 60,
+                'reorder_quantity' => 120,
+                'storage_conditions' => 'Racked off the ground, ends capped.',
+            ], $storesManager);
+
+            $item['FLANGE'] = $catalogue->create([
+                'code' => 'MAT-FLG-12-150',
+                'name' => '12" weld-neck flange, ANSI 150, raised face',
+                'category' => 'Raw material',
+                'uom' => 'ea',
+                'specification' => 'Forged ASTM A105, bore to schedule 40.',
+                'reorder_level' => 8,
+                'reorder_quantity' => 24,
+            ], $storesManager);
+
+            $item['ELBOW'] = $catalogue->create([
+                'code' => 'MAT-ELB-12-LR',
+                'name' => '12" long-radius elbow, 90°, butt weld',
+                'category' => 'Raw material',
+                'uom' => 'ea',
+                'reorder_level' => 4,
+                'reorder_quantity' => 16,
+            ], $storesManager);
+
+            $item['GASKET'] = $catalogue->create([
+                'code' => 'MAT-GSK-12-SW',
+                'name' => '12" spiral wound gasket, ANSI 150, 316L/graphite',
+                'category' => 'Spare part',
+                'uom' => 'ea',
+                'reorder_level' => 20,
+                'reorder_quantity' => 40,
+            ], $storesManager);
+
+            $item['CAF'] = $catalogue->create([
+                'code' => 'MAT-GSK-12-CAF',
+                'name' => '12" CAF gasket, ANSI 150',
+                'category' => 'Spare part',
+                'uom' => 'ea',
+                'notes' => 'Superseded by the spiral wound set. Use the remaining six on '
+                    .'non-hydrocarbon service only.',
+            ], $storesManager);
+
+            $item['ELECTRODE'] = $catalogue->create([
+                'code' => 'CON-ELE-7018',
+                'name' => 'Welding electrodes, E7018, 3.2 mm',
+                'category' => 'Consumable',
+                'uom' => 'kg',
+                'reorder_level' => 25,
+                'reorder_quantity' => 100,
+                'storage_conditions' => 'Quiver at 120 °C once the packet is opened. Rebake or '
+                    .'scrap anything left out overnight.',
+                'shelf_life_days' => 730,
+            ], $storesManager);
+
+            $item['ARGON'] = $catalogue->create([
+                'code' => 'CON-GAS-AR',
+                'name' => 'Shielding gas, argon/CO₂ 80:20, 50 l cylinder',
+                'category' => 'Consumable',
+                'uom' => 'cyl',
+                'is_hazardous' => true,
+                'storage_conditions' => 'Upright, chained, outside, away from the diesel bowser.',
+            ], $storesManager);
+
+            $item['GLOVES'] = $catalogue->create([
+                'code' => 'PPE-GLV-RIG',
+                'name' => 'Rigger gloves, leather, size 10',
+                'category' => 'PPE',
+                'uom' => 'pair',
+                'reorder_level' => 20,
+                'reorder_quantity' => 60,
+            ], $storesManager);
+
+            $item['HARNESS'] = $catalogue->create([
+                'code' => 'PPE-HAR-FB',
+                'name' => 'Full body harness, twin lanyard, shock absorbing',
+                'category' => 'PPE',
+                'uom' => 'ea',
+                'specification' => 'EN 361 with EN 355 energy absorber. Serial numbered.',
+                'shelf_life_days' => 1825,
+                'notes' => 'Inspected every six months and on every issue. A harness that comes '
+                    .'back without its inspection tag goes to quarantine, not to the rack.',
+            ], $storesManager);
+
+            /*
+             * CATALOGUED AND DELIBERATELY NOT STOCKED, which is the most useful row here.
+             *
+             * Radiography is bought constantly, is named on requisitions in the same words every
+             * time, and cannot be counted. Cataloguing it makes those requisitions consistent and
+             * reportable; `is_stock_item = false` makes StockService refuse to move it. A receipt
+             * against it goes straight to cost with no ledger row, which is the correct behaviour
+             * and not an omission (§90 does not mean everything must touch everything).
+             */
+            $item['NDT'] = $catalogue->create([
+                'code' => 'SVC-NDT-RT',
+                'name' => 'Radiographic testing — third party, per weld',
+                'uom' => 'weld',
+                'is_stock_item' => false,
+                'notes' => 'Catalogued so requisitions name it the same way every time. It is not '
+                    .'held, counted or issued — there is nothing to put on a shelf.',
+            ], $storesManager);
+
+            foreach ($item as $line) {
+                $catalogue->activate($line, $storesManager);
+            }
+
+            // Withdrawn AFTER activation, because that is the life it actually had: bought for
+            // years, superseded last quarter, and six of them still on the shelf. The status graph
+            // is `draft → active → discontinued` and there is no shortcut, so the demo cannot show
+            // a state the application would not let somebody reach.
+            $catalogue->discontinue($item['CAF'], $storesManager,
+                'Superseded by MAT-GSK-12-SW on all flanged joints in hydrocarbon service. Six '
+                    .'remain and stay issuable for utility lines until they are gone.');
+
+            // ========================================================== what was on the shelf
+            /*
+             * AN OPENING BALANCE IS A RECEIPT, not a number typed into a balance.
+             *
+             * There is no way to write a quantity straight into `stock_balances` through any door
+             * this application offers, and this chapter does not get a private one. Every figure
+             * below arrives as a ledger row with a date, a value, a reason and a name against it,
+             * exactly as the day-two movements do — which is what makes StockService::rebuildBalances()
+             * a meaningful claim rather than a method nothing could ever contradict.
+             */
+            $opening = static function (Warehouse $store, StockItem $line, float $quantity, float $unitCost) use ($stock, $storesManager): void {
+                $stock->receive($store, $line, $quantity, $storesManager, [
+                    'unit_cost' => $unitCost,
+                    'reason' => 'Opening balance at go-live',
+                    'occurred_at' => now()->subDays(90),
+                    'notes' => 'Counted and valued at the changeover from the stores spreadsheet.',
+                ]);
+            };
+
+            $opening($central, $item['PIPE'], 120, 44800);
+            $opening($central, $item['FLANGE'], 12, 76500);
+            $opening($central, $item['ELBOW'], 8, 62000);
+            $opening($central, $item['GASKET'], 60, 13200);
+            $opening($central, $item['CAF'], 6, 4900);
+            $opening($central, $item['ELECTRODE'], 240, 3850);
+            $opening($central, $item['ARGON'], 14, 28500);
+            $opening($central, $item['GLOVES'], 90, 4200);
+
+            $opening($siteStore, $item['ELECTRODE'], 60, 3850);
+            $opening($siteStore, $item['GLOVES'], 24, 4200);
+
+            $opening($yard, $item['HARNESS'], 12, 96000);
+            $opening($yard, $item['GLOVES'], 36, 4200);
+
+            /*
+             * A TRANSFER IS ONE ACT AND TWO ROWS, joined by `transfer_ref`.
+             *
+             * Sadiq could post the two halves separately — he holds `stock.create` — and the yard
+             * would then be short for however long it took him to type the second one. That is why
+             * `stock.transfer` exists as a permission of its own: not because moving stock between
+             * two stores is more dangerous than moving it out of one, but because the pair must
+             * either both happen or neither, and only one method can promise that.
+             */
+            $stock->transfer($central, $siteStore, $item['PIPE'], 40, $storeOfficer, [
+                'project_id' => $job['DTE']?->id,
+                'org_unit_id' => $unit['CON-DT']->id,
+                'reason' => 'First tie-in spool set — cut and prep at site.',
+                'occurred_at' => now()->subDays(21),
+            ]);
+
+            $stock->transfer($central, $siteStore, $item['ELBOW'], 4, $storeOfficer, [
+                'project_id' => $job['DTE']?->id,
+                'org_unit_id' => $unit['CON-DT']->id,
+                'reason' => 'With the pipe.',
+                'occurred_at' => now()->subDays(21),
+            ]);
+
+            /*
+             * A COUNT THAT DISAGREED WITH THE BOOK, and the two people it takes.
+             *
+             * Six pairs of gloves are missing. There is no document behind that — no issue note, no
+             * receipt, nothing to point at — which is exactly why `stock.adjust` is not in the
+             * store officer's role: an adjustment is the one movement that says "the book was
+             * wrong" and it needs somebody who did not write the book. Sadiq counts, Halima posts
+             * the variance, and `inventory.separate_counter_and_adjuster` is the setting that says
+             * whether a company insists on it.
+             */
+            $stock->adjust($central, $item['GLOVES'], 84, $storesManager,
+                'Quarterly count. Book 90, counted 84. Six pairs went to the yard with the '
+                    .'scaffold gang in December and no issue was raised at the time.', [
+                        'occurred_at' => now()->subDays(14),
+                    ]);
+
+            // A STORE THAT IS FULL AND WILL NOT MOVE. The yard is being counted this week; it has
+            // twelve harnesses and thirty-six pairs of gloves in it, is staffed, and refuses every
+            // receipt and issue until Halima reopens it. Nothing in the procurement chapter names
+            // this store, which is the only reason that chapter still runs.
+            $warehouses->suspend($yard, $storesManager,
+                'Annual stocktake. Nothing in or out until the count is signed off on Friday.');
+
+            // ========================================================== the store's own chain
+            /*
+             * REQUEST → APPROVAL → ISSUE → LEDGER → PROJECT, which is §90 read from the other end.
+             *
+             * The procurement chapter shows stock arriving against an order. This is the same
+             * ledger being drawn down against a job, and the two meet in `stock_transactions`: the
+             * movements below carry the Delta Terminal project id, so what the tie-in front has
+             * consumed is answerable from the ledger rather than from somebody's memory of which
+             * requisitions were for which front.
+             *
+             * FOUR PEOPLE AND THREE OF THEM HAD TO BE DIFFERENT. Daniel asks, Halima decides, Sadiq
+             * hands it over. `inventory.separate_approver_and_issuer` is what makes the third
+             * separation compulsory here, and Kestrel switch it off ten pages down because they
+             * have eight staff — same engine, different answer, no branch in the code (§73).
+             */
+            $consumables = $requests->create([
+                'title' => 'Consumables — tie-in spool fabrication front',
+                'purpose' => 'Welding consumables and gloves for the tie-in spool crew for the '
+                    .'next three weeks. Harnesses are for the two men going up on the header.',
+                'warehouse_id' => $siteStore->getKey(),
+                'project_id' => $job['DTE']?->id,
+                'org_unit_id' => $unit['CON-DT']->id,
+                'location_id' => $place['SITE-DT']->id,
+                'priority' => 'normal',
+                'required_by' => now()->addDays(4)->toDateString(),
+                'items' => [
+                    ['stock_item_id' => $item['ELECTRODE']->getKey(), 'quantity_requested' => 40],
+                    ['stock_item_id' => $item['GLOVES']->getKey(), 'quantity_requested' => 12],
+                    [
+                        'stock_item_id' => $item['HARNESS']->getKey(),
+                        'quantity_requested' => 2,
+                        'notes' => 'Site store has never held these. Yard has twelve.',
+                    ],
+                ],
+            ], $projectManager);
+
+            $requests->submit($consumables, $projectManager);
+            $requests->approve($consumables, $storesManager, [], 'Approved as asked. The harnesses '
+                .'are at Ikeja and that store is shut for the count until Friday, so those two '
+                .'will not go out on this issue.');
+
+            // TWO LINES OUT AND ONE NOT, and the status is arithmetic rather than a decision. The
+            // third line is passed as zero explicitly: a storekeeper who hands over nothing on a
+            // line has not refused it, and an absent key means "all of it" by design.
+            $lines = $consumables->items()->orderBy('line_no')->get()->keyBy('line_no');
+            $consumables = $requests->issue($consumables, $storeOfficer, [
+                $lines[1]->getKey() => 40.0,
+                $lines[2]->getKey() => 12.0,
+                $lines[3]->getKey() => 0.0,
+            ], 'Electrodes into the quiver on the front. Gloves signed for by the foreman.');
+
+            // AND THEN IT CLOSES SHORT, which is the human act the arithmetic cannot take. The two
+            // harnesses were never issued and never will be — the men came off the header — and
+            // somebody has to say the store is finished with this rather than leave it outstanding
+            // forever. `part_issued → closed` needs `material_request.manage` and a reason.
+            $requests->close($consumables, $storesManager,
+                'Closing short. The header work was re-sequenced and the two harnesses are no '
+                    .'longer needed; the yard keeps them.');
+
+            // THE COMMONEST ROW IN ANY STORE REGISTER and the one a demo full of finished work
+            // never shows: submitted, sitting there, waiting for somebody to decide. It also asks
+            // for something the store it names does not hold, which is the normal reason a request
+            // waits — the answer is a transfer from Central, and nobody has done it yet.
+            $gasketRequest = $requests->create([
+                'title' => 'Gaskets and electrodes — hydrotest make-up',
+                'purpose' => 'Making up the flanged joints for the hydrotest. The site store has '
+                    .'no gaskets at all; Central holds sixty.',
+                'warehouse_id' => $siteStore->getKey(),
+                'project_id' => $job['DTE']?->id,
+                'org_unit_id' => $unit['CON-DT']->id,
+                'location_id' => $place['SITE-DT']->id,
+                'priority' => 'high',
+                'required_by' => now()->addDays(6)->toDateString(),
+                'items' => [
+                    ['stock_item_id' => $item['GASKET']->getKey(), 'quantity_requested' => 12],
+                    ['stock_item_id' => $item['ELECTRODE']->getKey(), 'quantity_requested' => 25],
+                ],
+            ], $projectManager);
+
+            $requests->submit($gasketRequest, $projectManager);
+        });
+    }
+
+    /*
+     * Kestrel's store: a spares cage, a van, and the switch that says a van is not a warehouse.
+     *
+     * TWO STORES FOR EIGHT PEOPLE, and the second one is the interesting half. An engineer's van is
+     * a store by every definition that matters — parts are in it, they leave it, somebody has to
+     * know what is there — and it is the one place where `allow_negative_stock` earns its keep. A
+     * fitter changes a belt at eight in the morning and posts the paperwork at six in the evening,
+     * by which time the balance has been negative all day. Refusing that movement does not make the
+     * belt reappear on the shelf; it makes the fitter stop posting movements at all.
+     *
+     * THE DEPOT CAGE IS THE OPPOSITE and is left as it comes: no negative stock, every issue
+     * against a request. Same table, same service, two answers, and the difference is one boolean
+     * a company sets for itself (§73).
+     *
+     * SEPARATION OF DUTIES, RELAXED AND RECORDED. Meridian's store needs three people to get a box
+     * of electrodes onto a site. Kestrel have one maintenance manager, and
+     * `inventory.separate_approver_and_issuer` comes off — which is not the same as it never having
+     * been applied: the second request below is raised, approved and issued by the same man, and
+     * the activity trail says `self_approved` and `self_issued` in as many words. An auditor asking
+     * the question in March gets an answer instead of a silence.
+     */
+    private function seedKestrelInventory(Organization $organization): void
+    {
+        $this->context->within($organization, function () use ($organization) {
+            $this->bootDelivery();
+
+            $settings = app(SettingsRepository::class);
+            $warehouses = app(WarehouseService::class);
+            $catalogue = app(StockItemService::class);
+            $stock = app(StockService::class);
+            $requests = app(MaterialRequestService::class);
+
+            // Written before anything moves, because these are the rules the chapter runs under.
+            $settings->set('inventory.separate_approver_and_issuer', false, $organization->id, 'inventory');
+
+            $staff = $this->staff();
+            $unit = $this->unitsByCode();
+            $place = $this->locationsByCode();
+            $job = Project::query()->get()->keyBy('code');
+
+            $opsManager = $this->accountOf($staff, 'KFM-002');       // Priti Shah
+            $maintenanceHead = $this->accountOf($staff, 'KFM-003');  // Duncan Reilly
+            $fitter = $this->accountOf($staff, 'KFM-005');           // Callum Whitfield
+
+            $depot = $warehouses->create([
+                'code' => 'STORE-LDS',
+                'name' => 'Leeds Depot Spares Store',
+                'type' => 'Store',
+                'location_id' => $place['LDS']->id,
+                'org_unit_id' => $unit['MNT']->id,
+                'keeper_id' => $maintenanceHead->getKey(),
+                'notes' => 'Filters, belts, bearings and lamps for the whole contract portfolio.',
+            ], $maintenanceHead);
+
+            $van = $warehouses->create([
+                'code' => 'VAN-CW',
+                'name' => 'Van stock — Callum Whitfield',
+                'type' => 'Transit',
+                'location_id' => $place['LDS']->id,
+                'org_unit_id' => $unit['MNT-MEC']->id,
+                'keeper_id' => $fitter->getKey(),
+                // THE ONE PLACE THIS IS SWITCHED ON, and a deliberate decision rather than a
+                // convenience. A van that may go negative will happily issue a belt it does not
+                // have and the balance then reads as a debt to itself — which is exactly right
+                // here, because the belt is on a fan and the paperwork is in his pocket.
+                'allow_negative_stock' => true,
+                'notes' => 'Restocked from the depot on a Monday. Balances are trued up at the '
+                    .'monthly van count, and the count is the record that matters.',
+            ], $maintenanceHead);
+
+            foreach ([$depot, $van] as $store) {
+                $warehouses->activate($store, $maintenanceHead);
+            }
+
+            // Six lines, which is a facilities catalogue: the things that get changed on a planned
+            // visit, plus the one thing that gets changed when something breaks.
+            $item = [];
+
+            $item['FILTER'] = $catalogue->create([
+                'code' => 'FLT-G4-595',
+                'name' => 'Panel filter, G4, 595 × 595 × 48 mm',
+                'category' => 'Consumable',
+                'uom' => 'ea',
+                'reorder_level' => 24,
+                'reorder_quantity' => 96,
+                'notes' => 'Changed quarterly on every AHU in the portfolio. Ordered by the '
+                    .'pallet because the planned schedule says exactly how many are needed.',
+            ], $maintenanceHead);
+
+            $item['BELT'] = $catalogue->create([
+                'code' => 'BLT-SPZ-1400',
+                'name' => 'V-belt, SPZ 1400',
+                'category' => 'Spare part',
+                'uom' => 'ea',
+                'reorder_level' => 6,
+                'reorder_quantity' => 12,
+            ], $maintenanceHead);
+
+            $item['BEARING'] = $catalogue->create([
+                'code' => 'BRG-6205',
+                'name' => 'Bearing, 6205-2RS',
+                'category' => 'Spare part',
+                'uom' => 'ea',
+                'reorder_level' => 4,
+                'reorder_quantity' => 10,
+            ], $maintenanceHead);
+
+            $item['LAMP'] = $catalogue->create([
+                'code' => 'LMP-LED-T8',
+                'name' => 'LED tube, T8 1500 mm, 4000 K',
+                'category' => 'Electrical',
+                'uom' => 'ea',
+                'reorder_level' => 40,
+                'reorder_quantity' => 120,
+            ], $maintenanceHead);
+
+            $item['SENSOR'] = $catalogue->create([
+                'code' => 'SNS-CO2-DUCT',
+                'name' => 'Duct CO₂ sensor, 0–2000 ppm, 0–10 V',
+                'category' => 'Instrumentation',
+                'uom' => 'ea',
+                'specification' => 'Must match the existing BMS scaling. Two spares held.',
+                'reorder_level' => 1,
+                'reorder_quantity' => 2,
+            ], $maintenanceHead);
+
+            $item['CLEANER'] = $catalogue->create([
+                'code' => 'CHM-COIL-CLN',
+                'name' => 'Coil cleaner, alkaline, 5 l',
+                'category' => 'Consumable',
+                'uom' => 'can',
+                'is_hazardous' => true,
+                'storage_conditions' => 'Bunded cabinet at the depot. COSHH sheet on the inside of '
+                    .'the door and a copy in every van that carries it.',
+            ], $maintenanceHead);
+
+            foreach ($item as $line) {
+                $catalogue->activate($line, $maintenanceHead);
+            }
+
+            $opening = static function (Warehouse $store, StockItem $line, float $quantity, float $unitCost) use ($stock, $maintenanceHead): void {
+                $stock->receive($store, $line, $quantity, $maintenanceHead, [
+                    'unit_cost' => $unitCost,
+                    'reason' => 'Opening balance at go-live',
+                    'occurred_at' => now()->subDays(75),
+                ]);
+            };
+
+            $opening($depot, $item['FILTER'], 96, 4.85);
+            $opening($depot, $item['BELT'], 14, 9.40);
+            $opening($depot, $item['BEARING'], 8, 6.20);
+            $opening($depot, $item['LAMP'], 120, 3.15);
+            $opening($depot, $item['SENSOR'], 2, 168.00);
+            $opening($depot, $item['CLEANER'], 6, 22.50);
+
+            // Monday morning: the van is loaded out of the depot. One act, two rows, one reference.
+            foreach ([['FILTER', 12.0], ['BELT', 2.0], ['LAMP', 20.0], ['CLEANER', 1.0]] as [$key, $quantity]) {
+                $stock->transfer($depot, $van, $item[$key], $quantity, $maintenanceHead, [
+                    'org_unit_id' => $unit['MNT-MEC']->id,
+                    'reason' => 'Weekly van load-out.',
+                    'occurred_at' => now()->subDays(6),
+                ]);
+            }
+
+            /*
+             * AND HERE IS WHAT THE SWITCH IS FOR. Three belts went on this week and the van was
+             * loaded with two: the third came off the depot rack on Wednesday afternoon with
+             * nobody at the desk, and Callum posted all three on Friday. The van balance is now
+             * minus one belt.
+             *
+             * THAT IS THE HONEST NUMBER. The depot is short a belt and the van owes it one, and
+             * both of those are true until the month-end count says otherwise. The alternative —
+             * refusing the third posting — does not put the belt back on the rack; it teaches a
+             * fitter that the system is something to be worked around, and after that the ledger
+             * is decoration. Meridian's stores would have thrown here, and should have.
+             */
+            $stock->issue($van, $item['BELT'], 3, $maintenanceHead, [
+                'project_id' => $job['TPA']?->id,
+                'org_unit_id' => $unit['MNT-MEC']->id,
+                'reason' => 'Three belt changes on the Trafford Point AHUs this week.',
+                'notes' => 'Third belt came off the depot rack on Wednesday without a transfer. '
+                    .'The van reads minus one until the month-end count.',
+                'occurred_at' => now()->subDays(1),
+            ]);
+
+            // ============================================================ the planned change
+            // The ordinary shape: the manager asks, operations decides, the manager hands it over.
+            // Two different people, and nothing had to be relaxed for it.
+            $filterChange = $requests->create([
+                'title' => 'Quarterly filter change — Trafford Point AHUs',
+                'purpose' => 'Q3 planned filter change across AHU-1 to AHU-4. Belts inspected at '
+                    .'the same visit and changed where they are glazed.',
+                'warehouse_id' => $depot->getKey(),
+                'project_id' => $job['TPA']?->id,
+                'org_unit_id' => $unit['MNT']->id,
+                'location_id' => $place['MCR']->id,
+                'priority' => 'normal',
+                'required_by' => now()->addDays(9)->toDateString(),
+                'items' => [
+                    ['stock_item_id' => $item['FILTER']->getKey(), 'quantity_requested' => 48],
+                    ['stock_item_id' => $item['BELT']->getKey(), 'quantity_requested' => 4],
+                ],
+            ], $maintenanceHead);
+
+            $requests->submit($filterChange, $maintenanceHead);
+            $requests->approve($filterChange, $opsManager, [], 'Planned work against the PPM '
+                .'schedule and the filters are already in the depot. Go ahead.');
+            $requests->issue($filterChange, $maintenanceHead, [],
+                'Loaded for the Tuesday visit. Old filters back to the depot for disposal.');
+
+            /*
+             * AND THE ONE THAT COULD NOT WAIT FOR ANYBODY.
+             *
+             * A CO₂ sensor failed at Trafford Point at half past four and the building goes to
+             * full fresh air without it. Duncan raised it, approved it and issued it inside ten
+             * minutes, which is the only thing that could have happened in a company of eight.
+             *
+             * MERIDIAN'S COPY OF THESE THREE LINES WOULD THROW, twice. Kestrel's writes
+             * `self_approved` and `self_issued` onto the trail instead — the control relaxed by a
+             * setting and recorded where an auditor will find it, rather than a control that was
+             * never there. That distinction is the entire argument for configuration over a branch
+             * in the code per customer (§73, §59).
+             */
+            $sensor = $requests->create([
+                'title' => 'CO₂ sensor — Trafford Point AHU-2 supply duct',
+                'purpose' => 'Sensor failed open circuit at 16:30. The AHU has gone to full fresh '
+                    .'air and the building will be cold by morning.',
+                'warehouse_id' => $depot->getKey(),
+                'project_id' => $job['TPA']?->id,
+                'org_unit_id' => $unit['MNT']->id,
+                'location_id' => $place['MCR']->id,
+                'priority' => 'urgent',
+                'required_by' => now()->toDateString(),
+                'items' => [
+                    ['stock_item_id' => $item['SENSOR']->getKey(), 'quantity_requested' => 1],
+                ],
+            ], $maintenanceHead);
+
+            $requests->submit($sensor, $maintenanceHead);
+            $requests->approve($sensor, $maintenanceHead, [], 'Self approved out of hours. One of '
+                .'the two spares — the other stays on the shelf until this one is replaced.');
+            $requests->issue($sensor, $maintenanceHead, [], 'Taken to site the same evening.');
+        });
+    }
+
+    /*
      * Meridian buy things, and the chain that starts when they decide to.
      *
      * THIS IS THE CHAPTER THE EXIT CRITERION IS ABOUT. Somewhere below, one requisition becomes an
@@ -4847,6 +5527,12 @@ class DemoSeeder extends Seeder
             // per invitation off an unloaded relation is exactly what the guard exists to catch.
             $vendor = Vendor::with('status')->get()->keyBy('code');
             $contract = Contract::query()->get()->keyBy('reference');
+            // The two registers the stores chapter opened, and the only reason anything below
+            // reaches a shelf. A requisition line that names a catalogue item carries that item
+            // through the enquiry, the order and the delivery; a receipt that names a store is what
+            // turns acceptance into a ledger row. Neither is compulsory and both are here (§90).
+            $catalogue = StockItem::query()->get()->keyBy('code');
+            $store = Warehouse::query()->get()->keyBy('code');
 
             $md = $this->accountOf($staff, 'MEI-0001');             // Adaeze Okonkwo
             $projectManager = $this->accountOf($staff, 'MEI-0011'); // Daniel Mbeki
@@ -4869,8 +5555,13 @@ class DemoSeeder extends Seeder
                 'priority' => 'high',
                 'required_by' => now()->addWeeks(3)->toDateString(),
                 'currency' => 'NGN',
+                // ALL THREE LINES NAME A CATALOGUE ITEM, which is what makes this thread the one
+                // that reaches a shelf. The reference travels: requisition line → enquiry line →
+                // quotation line → order line → delivery line, and acceptance reads it back
+                // through the chain to know which balance to move. Nobody retypes it anywhere.
                 'items' => [
                     [
+                        'stock_item_id' => $catalogue['MAT-PIPE-12-S40']?->id,
                         'description' => '12" carbon steel pipe, API 5L Gr.B, schedule 40',
                         'specification' => 'Seamless. Mill certificates to EN 10204 3.1 required '
                             .'with the delivery, not after it.',
@@ -4879,6 +5570,7 @@ class DemoSeeder extends Seeder
                         'estimated_unit_price' => 46500,
                     ],
                     [
+                        'stock_item_id' => $catalogue['MAT-FLG-12-150']?->id,
                         'description' => '12" weld-neck flanges, ANSI 150, raised face',
                         'specification' => 'Forged, ASTM A105. Bore to match schedule 40.',
                         'quantity' => 24,
@@ -4886,6 +5578,7 @@ class DemoSeeder extends Seeder
                         'estimated_unit_price' => 78000,
                     ],
                     [
+                        'stock_item_id' => $catalogue['MAT-ELB-12-LR']?->id,
                         'description' => '12" long-radius elbows, 90°, butt weld',
                         'quantity' => 16,
                         'uom' => 'ea',
@@ -5054,6 +5747,14 @@ class DemoSeeder extends Seeder
                 'delivery_note_ref' => 'SSF/DN/4471',
                 'carrier' => 'Sahara own fleet',
                 'vehicle_ref' => 'LAG-441-XA',
+                // THE FIELD THAT MAKES THE CHAIN ONE CHAIN. Naming a store here is what turns
+                // acceptance into stock: every accepted line carrying a catalogue item posts a
+                // receipt to this warehouse's ledger, at the ORDER's price rather than the
+                // requisition's estimate, against the order's project. Leave it out and the
+                // delivery is still a complete record of what arrived — it simply never reaches a
+                // shelf, which is the right answer for the many deliveries consumed on site the
+                // same week. See GoodsReceiptService::postToStock().
+                'warehouse_id' => $store['WH-DT']->id,
                 'notes' => 'Pipe and elbows. Flanges to follow — they were short on the raised face.',
                 'items' => $this->receiptLines($spoolOrder, [1 => 96.0, 3 => 16.0], 'Good'),
             ], $storeOfficer);
@@ -5070,6 +5771,7 @@ class DemoSeeder extends Seeder
                 'delivery_note_ref' => 'SSF/DN/4488',
                 'carrier' => 'Sahara own fleet',
                 'vehicle_ref' => 'LAG-208-KJ',
+                'warehouse_id' => $store['WH-DT']->id,
                 'notes' => 'Balance of the flanges, six days after the pipe.',
                 'items' => $this->receiptLines($spoolOrder, [2 => 24.0], 'Good'),
             ], $storeOfficer);
@@ -5212,6 +5914,7 @@ class DemoSeeder extends Seeder
                 'currency' => 'NGN',
                 'items' => [
                     [
+                        'stock_item_id' => $catalogue['MAT-GSK-12-SW']?->id,
                         'description' => '12" spiral wound gaskets, ANSI 150, 316L/graphite',
                         'quantity' => 40,
                         'uom' => 'ea',
@@ -5262,6 +5965,13 @@ class DemoSeeder extends Seeder
                 'location_id' => $place['SITE-DT']->id,
                 'delivery_note_ref' => 'KIS/DN/0212',
                 'carrier' => 'Courier',
+                // A STORE IS NAMED AND NOTHING REACHES IT, which is the case worth seeding. The
+                // twenty-two good gaskets would post to WH-DT the moment somebody accepts this
+                // delivery, and nobody has: it is `disputed` and it stays there until Kano collect
+                // the eighteen wrong ones. Stock follows ACCEPTANCE, not arrival — a lorry on the
+                // weighbridge is not stock, and a register that said it was would be lying to
+                // whoever asks what is on site.
+                'warehouse_id' => $store['WH-DT']->id,
                 'notes' => 'Opened on the bench with the piping supervisor before signing.',
                 'items' => [
                     [
@@ -5425,6 +6135,13 @@ class DemoSeeder extends Seeder
                 'location_id' => $place['MCR']->id,
                 'delivery_note_ref' => 'NAH-DN-40188',
                 'carrier' => "Supplier's own vehicle",
+                // NO STORE, AND NO CATALOGUE ITEM ON THE REQUISITION EITHER — both deliberate, and
+                // between them the reason this delivery reaches no shelf. An air handling unit is
+                // craned onto a roof and installed; it is never counted, never issued and never
+                // held, and cataloguing it so that a balance could read "1" would be bookkeeping
+                // for its own sake. Kestrel's spares cage is three pages up and takes filters,
+                // belts and bearings. §90 asks that the parts of the system connect, not that
+                // every record touch every register.
                 'notes' => 'Unit only. Commissioning is booked for the week after the install.',
                 'items' => $this->receiptLines($ahuOrder, [1 => 1.0], 'Good'),
             ], $maintenanceHead);

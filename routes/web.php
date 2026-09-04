@@ -27,6 +27,7 @@ use App\Http\Controllers\HseObservationController;
 use App\Http\Controllers\IncidentController;
 use App\Http\Controllers\InvestigationController;
 use App\Http\Controllers\LocationController;
+use App\Http\Controllers\MaterialRequestController;
 use App\Http\Controllers\MeetingController;
 use App\Http\Controllers\MemoController;
 use App\Http\Controllers\NcrController;
@@ -49,6 +50,8 @@ use App\Http\Controllers\RfqController;
 use App\Http\Controllers\RiskAssessmentController;
 use App\Http\Controllers\RoleController;
 use App\Http\Controllers\SettingController;
+use App\Http\Controllers\StockController;
+use App\Http\Controllers\StockItemController;
 use App\Http\Controllers\SubmittalController;
 use App\Http\Controllers\TaskChecklistItemController;
 use App\Http\Controllers\TaskController;
@@ -61,6 +64,7 @@ use App\Http\Controllers\TransmittalController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\VendorContactController;
 use App\Http\Controllers\VendorController;
+use App\Http\Controllers\WarehouseController;
 use App\Http\Controllers\WorkflowController;
 use App\Http\Controllers\WorkflowStageController;
 use Illuminate\Support\Facades\Route;
@@ -1730,6 +1734,161 @@ Route::middleware(['auth', 'password.current'])->group(function () {
 
         Route::post('goods-receipts/{goods_receipt}/accept', [GoodsReceiptController::class, 'accept'])
             ->middleware('permission:goods_receipt.approve')->name('goods-receipts.accept');
+    });
+
+    // --- warehouses ----------------------------------------------------------------------------
+    //
+    // A store is a place, not a dropdown: it has an address, a keeper, and a rule about whether it
+    // may go negative. `warehouse.suspend` is its own grant because suspending a store stops every
+    // movement in it — a supervisor's decision during a stocktake, not a clerical one. There is no
+    // separate close permission: closing is `warehouse.manage`, and the service refuses while any
+    // stock remains on hand.
+
+    Route::middleware('permission:warehouse.view')->group(function () {
+        Route::get('warehouses', [WarehouseController::class, 'index'])->name('warehouses.index');
+        Route::get('warehouses/{warehouse}', [WarehouseController::class, 'show'])
+            ->whereNumber('warehouse')->name('warehouses.show');
+    });
+
+    Route::get('warehouses/create', [WarehouseController::class, 'create'])
+        ->middleware('permission:warehouse.create')->name('warehouses.create');
+    Route::post('warehouses', [WarehouseController::class, 'store'])
+        ->middleware('permission:warehouse.create')->name('warehouses.store');
+
+    Route::whereNumber('warehouse')->group(function () {
+        Route::get('warehouses/{warehouse}/edit', [WarehouseController::class, 'edit'])
+            ->middleware('permission:warehouse.edit')->name('warehouses.edit');
+        Route::put('warehouses/{warehouse}', [WarehouseController::class, 'update'])
+            ->middleware('permission:warehouse.edit')->name('warehouses.update');
+        Route::delete('warehouses/{warehouse}', [WarehouseController::class, 'destroy'])
+            ->middleware('permission:warehouse.delete')->name('warehouses.destroy');
+
+        Route::post('warehouses/{warehouse}/activate', [WarehouseController::class, 'activate'])
+            ->middleware('permission:warehouse.edit')->name('warehouses.activate');
+        Route::post('warehouses/{warehouse}/suspend', [WarehouseController::class, 'suspend'])
+            ->middleware('permission:warehouse.suspend')->name('warehouses.suspend');
+        Route::post('warehouses/{warehouse}/close', [WarehouseController::class, 'close'])
+            ->middleware('permission:warehouse.manage')->name('warehouses.close');
+        Route::post('warehouses/{warehouse}/transition', [WarehouseController::class, 'transition'])
+            ->middleware('permission:warehouse.edit')->name('warehouses.transition');
+    });
+
+    // --- stock catalogue -----------------------------------------------------------------------
+    //
+    // What the company holds, as a list of things rather than a list of quantities. Editing an item
+    // is `stock_item.edit`; discontinuing one is `stock_item.manage`, because an item that is still
+    // on a shelf somewhere should not disappear from the catalogue on a clerk's afternoon.
+
+    Route::middleware('permission:stock_item.view')->group(function () {
+        Route::get('stock-items', [StockItemController::class, 'index'])->name('stock-items.index');
+        Route::get('stock-items/{stock_item}', [StockItemController::class, 'show'])
+            ->whereNumber('stock_item')->name('stock-items.show');
+    });
+
+    Route::get('stock-items/create', [StockItemController::class, 'create'])
+        ->middleware('permission:stock_item.create')->name('stock-items.create');
+    Route::post('stock-items', [StockItemController::class, 'store'])
+        ->middleware('permission:stock_item.create')->name('stock-items.store');
+
+    Route::whereNumber('stock_item')->group(function () {
+        Route::get('stock-items/{stock_item}/edit', [StockItemController::class, 'edit'])
+            ->middleware('permission:stock_item.edit')->name('stock-items.edit');
+        Route::put('stock-items/{stock_item}', [StockItemController::class, 'update'])
+            ->middleware('permission:stock_item.edit')->name('stock-items.update');
+        Route::delete('stock-items/{stock_item}', [StockItemController::class, 'destroy'])
+            ->middleware('permission:stock_item.delete')->name('stock-items.destroy');
+
+        Route::post('stock-items/{stock_item}/activate', [StockItemController::class, 'activate'])
+            ->middleware('permission:stock_item.edit')->name('stock-items.activate');
+        Route::post('stock-items/{stock_item}/discontinue', [StockItemController::class, 'discontinue'])
+            ->middleware('permission:stock_item.manage')->name('stock-items.discontinue');
+        Route::post('stock-items/{stock_item}/transition', [StockItemController::class, 'transition'])
+            ->middleware('permission:stock_item.edit')->name('stock-items.transition');
+    });
+
+    // --- the stock ledger ----------------------------------------------------------------------
+    //
+    // EVERY VERB HAS ITS OWN URL AND ITS OWN PERMISSION. There is no `stock/movements` taking a
+    // `type` field, because that single endpoint would collapse receiving, issuing, transferring
+    // and adjusting into one grant, and the whole point of separating them is that they are done by
+    // different people for different reasons (§84).
+    //
+    // NO EDIT ROUTE AND NO DELETE ROUTE, deliberately, matching the model, the policy and the
+    // permission catalogue. A movement is corrected by `reverse`, which writes a new row pointing
+    // at the old one, and there is no URL that would let anybody do otherwise (§59).
+    //
+    // `stock.view_value` gates no route of its own — it is asked inside the controller and the
+    // views, because it decides which COLUMNS a person sees rather than which pages.
+
+    Route::middleware('permission:stock.view')->group(function () {
+        Route::get('stock', [StockController::class, 'index'])->name('stock.index');
+        Route::get('stock/new/{verb}', [StockController::class, 'create'])
+            ->whereIn('verb', ['receive', 'issue', 'return', 'transfer', 'count'])
+            ->name('stock.create');
+        Route::get('stock/{movement}', [StockController::class, 'show'])
+            ->whereNumber('movement')->name('stock.show');
+    });
+
+    Route::middleware('permission:stock.create')->group(function () {
+        Route::post('stock/receive', [StockController::class, 'receive'])->name('stock.receive');
+        Route::post('stock/issue', [StockController::class, 'issue'])->name('stock.issue');
+        Route::post('stock/return', [StockController::class, 'returnToStore'])->name('stock.return');
+    });
+
+    Route::post('stock/transfer', [StockController::class, 'transfer'])
+        ->middleware('permission:stock.transfer')->name('stock.transfer');
+    Route::post('stock/count', [StockController::class, 'adjust'])
+        ->middleware('permission:stock.adjust')->name('stock.count');
+    Route::post('stock/{movement}/reverse', [StockController::class, 'reverse'])
+        ->middleware('permission:stock.reverse')
+        ->whereNumber('movement')->name('stock.reverse');
+
+    // --- material requests ---------------------------------------------------------------------
+    //
+    // Asking the store, as opposed to asking the company to buy. `issue` is separated from
+    // `approve` for the same four-eyes reason procurement separates ordering from receiving: the
+    // person who agreed the site needs it should not also be the person who says it went out.
+    // Closing is `material_request.manage` because it releases the reservation and can be done
+    // while lines remain unissued.
+
+    Route::middleware('permission:material_request.view')->group(function () {
+        Route::get('material-requests', [MaterialRequestController::class, 'index'])
+            ->name('material-requests.index');
+        Route::get('material-requests/{material_request}', [MaterialRequestController::class, 'show'])
+            ->whereNumber('material_request')->name('material-requests.show');
+    });
+
+    Route::get('material-requests/create', [MaterialRequestController::class, 'create'])
+        ->middleware('permission:material_request.create')->name('material-requests.create');
+    Route::post('material-requests', [MaterialRequestController::class, 'store'])
+        ->middleware('permission:material_request.create')->name('material-requests.store');
+
+    Route::whereNumber('material_request')->group(function () {
+        Route::get('material-requests/{material_request}/edit', [MaterialRequestController::class, 'edit'])
+            ->middleware('permission:material_request.edit')->name('material-requests.edit');
+        Route::put('material-requests/{material_request}', [MaterialRequestController::class, 'update'])
+            ->middleware('permission:material_request.edit')->name('material-requests.update');
+        Route::delete('material-requests/{material_request}', [MaterialRequestController::class, 'destroy'])
+            ->middleware('permission:material_request.delete')->name('material-requests.destroy');
+
+        Route::post('material-requests/{material_request}/submit', [MaterialRequestController::class, 'submit'])
+            ->middleware('permission:material_request.submit')->name('material-requests.submit');
+
+        // Approving and rejecting are one permission: the same person answering the same question
+        // either way. The status graph agrees, and the policy defers to it.
+        Route::middleware('permission:material_request.approve')->group(function () {
+            Route::post('material-requests/{material_request}/approve', [MaterialRequestController::class, 'approve'])
+                ->name('material-requests.approve');
+            Route::post('material-requests/{material_request}/reject', [MaterialRequestController::class, 'reject'])
+                ->name('material-requests.reject');
+        });
+
+        Route::post('material-requests/{material_request}/issue', [MaterialRequestController::class, 'issue'])
+            ->middleware('permission:material_request.issue')->name('material-requests.issue');
+        Route::post('material-requests/{material_request}/close', [MaterialRequestController::class, 'close'])
+            ->middleware('permission:material_request.manage')->name('material-requests.close');
+        Route::post('material-requests/{material_request}/transition', [MaterialRequestController::class, 'transition'])
+            ->middleware('permission:material_request.edit')->name('material-requests.transition');
     });
 
     // --- approvals -----------------------------------------------------------------------------

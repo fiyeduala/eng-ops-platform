@@ -153,18 +153,30 @@ final class Phase1SmokeTest extends TestCase
         ], [$colleague]);
     }
 
+    /**
+     * EVERY page, not every page up to the first broken one.
+     *
+     * This assertion used to fail inside the loop, which meant one broken template hid all the
+     * others and each full-suite run — fifteen minutes — bought exactly one fix. Two unrelated
+     * inventory faults were found that way, one run apiece, and the second was only visible once
+     * the first was gone. Collecting the failures and asserting on the collection turns a queue of
+     * runs into a list you can read at once.
+     */
     #[Test]
     public function every_page_renders_for_someone_who_holds_the_permission(): void
     {
-        foreach ($this->pages() as $name => $url) {
-            $response = $this->actingAs($this->administrator)->get($url);
+        $broken = [];
 
-            $this->assertSame(
-                200,
-                $response->status(),
-                $name.' ('.$url.') returned '.$response->status().' for an administrator holding every permission.',
-            );
+        foreach ($this->pages() as $name => $url) {
+            $status = $this->actingAs($this->administrator)->get($url)->status();
+
+            if ($status !== 200) {
+                $broken[] = $name.' ('.$url.') returned '.$status;
+            }
         }
+
+        $this->assertSame([], $broken, count($broken).' page(s) did not render for an administrator '
+            ."holding every permission:\n  ".implode("\n  ", $broken));
     }
 
     #[Test]

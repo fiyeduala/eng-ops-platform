@@ -319,6 +319,25 @@ class NumberGenerator
             'purchase_order' => ['prefix' => 'PO', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
             // GRN, not GR: the abbreviation every storekeeper already writes on the paper copy.
             'goods_receipt' => ['prefix' => 'GRN', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+
+            /*
+             * --- Phase 5, part 3: inventory ------------------------------------------
+             *
+             * A LEDGER SERIES IS SIX DIGITS AND THE OTHERS ARE FOUR. A busy store posts more
+             * movements in a month than the company raises purchase orders in a decade — every
+             * receipt line, every issue, both halves of every transfer — and a four-digit series
+             * that wraps in March is a series in which two movements share a number.
+             *
+             * WAREHOUSES AND STOCK ITEMS ARE ABSENT, and their absence is the point: their codes are
+             * TYPED BY A HUMAN. A storekeeper calls the main store WH-MAIN and the catalogue line
+             * for a 12in flange whatever their industry already calls it, and a generated
+             * `WHS-2026-0001` would be a code nobody uses next to a name everybody does. Generated
+             * numbers are for records that are EVENTS; typed codes are for things that exist.
+             */
+            'stock_transaction' => ['prefix' => 'STK', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 6],
+            // MR, and deliberately not MRQ or MREQ: it is what is said out loud in a store, and the
+            // register it is most confused with — PR — is two letters as well.
+            'material_request' => ['prefix' => 'MR', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
         ];
     }
 }

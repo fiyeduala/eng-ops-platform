@@ -12,6 +12,7 @@ use App\Events\PurchaseRequestDecided;
 use App\Events\PurchaseRequestSubmitted;
 use App\Models\PurchaseRequest;
 use App\Models\PurchaseRequestItem;
+use App\Models\StockItem;
 use App\Models\User;
 use App\Services\Concerns\ManagesLineItems;
 use App\Services\Concerns\SeparatesDuties;
@@ -316,12 +317,17 @@ class PurchaseRequestService extends RegisterService
     {
         $quantity = (float) ($row['quantity'] ?? 0);
         $rate = $row['estimated_unit_price'] ?? null;
+        $item = $this->resolveStockItem($row);
 
         return [
+            // The catalogue reference, where the requester chose one. It is what carries the line
+            // through the order to the delivery and into the ledger (§90), and it is null far more
+            // often than not — most of what a site asks for has never been a stock item.
+            'stock_item_id' => $item?->getKey(),
             'description' => (string) $row['description'],
             'specification' => blank($row['specification'] ?? null) ? null : (string) $row['specification'],
             'quantity' => $quantity,
-            'uom' => blank($row['uom'] ?? null) ? null : (string) $row['uom'],
+            'uom' => blank($row['uom'] ?? null) ? $item?->uom : (string) $row['uom'],
             'estimated_unit_price' => blank($rate) ? null : (float) $rate,
             // Null, not zero, when nobody priced it — see PurchaseRequestItem::computedTotal() for
             // why "costs nothing" and "nobody has said" must stay distinguishable.
@@ -329,6 +335,43 @@ class PurchaseRequestService extends RegisterService
             'required_by' => blank($row['required_by'] ?? null) ? null : $row['required_by'],
             'notes' => blank($row['notes'] ?? null) ? null : (string) $row['notes'],
         ];
+    }
+
+    /**
+     * Which catalogue item a line names, if it names one at all.
+     *
+     * MOST LINES NAME NOTHING, and that is the design. A requisition is how a site asks for what it
+     * has not got, and a great deal of that has never been catalogued and never will be. The link
+     * is an option on a free-text line, not a replacement for it.
+     *
+     * CHECKED HERE AS WELL AS IN THE FORM REQUEST because the form is one door. A seeder, an
+     * import or another service is another, and an id from another organization must fail wherever
+     * it arrives from (§84, §75).
+     *
+     * A NOTE ON UNITS, which is the one thing that can go quietly wrong: the ledger posts in the
+     * CATALOGUE item's unit, so a line asking for "8 lengths" against an item held in metres would
+     * put 8 metres on the shelf. The unit is therefore taken from the catalogue when the requester
+     * left it blank, and where they typed one it is left alone and shown on the line for the buyer
+     * to see.
+     *
+     * @param  array<string,mixed>  $row
+     */
+    private function resolveStockItem(array $row): ?StockItem
+    {
+        $id = (int) ($row['stock_item_id'] ?? 0);
+
+        if ($id <= 0) {
+            return null;
+        }
+
+        // Tenant-scoped, so another organization's catalogue is simply not there.
+        $item = StockItem::query()->whereKey($id)->first();
+
+        if ($item === null) {
+            throw new \DomainException('That catalogue item could not be found.');
+        }
+
+        return $item;
     }
 
     /**

@@ -10,6 +10,7 @@ use App\Engines\Audit\Concerns\Auditable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 /**
  * What arrived against one line of one order.
@@ -45,6 +46,35 @@ class GoodsReceiptItem extends Model
     public function goodsReceipt(): BelongsTo
     {
         return $this->belongsTo(GoodsReceipt::class);
+    }
+
+    /**
+     * The stock movements this line produced. Normally one; none when the delivery went straight
+     * to site, or when nobody ever catalogued what was bought.
+     *
+     * IT IS ALSO THE IDEMPOTENCY CHECK. GoodsReceiptService::postToStock() asks this before posting
+     * so that a receipt disputed, resolved and accepted a second time cannot put the same forty
+     * metres of cable onto the shelf twice. The ledger has no unique key that could catch it —
+     * receiving the same thing twice on two different days is perfectly legitimate — so the guard
+     * has to be the link back to the line that caused it.
+     */
+    public function movements(): MorphMany
+    {
+        return $this->morphMany(StockTransaction::class, 'source');
+    }
+
+    /**
+     * What this line will become in the store, if anything.
+     *
+     * THE WHOLE §90 CHAIN IN ONE EXPRESSION, read backwards: this receipt line came off an order
+     * line, which came off a requisition line, on which somebody chose a catalogue item. Any link
+     * in that may be missing — a direct order raised with no requisition, a requisition line typed
+     * as free text — and each missing link means the same thing, which is that the store has
+     * nothing to file the goods under. Null is a legitimate answer and the caller skips the line.
+     */
+    public function stockItem(): ?StockItem
+    {
+        return $this->purchaseOrderItem?->requestItem?->stockItem;
     }
 
     public function purchaseOrderItem(): BelongsTo

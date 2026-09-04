@@ -34,7 +34,7 @@ class NotifyPurchaseOrderSubmitted
     public function handle(PurchaseOrderSubmitted $event): void
     {
         $order = $event->purchaseOrder;
-        $order->loadMissing('vendor:id,name');
+        $order->loadMissing('vendor');
 
         $audience = Audience::followers($order);
 

@@ -155,8 +155,8 @@ purchase_orders ──1:N── purchase_order_items
 goods_receipts ──1:N── goods_receipt_items  → stock_transactions
 
 warehouses ──1:N── warehouse_locations
-inventory_items          sku, name, category, uom, reorder_level, unit_cost
-stock_balances           inventory_item_id, warehouse_id, quantity   ← derived, reconciled
+stock_items              sku, name, category, uom, reorder_level, unit_cost
+stock_balances           stock_item_id, warehouse_id, quantity   ← derived, reconciled
 stock_transactions       type(receipt|issue|transfer|return|adjustment), item, warehouse,
                          quantity(+/-), reference_type/id, project_id, performed_by
 material_requests        project_id, requested_by, items, status_id
@@ -216,7 +216,7 @@ reports / report_schedules / saved_filters
 | Documents | `(organization_id, document_category_id)`, `documents.number` unique per org |
 | Search | `FULLTEXT` on `name/title/description` of searchable tables |
 | Expiry sweeps | `(organization_id, expires_on)` on every expiring entity |
-| Stock | `(inventory_item_id, warehouse_id)` unique on `stock_balances` |
+| Stock | `(stock_item_id, warehouse_id)` unique on `stock_balances` |
 
 ## Integrity rules
 

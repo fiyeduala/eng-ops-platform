@@ -14,7 +14,7 @@ document, transmittal, workflow, form, meeting, memo, announcement, daily_report
 drawing, rfi, submittal, change_request, hse_incident, hse_risk, hse_inspection, hse_observation,
 toolbox_talk, permit, corrective_action, hse_training, quality_inspection, ncr, vendor, client,
 contract, purchase_request, rfq, quotation, purchase_order, goods_receipt, material_request,
-warehouse, inventory_item, stock, asset, asset_maintenance, vehicle, fuel, visitor, attendance,
+warehouse, stock_item, stock, asset, asset_maintenance, vehicle, fuel, visitor, attendance,
 timesheet, leave, recruitment, performance, payroll, expense, income, budget, payment, report,
 kpi, audit_log, setting, custom_field, template, numbering, escalation`
 
@@ -64,7 +64,7 @@ administrator may rename, edit or delete them. Only `Super Administrator` is pro
 | **Procurement Manager** | `purchase_request.manage:organization`, `rfq.manage:organization`, `purchase_order.approve:organization`, `vendor.manage:organization` |
 | **Procurement Officer** | `purchase_request.view:department`, `rfq.create:department`, `quotation.manage:department`, `purchase_order.create:department` |
 | **Store Manager** | `warehouse.manage:organization`, `stock.manage:organization`, `goods_receipt.approve:organization`, `material_request.approve:organization` |
-| **Store Officer** | `stock.create:team`, `goods_receipt.create:team`, `inventory_item.view:organization` |
+| **Store Officer** | `stock.create:team`, `goods_receipt.create:team`, `stock_item.view:organization` |
 | **Fleet Manager** | `vehicle.manage:organization`, `fuel.manage:organization`, `asset_maintenance.manage:organization` |
 | **Driver** | `vehicle.view:assigned`, `fuel.create:own`, `task.view:assigned` |
 | **Office Administrator** | `visitor.manage:organization`, `meeting.manage:organization`, `memo.create:organization`, `employee.view:organization` — **no** payroll, **no** finance |
