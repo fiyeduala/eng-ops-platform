@@ -65,8 +65,8 @@ administrator may rename, edit or delete them. Only `Super Administrator` is pro
 | **Procurement Officer** | `purchase_request.view:department`, `rfq.create:department`, `quotation.manage:department`, `purchase_order.create:department` |
 | **Store Manager** | `warehouse.manage:organization`, `stock.manage:organization`, `goods_receipt.approve:organization`, `material_request.approve:organization` |
 | **Store Officer** | `stock.create:team`, `goods_receipt.create:team`, `stock_item.view:organization` |
-| **Fleet Manager** | `vehicle.manage:organization`, `fuel.manage:organization`, `asset_maintenance.manage:organization` |
-| **Driver** | `vehicle.view:assigned`, `fuel.create:own`, `task.view:assigned` |
+| **Fleet Manager** | `vehicle.manage:organization`, `fuel_log.manage:organization`, `asset_maintenance.manage:organization` |
+| **Driver** | `vehicle.view:assigned`, `fuel_log.create:own`, `task.view:assigned` |
 | **Office Administrator** | `visitor.manage:organization`, `meeting.manage:organization`, `memo.create:organization`, `employee.view:organization` — **no** payroll, **no** finance |
 | **Site Administrator** | `visitor.manage:project`, `attendance.edit:project`, `daily_report.view:project`, `memo.create:project` |
 | **Project Administrator** | role assignment scoped `scope_type=project` — `project.edit`, `task.manage`, `meeting.manage`, `document.view` within that one project only |

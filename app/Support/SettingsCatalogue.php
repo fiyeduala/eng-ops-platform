@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use App\Models\Asset;
+use App\Models\AssetMaintenance;
 use App\Models\Client;
 use App\Models\Contract;
 use App\Models\CorrectiveAction;
@@ -27,6 +29,8 @@ use App\Models\StockItem;
 use App\Models\Submittal;
 use App\Models\TrainingCourse;
 use App\Models\TrainingRecord;
+use App\Models\Vehicle;
+use App\Models\VehicleDocument;
 use App\Models\Vendor;
 use App\Models\Warehouse;
 
@@ -288,6 +292,38 @@ final class SettingsCatalogue
                     'stock_item.categories' => ['label' => 'Stock categories', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Leave blank to use: '.implode(', ', StockItem::DEFAULT_CATEGORIES)],
                     'warehouse.types' => ['label' => 'Kinds of store', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:400'], 'help' => 'Leave blank to use: '.implode(', ', Warehouse::DEFAULT_TYPES)],
                     'material_request.priorities' => ['label' => 'Material request priorities', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:400'], 'help' => 'Leave blank to use: '.implode(', ', MaterialRequest::DEFAULT_PRIORITIES)],
+                ],
+            ],
+
+            /*
+             * The register of things, and the vehicles among them.
+             *
+             * `require_authoriser_on_transfer` IS THE SEGREGATION SETTING OF THIS MODULE, and it is
+             * the same argument procurement and inventory each make with a different pair of hands.
+             * A custodian who can hand a generator to themselves and record their own authorisation
+             * has produced a complete, tidy paper trail for a machine that is now in their yard. In
+             * a company of eight that is unavoidable and the switch goes off knowingly; in a company
+             * of eight hundred it is the control.
+             *
+             * `odometer_required_on_fuel` LOOKS LIKE FUSSINESS AND IS THE OPPOSITE. A fuel log with
+             * no reading cannot contribute to any consumption figure ever, so a fleet that skips it
+             * is a fleet that has receipts and no idea what it is burning. The setting exists
+             * because plant metered in hours genuinely has fills where nobody reads the meter, and
+             * a hard requirement would teach those drivers to type a zero.
+             */
+            'assets' => [
+                'label' => 'Assets & fleet',
+                'description' => 'How equipment is registered, handed over and maintained, and what your fleet records. Separate each list entry with a comma.',
+                'settings' => [
+                    'asset.require_authoriser_on_transfer' => ['label' => 'A custody handover must name somebody who authorised it', 'type' => 'boolean', 'help' => 'The person who types the handover cannot also be the person who permitted it. Turn this off only where the same one or two people do everything.'],
+                    'asset.maintenance_warning_days' => ['label' => 'Warn about maintenance coming due', 'type' => 'integer', 'rules' => ['required', 'integer', 'between:1,365'], 'help' => 'Days ahead. This is the window the maintenance register opens on, and how far in advance the planner is told.'],
+                    'asset.categories' => ['label' => 'Asset categories', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:900'], 'help' => 'Leave blank to use: '.implode(', ', Asset::DEFAULT_CATEGORIES)],
+                    'asset_maintenance.types' => ['label' => 'Kinds of maintenance work', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'What was done — not whether it was planned, which is recorded separately on every job. Leave blank to use: '.implode(', ', AssetMaintenance::DEFAULT_TYPES)],
+                    'vehicle.types' => ['label' => 'Kinds of vehicle', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Leave blank to use: '.implode(', ', Vehicle::DEFAULT_TYPES)],
+                    'vehicle.fuel_types' => ['label' => 'Fuel types', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:400'], 'help' => 'Leave blank to use: '.implode(', ', Vehicle::DEFAULT_FUEL_TYPES)],
+                    'vehicle_document.types' => ['label' => 'Vehicle documents you track', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:900'], 'help' => 'The papers a vehicle must carry where you operate. Nothing in the system knows what any of these mean — they are your words. Leave blank to use: '.implode(', ', VehicleDocument::DEFAULT_TYPES)],
+                    'vehicle_document.expiry_warning_days' => ['label' => 'Warn about expiring vehicle documents', 'type' => 'integer', 'rules' => ['required', 'integer', 'between:7,365'], 'help' => 'Days ahead. Renewals take weeks in most places, so this is usually set wider than it feels.'],
+                    'fuel_log.odometer_required' => ['label' => 'A fuel log must carry an odometer reading', 'type' => 'boolean', 'help' => 'Without a reading the fill can never contribute to a consumption figure. Turn this off only for plant where nobody reads the meter at the pump.'],
                 ],
             ],
             'notify' => [

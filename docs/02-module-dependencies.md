@@ -42,8 +42,8 @@ relations**, not as duplicated data.
 | HSE Incident | Investigation + corrective action | CorrectiveAction, Task | `IncidentCreated` event → workflow |
 | NCR | Corrective action | CorrectiveAction, Task | Workflow stage `on_enter` action |
 | Purchase Request | Approval chain | WorkflowInstance | `HasWorkflow` |
-| Purchase Order | Goods receipt | StockTransaction | `GoodsReceived` listener |
-| Goods Receipt | Cost posting | Expense (project cost) | `GoodsReceived` listener |
+| Purchase Order | Goods receipt | StockTransaction | Receipt-acceptance transaction |
+| Goods Receipt | Cost posting | ProjectCost | Receipt-acceptance transaction |
 | Document approval | Register entry + notification | DocumentRegister, Notification | `DocumentApproved` event |
 | Project member assigned | Visibility grant | Access engine | `project_members` row |
 | Form submission | Any workflow | WorkflowInstance | `Form.workflow_id` |

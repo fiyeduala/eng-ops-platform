@@ -40,7 +40,18 @@ approval and signature stack — including native in-browser authoring with .doc
 drawings through permits-to-work to the NCR lifecycle. Phase 4's exit criterion is pinned by a test
 that configures a route through the same three HTTP endpoints the builder screen posts to, reports
 an incident against it, and watches the review stage open an investigation and raise a corrective
-action — neither of which the engine or the controller names. See
+action — neither of which the engine or the controller names.
+
+**Phase 5 is in progress.** Commercial registers, procurement, warehouses, inventory and the stock
+ledger are committed. The current working tree also contains assets, custody, maintenance, fleet,
+fuel and vehicle documents. The continuation adds parent access protections, lifecycle fixes and
+registration from accepted goods receipts, with targeted regression coverage.
+The first operational-finance slice is now present: accepting a receipt posts immutable,
+source-linked project costs in both the purchase currency and organization currency, including
+direct-to-site deliveries. Foreign order prices are also converted before stock valuation. Cost
+centers and controlled budgets now compare approved allocations with that ledger. Income, manual
+expenses, petty cash and payments remain. See the
+[development handoff](docs/16-development-handoff.md) for the reviewed stopping point and next tasks,
 [docs/14-roadmap.md](docs/14-roadmap.md) for what each phase covers and what is deliberately out of
 V1, and [docs/15-hse-quality-architecture.md](docs/15-hse-quality-architecture.md) for how the
 registers fit together.
@@ -68,6 +79,7 @@ Architecture and design documents live in [`docs/`](docs/):
 | [13-vps-migration.md](docs/13-vps-migration.md) | VPS migration architecture |
 | [14-roadmap.md](docs/14-roadmap.md) | Phased development roadmap |
 | [15-hse-quality-architecture.md](docs/15-hse-quality-architecture.md) | Engineering, HSE & quality registers |
+| [16-development-handoff.md](docs/16-development-handoff.md) | Reviewed checkpoint, outstanding issues & continuation order |
 
 ---
 

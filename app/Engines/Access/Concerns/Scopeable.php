@@ -26,6 +26,16 @@ use Illuminate\Database\Eloquent\Builder;
 trait Scopeable
 {
     /**
+     * Parent whose tenant, ACL and classification also protect this record. Child permissions
+     * still govern the action; missing unit/project columns are resolved through this relation.
+     * Relations must form an acyclic hierarchy.
+     */
+    public function accessParentRelation(): ?string
+    {
+        return null;
+    }
+
+    /**
      * Restrict a query to records the user may reach under a permission.
      *
      * @param  Builder<static>  $query

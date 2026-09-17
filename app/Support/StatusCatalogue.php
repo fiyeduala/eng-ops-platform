@@ -925,6 +925,113 @@ final class StatusCatalogue
                     [null, 'cancelled', 'Cancel', 'material_request.manage', true],
                 ],
             ],
+
+            // A budget is editable only while draft. Approval freezes both its scope and lines so
+            // variance reports always compare actual costs with the allocation that was signed.
+            'budget' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'submitted' => ['label' => 'Awaiting approval', 'color' => 'brand'],
+                    'approved' => ['label' => 'Approved', 'color' => 'success'],
+                    'closed' => ['label' => 'Closed', 'color' => 'neutral', 'terminal' => true],
+                    'rejected' => ['label' => 'Rejected', 'color' => 'danger', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['draft', 'submitted', 'Submit for approval', 'budget.edit'],
+                    ['submitted', 'draft', 'Return for amendment', 'budget.approve', true],
+                    ['submitted', 'approved', 'Approve', 'budget.approve'],
+                    ['submitted', 'rejected', 'Reject', 'budget.approve', true],
+                    ['approved', 'closed', 'Close the budget', 'budget.manage'],
+                ],
+            ],
+
+            /*
+             * `lost` IS A STATUS AND NOT A DELETION, and it is the reason this graph is worth
+             * reading. A generator nobody can find is the single most important row in an asset
+             * register: it has a custodian, a handover trail and a date it was last seen, and every
+             * one of those facts is what an investigation runs on. Deleting it, or quietly retiring
+             * it, is how a missing thing stops being missing.
+             *
+             * `lost` IS NOT TERMINAL EITHER. Things turn up — in another yard, on another site, in
+             * the back of a van — and the reinstatement must land on the SAME row so the trail
+             * survives. A terminal `lost` would force a new asset code for a machine the company
+             * never stopped owning.
+             *
+             * `retired` IS TERMINAL AND `idle` IS NOT, which is the distinction people get wrong.
+             * Idle is a forklift with nothing to lift this month; retired is a forklift that has
+             * left the company. The first is a Tuesday, the second needs `asset.dispose` and a
+             * reason, because it is the entry that makes an asset stop being counted.
+             *
+             * `under_maintenance` IS SET BY THE MAINTENANCE SERVICE, not clicked. It is listed here
+             * so it can be renamed and reported on like any other status, and its transitions are
+             * left in the graph so an administrator can still correct a machine that was marked
+             * down and never marked back up — which happens, and is otherwise unrecoverable.
+             */
+            'asset' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Being registered', 'color' => 'neutral', 'initial' => true],
+                    'in_service' => ['label' => 'In service', 'color' => 'success'],
+                    'idle' => ['label' => 'Idle', 'color' => 'neutral'],
+                    'under_maintenance' => ['label' => 'Under maintenance', 'color' => 'warning'],
+                    'lost' => ['label' => 'Lost or stolen', 'color' => 'danger'],
+                    'retired' => ['label' => 'Retired', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['draft', 'in_service', 'Put into service', 'asset.manage'],
+                    ['in_service', 'idle', 'Stand down', 'asset.manage'],
+                    ['idle', 'in_service', 'Put back into service', 'asset.manage'],
+                    ['in_service', 'under_maintenance', 'Take out for maintenance', 'asset.manage'],
+                    ['idle', 'under_maintenance', 'Take out for maintenance', 'asset.manage'],
+                    ['under_maintenance', 'in_service', 'Return to service', 'asset.manage'],
+                    // A reason is demanded on the way in AND on the way out. "It was found" with no
+                    // explanation is exactly the entry that ends an investigation prematurely.
+                    [null, 'lost', 'Report lost or stolen', 'asset.manage', true],
+                    ['lost', 'in_service', 'Recovered', 'asset.manage', true],
+                    ['lost', 'idle', 'Recovered', 'asset.manage', true],
+                    // Its own permission, not `manage`: see the catalogue note on why disposing is
+                    // separated from every other kind of edit.
+                    ['in_service', 'retired', 'Retire or dispose', 'asset.dispose', true],
+                    ['idle', 'retired', 'Retire or dispose', 'asset.dispose', true],
+                    ['under_maintenance', 'retired', 'Retire beyond repair', 'asset.dispose', true],
+                    ['lost', 'retired', 'Write off', 'asset.dispose', true],
+                ],
+            ],
+
+            /*
+             * PLANNED WORK STARTS AT `scheduled` AND A BREAKDOWN STARTS AT `in_progress` — one
+             * graph, two entry points, which is the whole argument for keeping planned and unplanned
+             * in one table. The service chooses where a record enters; the vocabulary does not have
+             * to know which kind it was.
+             *
+             * `completed` IS NOT REACHED BY EDITING A FIELD. It is its own ability —
+             * `asset_maintenance.complete` — because certifying that a service happened is the
+             * entry that clears a backlog, and the person who scheduled the work should be able to
+             * be a different person from the one who signs it off (§6).
+             *
+             * `cancelled` EXISTS FOR THE PLAN THAT WAS NEVER NEEDED: the machine was sold, the
+             * interval changed, the job was folded into a bigger overhaul. Without it, a planner's
+             * only way to clear a stale plan is to mark it complete, and a maintenance history in
+             * which nothing was ever cancelled is a maintenance history nobody believes.
+             */
+            'asset_maintenance' => [
+                'statuses' => [
+                    'scheduled' => ['label' => 'Scheduled', 'color' => 'brand', 'initial' => true],
+                    'in_progress' => ['label' => 'In progress', 'color' => 'warning'],
+                    'on_hold' => ['label' => 'Waiting on parts', 'color' => 'warning'],
+                    'completed' => ['label' => 'Completed', 'color' => 'success', 'terminal' => true],
+                    'cancelled' => ['label' => 'Cancelled', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['scheduled', 'in_progress', 'Start the work', 'asset_maintenance.edit'],
+                    ['in_progress', 'on_hold', 'Wait on parts', 'asset_maintenance.edit', true],
+                    ['on_hold', 'in_progress', 'Resume', 'asset_maintenance.edit'],
+                    ['in_progress', 'completed', 'Certify complete', 'asset_maintenance.complete'],
+                    // Reopening rewrites an availability figure somebody has already reported, so it
+                    // is the narrowest permission here and demands a reason.
+                    ['completed', 'in_progress', 'Reopen', 'asset_maintenance.manage', true],
+                    [null, 'cancelled', 'Cancel', 'asset_maintenance.manage', true],
+                ],
+            ],
         ];
     }
 

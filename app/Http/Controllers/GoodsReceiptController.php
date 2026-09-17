@@ -148,6 +148,10 @@ class GoodsReceiptController extends RegisterController
             'purchaseOrder.vendor:id,name', 'purchaseOrder.status:id,label,color',
             'items.purchaseOrderItem',
         ]);
+        $goodsReceipt->load([
+            'items.asset' => fn ($query) => $query->visibleTo($user),
+            'items.projectCost' => fn ($query) => $query->visibleTo($user, 'expense.view'),
+        ]);
 
         return view('goods-receipts.show', [
             'goodsReceipt' => $goodsReceipt,

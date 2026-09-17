@@ -138,11 +138,41 @@ final class PermissionCatalogue
              */
             'stock' => ['Inventory', 'Stock Movements', ['view', 'create', 'manage', 'adjust', 'transfer', 'reverse', 'view_value']],
 
-            // ------------------------------------------------------------- assets & fleet
+            /*
+             * ------------------------------------------------------------- assets & fleet
+             *
+             * `transfer` IS NOT `edit`, and separating them is the whole control on an asset
+             * register. Correcting a serial number and handing a generator to somebody else are
+             * different acts with different consequences: the first is a typo, the second is the
+             * moment responsibility for a quarter of a million naira of plant changes hands. A
+             * store clerk needs the first every week and should never have the second.
+             *
+             * `dispose` IS SEPARATED FROM `delete` FOR THE SAME REASON, in the direction that
+             * matters more. An asset row is never deleted — a disposed generator is most of what an
+             * auditor asks about — so `delete` here is the ordinary "this record should not exist"
+             * ability, while `dispose` records that a real thing left the company. Giving the second
+             * to whoever holds the first is how plant walks off site with paperwork behind it.
+             *
+             * THERE IS NO `asset_custody_transfer` MODULE. The trail is append-only and is governed
+             * by `asset.transfer` and `asset.view` — see AssetCustodyTransfer::permissionModule().
+             * A module of its own would offer an administrator `asset_custody_transfer.edit`, an
+             * ability the model throws on, which is a permission that grants nothing and reads as
+             * though it grants everything.
+             */
             'asset' => ['Assets', 'Assets', [...self::CRUD, 'manage', 'assign', 'transfer', 'dispose']],
             'asset_maintenance' => ['Assets', 'Asset Maintenance', [...self::CRUD, 'manage', 'complete']],
             'vehicle' => ['Fleet', 'Vehicles', [...self::CRUD, 'manage', 'assign']],
-            'fuel' => ['Fleet', 'Fuel Records', [...self::CRUD, 'manage', 'approve']],
+            // `fuel_log`, not `fuel`: every other key in this catalogue is the snake-cased model
+            // name, because that is what Scopeable::permissionModule() derives when nothing
+            // overrides it. A key that does not match its model is a `visibleTo()` call checking a
+            // permission nobody was ever granted, and it fails closed and silently.
+            'fuel_log' => ['Fleet', 'Fuel Records', [...self::CRUD, 'manage']],
+            // The scans are private files (§67) and the expiry is the reason the register exists.
+            // `renew` is separate from `create` because renewing writes a NEW row while the lapsed
+            // one keeps its dates — "were we insured on the day of the accident" is asked about
+            // last year — and the person who files certificates is not always the person who buys
+            // them.
+            'vehicle_document' => ['Fleet', 'Vehicle Documents', [...self::CRUD, 'manage', 'renew']],
 
             // ------------------------------------------------------------- people
             'employee' => ['People', 'Employees', [...self::CRUD, 'manage', 'view_contact', 'view_confidential']],

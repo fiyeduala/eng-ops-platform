@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Console\Commands;
 
+use App\Engines\Access\OrganizationContext;
 use App\Engines\Workflow\EscalationService;
+use App\Models\Organization;
 use Illuminate\Console\Command;
 
 /**

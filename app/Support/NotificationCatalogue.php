@@ -329,6 +329,34 @@ final class NotificationCatalogue
             'A store\'s holding of an item dropped to or below the level it should be reordered at.',
             'normal', false, [true, false, false],
         ],
+
+        // ------------------------------------------------------------------ assets & fleet
+        // BOTH ENDS OF THE HANDOVER ARE TOLD, and both are mandatory. This is the notice that says
+        // "you are now responsible for a generator", and a custodian who was never told cannot be
+        // held to it — which is the argument every asset dispute eventually turns on. The person
+        // giving it up is told for the mirror reason: it is their evidence that they gave it up.
+        'asset.custody_transferred' => [
+            'asset', 'Assets', 'An asset changed hands',
+            'Custody of equipment moved to or from you.',
+            'high', true, [true, true, false],
+        ],
+        // Not mandatory, and the window is `asset.maintenance_warning_days`. A fleet of forty with
+        // monthly services generates a steady drip of these, and a planner who cannot turn the
+        // email off will filter them all into a folder and stop reading the overdue ones too.
+        'asset_maintenance.due' => [
+            'asset_maintenance', 'Assets', 'Maintenance is coming due',
+            'A planned service or inspection reaches its due date shortly.',
+            'normal', false, [true, false, false],
+        ],
+        // URGENT AND UN-MUTABLE, the same posture as `permit.expiring` and for the same kind of
+        // reason: a vehicle whose insurance has lapsed is not merely overdue on paperwork, it is a
+        // vehicle that must not leave the yard. There is a hard clock and a legal consequence
+        // behind this one, so it is not somebody's preference whether they hear about it.
+        'vehicle_document.expiring' => [
+            'vehicle_document', 'Fleet', 'A vehicle document is about to expire',
+            'Insurance, a licence or a permit on a vehicle reaches its expiry date shortly.',
+            'urgent', true, [true, true, true],
+        ],
     ];
 
     /**

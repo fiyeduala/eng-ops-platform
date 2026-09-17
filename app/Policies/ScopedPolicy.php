@@ -165,7 +165,8 @@ abstract class ScopedPolicy
         // --- Gate 4b: explicit allow ---------------------------------------------------
         // A direct grant on this record lifts reach and confidentiality, which is exactly what
         // "share this drawing with the client's reviewer" has to mean.
-        if ($this->hasAclRow($user, $record, $permission, AclEffect::Allow)) {
+        if ($this->hasAclRow($user, $record, $permission, AclEffect::Allow)
+            && (! method_exists($record, 'accessParentRelation') || $record->accessParentRelation() === null)) {
             return true;
         }
 

@@ -13,12 +13,14 @@ use App\Engines\Organization\OrganizationProvisioner;
 use App\Engines\Organization\OrgUnitService;
 use App\Engines\Workflow\WorkflowEngine;
 use App\Models\Announcement;
+use App\Models\Asset;
 use App\Models\Client;
 use App\Models\Contract;
 use App\Models\Document;
 use App\Models\DocumentCategory;
 use App\Models\DocumentVersion;
 use App\Models\Employee;
+use App\Models\GoodsReceiptItem;
 use App\Models\Location;
 use App\Models\Meeting;
 use App\Models\Memo;
@@ -47,6 +49,8 @@ use App\Models\Workflow;
 use App\Models\WorkflowStage;
 use App\Models\WorkflowStageInstance;
 use App\Services\AnnouncementService;
+use App\Services\AssetMaintenanceService;
+use App\Services\AssetService;
 use App\Services\ChangeRequestService;
 use App\Services\ClientService;
 use App\Services\ContractService;
@@ -55,6 +59,7 @@ use App\Services\DeliverableService;
 use App\Services\DocumentService;
 use App\Services\DocumentVersionService;
 use App\Services\DrawingService;
+use App\Services\FleetService;
 use App\Services\GoodsReceiptService;
 use App\Services\HseInspectionService;
 use App\Services\HseObservationService;
@@ -84,11 +89,13 @@ use App\Services\TemplateService;
 use App\Services\ToolboxTalkService;
 use App\Services\TrainingRecordService;
 use App\Services\TransmittalService;
+use App\Services\VehicleDocumentService;
 use App\Services\VendorService;
 use App\Services\WarehouseService;
 use App\Services\WorkflowDefinitionService;
 use App\Support\Enums\ChangeDisposition;
 use App\Support\Enums\Decision;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Seeder;
 use Illuminate\Http\UploadedFile;
@@ -231,6 +238,13 @@ class DemoSeeder extends Seeder
         // signed. This is the chapter where the five registers become one chain.
         $this->seedMeridianProcurement($meridian);
         $this->seedKestrelProcurement($kestrel);
+
+        // Assets after procurement, and it has to be that way round for one row: Kestrel's air
+        // handling unit is registered FROM the goods receipt that delivered it, so the delivery has
+        // to exist before the asset can point at it. Everything else here could have been seeded
+        // anywhere; that one joint is what fixes the order (§90).
+        $this->seedMeridianAssets($meridian);
+        $this->seedKestrelAssets($kestrel);
 
         // The rows above were written straight to the database, so nothing observed them happening.
         // A demo whose record timelines are all blank teaches the wrong lesson about Engine 4 — the
@@ -6766,6 +6780,641 @@ class DemoSeeder extends Seeder
                 DB::table($table)->where('id', $id)->update(['created_at' => $at]);
             }
         }
+    }
+
+    // ================================================================= assets, plant and fleet
+
+    /**
+     * Meridian's plant, its lorries, and the paperwork that keeps them on the road.
+     *
+     * WHY THIS CHAPTER LOOKS LIKE A YARD RATHER THAN A TABLE. Four things are registered and every
+     * one of them is somewhere, in somebody's hands, for a reason that is written down: a generator
+     * that left the Ikorodu yard for Delta Terminal, a tipper and a pickup that belong to Fleet &
+     * Logistics, and a thickness gauge that belongs to the inspector who signs the readings taken
+     * with it. Custody is written through `AssetService::transferCustody()` every single time, so
+     * the four custody columns on `assets` are the cache of a trail rather than four fields
+     * somebody typed and can retype.
+     *
+     * THE GENERATOR IS ON THE FLEET REGISTER, and it is the whole reason `odometer_unit` exists. A
+     * 250 kVA set is metered in RUNNING HOURS and serviced every 250 of them; put it on a register
+     * that assumes kilometres and the planner is told it needs a service every 250 km. Its "plate"
+     * is the number stencilled on its side, which is what a forty-character registration column is
+     * for on a machine that has no plate.
+     *
+     * MERIDIAN REQUIRES A SECOND SIGNATURE ON EVERY HANDOVER, and requires the odometer on every
+     * fill. Kestrel, one chapter down, requires neither. Same code, two companies (§73).
+     *
+     * ONE CERTIFICATE HAS ALREADY LAPSED. The tipper's roadworthiness expired eleven days ago and
+     * the vehicle's own page says so in red, because a fleet register whose every row is green
+     * teaches nothing about the one screen a transport manager actually opens on a Monday.
+     */
+    private function seedMeridianAssets(Organization $organization): void
+    {
+        $this->context->within($organization, function () use ($organization) {
+            $this->bootDelivery();
+
+            $settings = app(SettingsRepository::class);
+            $assets = app(AssetService::class);
+            $fleet = app(FleetService::class);
+            $jobs = app(AssetMaintenanceService::class);
+            $papers = app(VehicleDocumentService::class);
+
+            // Written before anything is registered, because these are the rules the chapter runs
+            // under. A control applied afterwards is a control nothing obeyed.
+            $settings->set('asset.require_authoriser_on_transfer', true, $organization->id, 'assets');
+            $settings->set('asset.maintenance_warning_days', 30, $organization->id, 'assets');
+            $settings->set('fuel_log.odometer_required', true, $organization->id, 'assets');
+            $settings->set('vehicle_document.expiry_warning_days', 60, $organization->id, 'assets');
+
+            $staff = $this->staff();
+            $unit = $this->unitsByCode();
+            $place = $this->locationsByCode();
+            $job = Project::query()->get()->keyBy('code');
+
+            $opsDirector = $this->accountOf($staff, 'MEI-0003');    // Chinedu Balogun
+            $projectManager = $this->accountOf($staff, 'MEI-0011'); // Daniel Mbeki
+            $siteManager = $this->accountOf($staff, 'MEI-0012');    // Kelechi Nwosu
+            $qaManager = $this->accountOf($staff, 'MEI-0015');      // Yemi Bakare
+            $qaInspector = $this->accountOf($staff, 'MEI-0016');    // Ruth Okafor
+            $fleetManager = $this->accountOf($staff, 'MEI-0022');   // Tunde Ogunleye
+            $driver = $this->accountOf($staff, 'MEI-0023');         // Musa Garba
+
+            // ------------------------------------------------------------------ the generator
+            $generator = $this->asset($assets, [
+                'code' => 'GEN-02',
+                'name' => '250 kVA diesel generator',
+                'description' => 'Site power for the tank farm compound. Runs the welding bay, the '
+                    .'site offices and the compound lighting when the grid supply drops, which at '
+                    .'Delta Terminal is most afternoons.',
+                'category' => 'Generator',
+                'manufacturer' => 'Perkins',
+                'model' => '1506A-E88TAG5',
+                'serial_number' => 'PK1506A-44821',
+                'tag_number' => 'MEI-PLT-0002',
+                'acquired_on' => now()->subYears(3)->subMonths(2)->toDateString(),
+                'purchase_cost' => 18500000,
+                'notes' => 'Serviced every 250 running hours. The hour meter, not the calendar, is '
+                    .'what the service interval is counted in.',
+            ], $fleetManager);
+
+            // Two moves rather than one, because a trail of a single row proves nothing: the first
+            // says the set came onto the yard's books, the second says it went out to a job. Both
+            // name an authoriser, because this company requires one — see the setting above.
+            $assets->transferCustody($generator, [
+                'custodian_id' => $fleetManager->getKey(),
+                'org_unit_id' => $unit['FLT']->id,
+                'project_id' => null,
+                'location_id' => $place['YARD-IK']->id,
+            ], $fleetManager, 'Taken onto the yard register after the last hire returned it', 'good',
+                null, $opsDirector->getKey());
+
+            $assets->transferCustody($generator, [
+                'custodian_id' => $siteManager->getKey(),
+                'org_unit_id' => $unit['CON-DT']->id,
+                'project_id' => $job['DTE']?->id,
+                'location_id' => $place['SITE-DT']->id,
+            ], $fleetManager,
+                'Mobilised to Delta Terminal for the tank farm compound',
+                'good',
+                'Low-loader on the Thursday. Fuel bowser follows on the Friday; site to draw from '
+                    .'it and log every fill against the set rather than against the truck.',
+                $opsDirector->getKey());
+
+            // A generator on the fleet register. See the class docblock — the unit is hours.
+            $generatorPlant = $fleet->attachVehicle($generator, [
+                'registration_number' => 'GEN-02',
+                'vehicle_type' => 'Generator',
+                'fuel_type' => 'Diesel',
+                'year_of_manufacture' => 2022,
+                'tank_capacity' => 400,
+                'odometer_unit' => 'hours',
+                'current_odometer' => 1900,
+            ], $fleetManager);
+
+            $fleet->logFuel($generatorPlant, [
+                'filled_at' => now()->subDays(25)->setTime(7, 20),
+                'litres' => 900,
+                'odometer' => 1940,
+                'total_cost' => 1233000,
+                'station' => 'Site bowser, Delta Terminal',
+                'receipt_reference' => 'BWR-0441',
+                'project_id' => $job['DTE']?->id,
+            ], $siteManager);
+
+            $fleet->logFuel($generatorPlant, [
+                'filled_at' => now()->subDays(5)->setTime(6, 55),
+                'litres' => 880,
+                'odometer' => 1962,
+                'total_cost' => 1214400,
+                'station' => 'Site bowser, Delta Terminal',
+                'receipt_reference' => 'BWR-0468',
+                'project_id' => $job['DTE']?->id,
+                'notes' => 'Twenty-two hours on the meter since the last fill. Forty litres an hour '
+                    .'is about right for the load it is carrying.',
+            ], $siteManager);
+
+            // ------------------------------------------------------------------ the tipper
+            $tipper = $this->asset($assets, [
+                'code' => 'TRK-01',
+                'name' => 'Tipper truck, 15 m³',
+                'category' => 'Vehicle',
+                'manufacturer' => 'Howo',
+                'model' => 'ZZ3257N3847A',
+                'serial_number' => 'LZZ5ELND9KA284471',
+                'tag_number' => 'MEI-VEH-0001',
+                'acquired_on' => now()->subYears(4)->toDateString(),
+                'purchase_cost' => 34200000,
+            ], $fleetManager);
+
+            $assets->transferCustody($tipper, [
+                'custodian_id' => $fleetManager->getKey(),
+                'org_unit_id' => $unit['FLT']->id,
+                'project_id' => null,
+                'location_id' => $place['YARD-IK']->id,
+            ], $fleetManager, 'Yard fleet', 'fair', null, $opsDirector->getKey());
+
+            $tipperVehicle = $fleet->attachVehicle($tipper, [
+                'registration_number' => 'LSR 482 XA',
+                'vin' => 'LZZ5ELND9KA284471',
+                'vehicle_type' => 'Tipper truck',
+                'fuel_type' => 'Diesel',
+                'year_of_manufacture' => 2019,
+                'colour' => 'White',
+                'tank_capacity' => 300,
+                'current_odometer' => 213100,
+            ], $fleetManager);
+
+            // The driver, not the custodian. Musa drives it; Tunde answers for it. Conflating the
+            // two would mean a lorry parked for a fortnight had nobody responsible for it.
+            $fleet->assignDriver($tipperVehicle, $driver->getKey(), $fleetManager);
+
+            foreach ([
+                [40, 213400, 185.0, 259000.0, 'NNPC Ikorodu', 'FR-88214'],
+                [22, 213950, 178.0, 251980.0, 'NNPC Ikorodu', 'FR-88907'],
+                [6, 214500, 180.0, 257400.0, 'Ardova, Sagamu Road', 'AR-12066'],
+            ] as [$daysAgo, $odometer, $litres, $total, $station, $receipt]) {
+                $fleet->logFuel($tipperVehicle, [
+                    'filled_at' => now()->subDays($daysAgo)->setTime(6, 40),
+                    'litres' => $litres,
+                    'odometer' => $odometer,
+                    'total_cost' => $total,
+                    'station' => $station,
+                    'receipt_reference' => $receipt,
+                ], $driver);
+            }
+
+            // Three certificates and three different states, which is the only way the register's
+            // tabs mean anything: one lapsed, one inside the warning window, one that never expires.
+            $papers->create($tipperVehicle, [
+                'document_type' => 'Roadworthiness certificate',
+                'document_number' => 'RWC/LA/2025/338204',
+                'issuer' => 'Lagos State Vehicle Inspection Service',
+                'issued_on' => now()->subDays(376)->toDateString(),
+                'expires_on' => now()->subDays(11)->toDateString(),
+                'cost' => 27500,
+                'notes' => 'Lapsed. Booked in for re-test; the lorry is off the road until it has '
+                    .'a fresh certificate in the cab.',
+            ], $fleetManager);
+
+            $papers->create($tipperVehicle, [
+                'document_type' => 'Insurance',
+                'document_number' => 'LWA/CV/0092841',
+                'issuer' => 'Leadway Assurance',
+                'issued_on' => now()->subDays(341)->toDateString(),
+                'expires_on' => now()->addDays(24)->toDateString(),
+                'cost' => 412000,
+                'notes' => 'Comprehensive. Renewal quote requested from the broker.',
+            ], $fleetManager);
+
+            $papers->create($tipperVehicle, [
+                'document_type' => 'Proof of ownership',
+                'document_number' => 'POC/LA/2019/118763',
+                'issuer' => 'Lagos State Motor Vehicle Administration Agency',
+                'issued_on' => now()->subYears(4)->toDateString(),
+                // NO EXPIRY, and that is a fact rather than a gap. The register prints "Never
+                // expires" in words for exactly this row.
+                'expires_on' => null,
+            ], $fleetManager);
+
+            // A service that has been done, and one that has not. The completed card carries what
+            // it cost and how long the lorry was off the road; the open one is what the planner is
+            // looking at.
+            $service = $jobs->create([
+                'asset_id' => $tipper->getKey(),
+                'title' => '20,000 km service — tipper LSR 482 XA',
+                'description' => 'Engine and gearbox oil, all filters, brake adjustment, tipping '
+                    .'ram seals checked.',
+                'is_planned' => true,
+                'maintenance_type' => 'Routine service',
+                'due_on' => now()->subDays(2)->toDateString(),
+                'due_odometer' => 214000,
+                'performed_by' => $fleetManager->getKey(),
+            ], $fleetManager);
+
+            $jobs->start($service, $fleetManager, 214780);
+            $jobs->complete($service, [
+                'labour_cost' => 45000,
+                'parts_cost' => 128500,
+                'downtime_hours' => 6.5,
+                'odometer' => 214780,
+                'findings' => 'Nearside rear brake chamber weeping and replaced. Tipping ram seals '
+                    .'still serviceable but marked for the next service. Two tyres on the drive '
+                    .'axle down to 4 mm — quoted separately.',
+            ], $fleetManager);
+
+            $jobs->create([
+                'asset_id' => $tipper->getKey(),
+                'title' => 'Drive axle tyre replacement — LSR 482 XA',
+                'description' => 'Two tyres, drive axle, fitted at the yard.',
+                'is_planned' => true,
+                'maintenance_type' => 'Tyre change',
+                'due_on' => now()->addDays(12)->toDateString(),
+                'due_odometer' => 217000,
+            ], $fleetManager);
+
+            // ------------------------------------------------------------------ the pickup
+            $pickup = $this->asset($assets, [
+                'code' => 'PKP-04',
+                'name' => 'Site pickup, double cab',
+                'category' => 'Vehicle',
+                'manufacturer' => 'Toyota',
+                'model' => 'Hilux 2.4D',
+                'tag_number' => 'MEI-VEH-0004',
+                'acquired_on' => now()->subYears(2)->subMonths(1)->toDateString(),
+                'purchase_cost' => 29800000,
+            ], $fleetManager);
+
+            $assets->transferCustody($pickup, [
+                'custodian_id' => $projectManager->getKey(),
+                'org_unit_id' => $unit['PMO']->id,
+                'project_id' => $job['DTE']?->id,
+                'location_id' => $place['SITE-DT']->id,
+            ], $fleetManager,
+                'Allocated to the Delta Terminal project team',
+                'good',
+                'Runs between the yard and site four days a week.',
+                $opsDirector->getKey());
+
+            $pickupVehicle = $fleet->attachVehicle($pickup, [
+                'registration_number' => 'KJA 119 BM',
+                'vehicle_type' => 'Pickup',
+                'fuel_type' => 'Diesel',
+                'year_of_manufacture' => 2021,
+                'colour' => 'Silver',
+                'tank_capacity' => 80,
+                'current_odometer' => 60900,
+            ], $fleetManager);
+
+            $fleet->assignDriver($pickupVehicle, $projectManager->getKey(), $fleetManager);
+
+            foreach ([
+                [30, 61100, 62.0, 88660.0],
+                [9, 61820, 58.0, 84100.0],
+            ] as [$daysAgo, $odometer, $litres, $total]) {
+                $fleet->logFuel($pickupVehicle, [
+                    'filled_at' => now()->subDays($daysAgo)->setTime(17, 15),
+                    'litres' => $litres,
+                    'odometer' => $odometer,
+                    'total_cost' => $total,
+                    'station' => 'Ardova, Sagamu Road',
+                    'project_id' => $job['DTE']?->id,
+                ], $projectManager);
+            }
+
+            $papers->create($pickupVehicle, [
+                'document_type' => 'Insurance',
+                'document_number' => 'LWA/CV/0093117',
+                'issuer' => 'Leadway Assurance',
+                'issued_on' => now()->subMonths(5)->toDateString(),
+                'expires_on' => now()->addMonths(7)->toDateString(),
+                'cost' => 268000,
+            ], $fleetManager);
+
+            $papers->create($pickupVehicle, [
+                'document_type' => 'Vehicle licence',
+                'document_number' => 'VL/LA/2025/771904',
+                'issuer' => 'Lagos State Motor Vehicle Administration Agency',
+                'issued_on' => now()->subDays(320)->toDateString(),
+                'expires_on' => now()->addDays(45)->toDateString(),
+                'cost' => 18500,
+            ], $fleetManager);
+
+            // ------------------------------------------------------------------ the gauge
+            // Not a vehicle and not plant, and the reason the asset register is not the fleet
+            // register: a calibrated instrument has a custodian, a certificate interval and a serial
+            // number, and none of that has anything to do with a plate.
+            $gauge = $this->asset($assets, [
+                'code' => 'TST-03',
+                'name' => 'Ultrasonic thickness gauge',
+                'description' => 'Wall thickness readings on the tank shell courses and on the '
+                    .'tie-in spools. Readings taken with this instrument go onto inspection '
+                    .'records, so its calibration certificate is part of the quality file.',
+                'category' => 'Test equipment',
+                'manufacturer' => 'Olympus',
+                'model' => '38DL PLUS',
+                'serial_number' => '38DL-2211-0774',
+                'tag_number' => 'MEI-QA-0003',
+                'acquired_on' => now()->subYears(2)->toDateString(),
+                'purchase_cost' => 4150000,
+            ], $qaManager);
+
+            $assets->transferCustody($gauge, [
+                'custodian_id' => $qaInspector->getKey(),
+                'org_unit_id' => $unit['QA']->id,
+                'project_id' => null,
+                'location_id' => $place['HQ']->id,
+            ], $qaManager,
+                'Issued to the inspector who takes the readings',
+                'good',
+                'Signed out of the QA cabinet. Goes to site and comes back the same week.',
+                $qaManager->getKey());
+
+            $jobs->create([
+                'asset_id' => $gauge->getKey(),
+                'title' => 'Annual calibration — thickness gauge 38DL-2211-0774',
+                'description' => 'The certificate expires with the calibration. Readings taken '
+                    .'after that date cannot be used on an inspection record.',
+                'is_planned' => true,
+                'maintenance_type' => 'Calibration',
+                'due_on' => now()->addDays(21)->toDateString(),
+            ], $qaManager);
+        });
+    }
+
+    /**
+     * Kestrel's two vans, its one big machine, and the same code with the controls turned down.
+     *
+     * THE AIR HANDLING UNIT ARRIVES FROM THE PROCUREMENT CHAPTER. It was requisitioned, ordered,
+     * delivered, inspected and accepted three chapters up, and here it becomes an asset whose
+     * `goods_receipt_item_id` points back at the delivery line — which points at the order, which
+     * points at the requisition. "Why do we own this and what did it cost" is answerable by clicking
+     * rather than by asking somebody who was there (§90). The cost and the supplier are not typed
+     * here at all; `registerFromReceipt()` reads them off the order.
+     *
+     * THE CONTROLS ARE TURNED DOWN, NOT ABSENT. `asset.require_authoriser_on_transfer` is OFF,
+     * because in a company of eight the person handing over the van and the person permitting it
+     * are the same person, and pretending otherwise produces a second signature that means nothing.
+     * `fuel_log.odometer_required` is OFF too, and the consequence is carried honestly: the
+     * mechanical van's fills record what was spent and nothing else, so the system declines to
+     * report a consumption figure for it rather than inventing one. The electrical van's driver
+     * does note the reading, and that van gets a figure. Same table, same code, one setting (§73).
+     *
+     * ONE VAN IS OVERDUE ON ITS SERVICE, nine days past, and it stays overdue: nothing sweeps a
+     * status onto it and nothing needs to. Overdue is a date question asked of an open job.
+     */
+    private function seedKestrelAssets(Organization $organization): void
+    {
+        $this->context->within($organization, function () use ($organization) {
+            $this->bootDelivery();
+
+            $settings = app(SettingsRepository::class);
+            $assets = app(AssetService::class);
+            $fleet = app(FleetService::class);
+            $jobs = app(AssetMaintenanceService::class);
+            $papers = app(VehicleDocumentService::class);
+
+            $settings->set('asset.require_authoriser_on_transfer', false, $organization->id, 'assets');
+            $settings->set('asset.maintenance_warning_days', 14, $organization->id, 'assets');
+            $settings->set('fuel_log.odometer_required', false, $organization->id, 'assets');
+            $settings->set('vehicle_document.expiry_warning_days', 30, $organization->id, 'assets');
+
+            $staff = $this->staff();
+            $unit = $this->unitsByCode();
+            $place = $this->locationsByCode();
+            $job = Project::query()->get()->keyBy('code');
+            $roles = Role::query()->get()->keyBy('slug');
+
+            $opsManager = $this->accountOf($staff, 'KFM-002');       // Priti Shah
+            $maintenanceHead = $this->accountOf($staff, 'KFM-003');  // Duncan Reilly
+            $fitter = $this->accountOf($staff, 'KFM-005');           // Callum Whitfield
+            $electrician = $this->accountOf($staff, 'KFM-006');      // Erin Doyle
+
+            // A fourth hat for Duncan, and the same argument as the store-manager one he already
+            // wears: roles are additive because in a company of eight one person runs the spares
+            // cage, the two vans and the planned maintenance, and a single "user type" column could
+            // not say that without inventing a role nobody has a name for (§9).
+            if (($fleetRole = $roles['fleet-manager'] ?? null) !== null) {
+                $maintenanceHead->assignRole($fleetRole);
+            }
+
+            // ------------------------------------------------------------ the AHU, from the delivery
+            $ahuLine = GoodsReceiptItem::query()
+                ->with(['purchaseOrderItem.purchaseOrder', 'goodsReceipt'])
+                ->whereHas(
+                    'purchaseOrderItem',
+                    fn (Builder $query) => $query->where('description', 'like', 'Air handling unit%'),
+                )
+                ->first();
+
+            if ($ahuLine !== null) {
+                $ahu = $assets->registerFromReceipt($ahuLine, [
+                    'code' => 'AHU-3',
+                    'name' => 'Air handling unit AHU-3 — Trafford Point',
+                    'description' => 'Roof-mounted, 4.2 m³/s, thermal wheel. Replaced the original '
+                        .'unit after the second bearing failure. Client-funded under the PPM '
+                        .'contract, maintained by us.',
+                    'category' => 'Plant and machinery',
+                    'manufacturer' => 'Northern Air Handling',
+                    'serial_number' => 'NAH-42TW-118206',
+                    'tag_number' => 'TPA-AHU-3',
+                ], $maintenanceHead);
+
+                $assets->commission($ahu, $maintenanceHead);
+
+                // NO AUTHORISER, and the service accepts it because this company said so. The
+                // identical call in Meridian's chapter above would refuse.
+                $assets->transferCustody($ahu, [
+                    'custodian_id' => $maintenanceHead->getKey(),
+                    'org_unit_id' => $unit['MNT']->id,
+                    'project_id' => $job['TPA']?->id,
+                    'location_id' => $place['MCR']->id,
+                ], $maintenanceHead, 'Installed and handed over on the Trafford Point roof', 'good');
+
+                $jobs->create([
+                    'asset_id' => $ahu->getKey(),
+                    'title' => 'First planned service — AHU-3',
+                    'description' => 'Belt tension, filter change and thermal wheel seal check at '
+                        .'three months from commissioning, as the warranty requires.',
+                    'is_planned' => true,
+                    'maintenance_type' => 'Routine service',
+                    'due_on' => now()->addDays(20)->toDateString(),
+                ], $maintenanceHead);
+            }
+
+            // ------------------------------------------------------------------ the mechanical van
+            $mechVan = $this->asset($assets, [
+                'code' => 'VAN-01',
+                'name' => 'Mechanical van',
+                'category' => 'Vehicle',
+                'manufacturer' => 'Ford',
+                'model' => 'Transit Custom 300 L2',
+                'acquired_on' => now()->subYears(3)->subMonths(4)->toDateString(),
+                'purchase_cost' => 24800,
+                'notes' => 'Carries the van stock — see the spares chapter. The stock is a store in '
+                    .'its own right and the van is an asset; the two are joined by the person '
+                    .'holding both.',
+            ], $maintenanceHead);
+
+            $assets->transferCustody($mechVan, [
+                'custodian_id' => $fitter->getKey(),
+                'org_unit_id' => $unit['MNT-MEC']->id,
+                'project_id' => null,
+                'location_id' => $place['LDS']->id,
+            ], $maintenanceHead, 'Allocated to the mechanical fitter', 'fair');
+
+            $mechVehicle = $fleet->attachVehicle($mechVan, [
+                'registration_number' => 'YK21 HRT',
+                'vehicle_type' => 'Pickup',
+                'fuel_type' => 'Diesel',
+                'year_of_manufacture' => 2021,
+                'colour' => 'White',
+                'tank_capacity' => 70,
+            ], $maintenanceHead);
+
+            $fleet->assignDriver($mechVehicle, $fitter->getKey(), $maintenanceHead);
+
+            // NO ODOMETER ON ANY OF THESE. The company turned the requirement off, and this is what
+            // that decision looks like on the ground: three receipts, real money, and a consumption
+            // figure the system refuses to compute because a fill at an unknown reading says
+            // nothing about how far the van went.
+            foreach ([
+                [28, 58.4, 76.51, 'Shell, Leeds Road'],
+                [16, 61.9, 80.47, 'Shell, Leeds Road'],
+                [4, 55.2, 72.29, 'BP, Kirkstall'],
+            ] as [$daysAgo, $litres, $total, $station]) {
+                $fleet->logFuel($mechVehicle, [
+                    'filled_at' => now()->subDays($daysAgo)->setTime(7, 30),
+                    'litres' => $litres,
+                    'total_cost' => $total,
+                    'station' => $station,
+                ], $fitter);
+            }
+
+            $papers->create($mechVehicle, [
+                'document_type' => 'Insurance',
+                'document_number' => 'AXA/CFL/771208',
+                'issuer' => 'AXA Commercial',
+                'issued_on' => now()->subDays(265)->toDateString(),
+                'expires_on' => now()->addDays(100)->toDateString(),
+                'cost' => 1180,
+            ], $maintenanceHead);
+
+            $papers->create($mechVehicle, [
+                'document_type' => 'Roadworthiness certificate',
+                'document_number' => 'MOT-4471-0982-2255',
+                'issuer' => 'Kirkstall Motor Services',
+                'issued_on' => now()->subDays(346)->toDateString(),
+                'expires_on' => now()->addDays(19)->toDateString(),
+                'cost' => 54.85,
+                'notes' => 'Booked in alongside the service below.',
+            ], $maintenanceHead);
+
+            // NINE DAYS OVERDUE AND STILL OPEN. Nothing has written a flag onto this row and nothing
+            // will: the register asks whether an open job's due date has passed, so a missed cron
+            // costs a warning and not the truth.
+            $jobs->create([
+                'asset_id' => $mechVan->getKey(),
+                'title' => 'Annual service and MOT — YK21 HRT',
+                'description' => 'Service, MOT and the two front tyres.',
+                'is_planned' => true,
+                'maintenance_type' => 'Routine service',
+                'due_on' => now()->subDays(9)->toDateString(),
+            ], $maintenanceHead);
+
+            // ------------------------------------------------------------------ the electrical van
+            $elecVan = $this->asset($assets, [
+                'code' => 'VAN-02',
+                'name' => 'Electrical van',
+                'category' => 'Vehicle',
+                'manufacturer' => 'Ford',
+                'model' => 'Transit Connect 240 L2',
+                'acquired_on' => now()->subYears(2)->subMonths(7)->toDateString(),
+                'purchase_cost' => 19400,
+            ], $maintenanceHead);
+
+            $assets->transferCustody($elecVan, [
+                'custodian_id' => $electrician->getKey(),
+                'org_unit_id' => $unit['MNT-ELE']->id,
+                'project_id' => null,
+                'location_id' => $place['LDS']->id,
+            ], $maintenanceHead, 'Allocated to the electrical engineer', 'good');
+
+            $elecVehicle = $fleet->attachVehicle($elecVan, [
+                'registration_number' => 'YK19 LDF',
+                'vehicle_type' => 'Pickup',
+                'fuel_type' => 'Diesel',
+                'year_of_manufacture' => 2019,
+                'colour' => 'White',
+                'tank_capacity' => 60,
+                'current_odometer' => 60800,
+            ], $maintenanceHead);
+
+            $fleet->assignDriver($elecVehicle, $electrician->getKey(), $maintenanceHead);
+
+            // Erin writes the reading on the receipt, so these two fills DO produce a figure. The
+            // setting relaxed a rule; it did not forbid the data, and one van with a consumption
+            // figure beside one without is the clearest statement of what the setting costs.
+            foreach ([
+                [21, 61220, 48.6, 63.66],
+                [7, 61940, 51.2, 67.07],
+            ] as [$daysAgo, $odometer, $litres, $total]) {
+                $fleet->logFuel($elecVehicle, [
+                    'filled_at' => now()->subDays($daysAgo)->setTime(16, 45),
+                    'litres' => $litres,
+                    'odometer' => $odometer,
+                    'total_cost' => $total,
+                    'station' => 'Shell, Leeds Road',
+                ], $electrician);
+            }
+
+            $papers->create($elecVehicle, [
+                'document_type' => 'Insurance',
+                'document_number' => 'AXA/CFL/771209',
+                'issuer' => 'AXA Commercial',
+                'issued_on' => now()->subDays(265)->toDateString(),
+                'expires_on' => now()->addDays(100)->toDateString(),
+                'cost' => 1040,
+            ], $maintenanceHead);
+
+            // Unplanned, done and closed. `is_planned` false with no due date is dated today by the
+            // service rather than left blank — a breakdown recorded after the fact is not something
+            // the planner has to arrange.
+            $repair = $jobs->create([
+                'asset_id' => $elecVan->getKey(),
+                'title' => 'Front brake pads and discs — YK19 LDF',
+                'is_planned' => false,
+                'maintenance_type' => 'Repair',
+                'performed_by' => $electrician->getKey(),
+            ], $maintenanceHead);
+
+            $jobs->start($repair, $maintenanceHead, 61950);
+            $jobs->complete($repair, [
+                'labour_cost' => 120,
+                'parts_cost' => 186.4,
+                'downtime_hours' => 3.5,
+                'odometer' => 61950,
+                'findings' => 'Pads down to the wear indicators and both discs lipped. Replaced as '
+                    .'a pair. Rear pads have another few thousand miles in them.',
+            ], $opsManager);
+        });
+    }
+
+    /**
+     * Register a thing and bring it into use, which is two acts and always both.
+     *
+     * A newly created asset sits in `draft` — "being registered" — and an asset register full of
+     * draft rows is a register nobody trusts. Commissioning is a separate act because it is a
+     * decision somebody makes, and keeping it separate is what lets a company receive a machine in
+     * March and put it to work in April without the register lying in between.
+     *
+     * @param  array<string,mixed>  $attributes
+     */
+    private function asset(AssetService $assets, array $attributes, User $actor): Asset
+    {
+        /** @var Asset $asset */
+        $asset = $assets->create($attributes, $actor);
+
+        return $assets->commission($asset, $actor);
     }
 
     // ================================================================= narrative history

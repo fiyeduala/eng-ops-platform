@@ -32,3 +32,21 @@ Schedule::command('approvals:sweep')
     ->withoutOverlapping(10)
     ->runInBackground()
     ->description('Escalate overdue approval stages');
+
+/*
+ * Daily rather than hourly, and early rather than at midnight.
+ *
+ * These are horizons measured in weeks — a certificate expiring in six days does not become more
+ * expired between 09:00 and 10:00, and an hourly reminder is a reminder people build a filter for.
+ * 06:30 puts the warning in the inbox before the yard opens, which is when somebody can still stop
+ * the truck.
+ *
+ * The sweep writes nothing (see SweepAssetExpiries): if this line is deleted, or the cron is never
+ * installed, the company loses its warnings and every expiry date on every screen stays exactly as
+ * correct as it was.
+ */
+Schedule::command('assets:sweep')
+    ->dailyAt('06:30')
+    ->withoutOverlapping(30)
+    ->runInBackground()
+    ->description('Warn about maintenance due and vehicle documents expiring');

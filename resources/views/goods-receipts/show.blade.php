@@ -118,6 +118,21 @@
                                             @if ($item->notes)
                                                 <span class="mt-0.5 block text-xs text-[var(--text-muted)]">{{ $item->notes }}</span>
                                             @endif
+                                            @if ($item->asset)
+                                                <a href="{{ route('assets.show', $item->asset) }}"
+                                                   class="mt-2 block text-sm text-brand-600 hover:underline">Asset {{ $item->asset->code }}</a>
+                                            @elseif ($goodsReceipt->statusKey() === 'accepted' && (float) $item->quantity_accepted === 1.0)
+                                                @can ('create', \App\Models\Asset::class)
+                                                    @can ('view', $goodsReceipt->purchaseOrder)
+                                                        <a href="{{ route('assets.from-receipt.create', $item) }}"
+                                                           class="mt-2 block text-sm text-brand-600 hover:underline">Register as an asset</a>
+                                                    @endcan
+                                                @endcan
+                                            @endif
+                                            @if ($item->projectCost)
+                                                <a href="{{ route('project-costs.show', $item->projectCost) }}"
+                                                   class="mt-2 block text-sm text-brand-600 hover:underline">Cost {{ $item->projectCost->number }}</a>
+                                            @endif
                                             @if ((float) $item->quantity_rejected > 0 && $item->rejection_reason)
                                                 {{-- The sentence a debit note gets argued from. --}}
                                                 <span class="mt-1 block text-xs text-rose-700 dark:text-rose-300">
@@ -216,7 +231,7 @@
                     </x-register.fact>
                     <x-register.fact label="Entered by" :value="$goodsReceipt->creator?->name"/>
                     <x-register.fact label="Confidentiality"
-                                     :value="ucfirst((string) $goodsReceipt->confidentiality)"/>
+                                     :value="ucfirst($goodsReceipt->confidentiality?->value ?? 'internal')"/>
                 </dl>
 
                 @if ($canConfirm && $key === 'draft')

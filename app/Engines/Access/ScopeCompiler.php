@@ -108,11 +108,37 @@ class ScopeCompiler
      */
     private function finalise(Builder $query, User $user, string $permission): Builder
     {
+        $this->applyParentProtection($query, $user);
+
         return $this->applyPublication(
             $this->applyConfidentiality($query, $user, $permission),
             $user,
             $permission,
         );
+    }
+
+    /** Parent protection does not require a second module permission: drivers can read their
+     * assigned vehicle without being granted the asset register. It cannot be lifted by a child ACL.
+     */
+    private function applyParentProtection(Builder $query, User $user): void
+    {
+        $relation = $this->parentRelation($query->getModel());
+
+        if ($relation === null) {
+            return;
+        }
+
+        $query->whereHas($relation, function (Builder $parent) use ($user) {
+            $permission = $parent->getModel()::defaultViewPermission();
+            $this->restrictToActorOrganization($parent, $user);
+            $this->excludeDenied($parent, $user, $permission);
+            $this->finalise($parent, $user, $permission);
+        });
+    }
+
+    private function parentRelation(Model $model): ?string
+    {
+        return method_exists($model, 'accessParentRelation') ? $model->accessParentRelation() : null;
     }
 
     /**
@@ -223,26 +249,26 @@ class ScopeCompiler
 
         // A pinned assignment narrows the grant to one unit subtree or one project.
         if ($grant->pinnedOrgUnitId !== null) {
-            $column = $this->orgUnitColumn($model);
-
-            if ($column === null) {
-                $query->whereRaw('1 = 0');
-            } else {
-                $query->whereIn(
-                    $model->qualifyColumn($column),
-                    $this->profile->subtreeOf($grant->pinnedOrgUnitId)
-                );
-            }
+            $this->applyInheritedPin($query, 'unit', $this->profile->subtreeOf($grant->pinnedOrgUnitId));
         }
 
         if ($grant->pinnedProjectId !== null) {
-            $column = $this->projectColumn($model);
+            $this->applyInheritedPin($query, 'project', [$grant->pinnedProjectId]);
+        }
+    }
 
-            if ($column === null) {
-                $query->whereRaw('1 = 0');
-            } else {
-                $query->where($model->qualifyColumn($column), $grant->pinnedProjectId);
-            }
+    /** Apply assignment bounds through the same ownership hierarchy as the grant itself. */
+    private function applyInheritedPin(Builder $query, string $axis, array $ids): void
+    {
+        $model = $query->getModel();
+        $column = $axis === 'unit' ? $this->orgUnitColumn($model) : $this->projectColumn($model);
+
+        if ($column !== null) {
+            $query->whereIn($model->qualifyColumn($column), $ids);
+        } elseif (($relation = $this->parentRelation($model)) !== null) {
+            $query->whereHas($relation, fn (Builder $parent) => $this->applyInheritedPin($parent, $axis, $ids));
+        } else {
+            $query->whereRaw('1 = 0');
         }
     }
 
@@ -251,6 +277,20 @@ class ScopeCompiler
      */
     private function applyScopePredicate(Builder $query, AccessScope $scope, User $user, Model $model): void
     {
+        $inherits = match ($scope) {
+            AccessScope::Project => $this->projectColumn($model) === null,
+            AccessScope::Team, AccessScope::Section, AccessScope::Department, AccessScope::Division => $this->orgUnitColumn($model) === null,
+            default => false,
+        };
+
+        if ($inherits && ($relation = $this->parentRelation($model)) !== null) {
+            $query->whereHas($relation, function (Builder $parent) use ($scope, $user) {
+                $this->applyScopePredicate($parent, $scope, $user, $parent->getModel());
+            });
+
+            return;
+        }
+
         match ($scope) {
             AccessScope::Organization => $query->whereRaw('1 = 1'),
 
@@ -362,12 +402,12 @@ class ScopeCompiler
         $unitColumn = $this->orgUnitColumn($model);
         $ownUnitSubtree = null;
 
-        if ($unitColumn !== null) {
+        if ($unitColumn !== null || $this->parentRelation($model) !== null) {
             $ownUnitId = $this->profile->orgUnitId($user);
             $ownUnitSubtree = $ownUnitId !== null ? $this->profile->subtreeOf($ownUnitId) : null;
         }
 
-        return $query->where(function (Builder $group) use ($model, $unitColumn, $ownUnitSubtree, $user, $permission) {
+        return $query->where(function (Builder $group) use ($model, $ownUnitSubtree, $user, $permission) {
             $column = $model->qualifyColumn('confidentiality');
 
             // Public and internal follow the ordinary scope rules already applied above.
@@ -377,10 +417,10 @@ class ScopeCompiler
             ]);
 
             // Restricted: visible from inside the owning unit subtree.
-            if ($unitColumn !== null && $ownUnitSubtree !== null && $ownUnitSubtree !== []) {
-                $group->orWhere(function (Builder $inner) use ($column, $model, $unitColumn, $ownUnitSubtree) {
-                    $inner->where($column, Confidentiality::Restricted->value)
-                        ->whereIn($model->qualifyColumn($unitColumn), $ownUnitSubtree);
+            if ($ownUnitSubtree !== null && $ownUnitSubtree !== []) {
+                $group->orWhere(function (Builder $inner) use ($column, $ownUnitSubtree) {
+                    $inner->where($column, Confidentiality::Restricted->value);
+                    $this->applyInheritedPin($inner, 'unit', $ownUnitSubtree);
                 });
             }
 
@@ -497,7 +537,10 @@ class ScopeCompiler
 
     private function hasColumn(Model $model, string $column): bool
     {
-        $table = $model->getTable();
+        // A nested whereHas may alias a repeated table as laravel_reserved_N. Inspect the
+        // physical table while continuing to qualify SQL with the query model's alias.
+        $class = $model::class;
+        $table = (new $class)->getTable();
 
         if (! isset($this->columnCache[$table])) {
             $this->columnCache[$table] = array_flip(

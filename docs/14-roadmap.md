@@ -274,7 +274,7 @@ corrective action's idempotence key is its configured title, so two actions with
 one stage collapse into one · `submitForApproval()` is wired to a route on incidents only; the other
 registers inherit the method but have no submit endpoint until a company asks for one.
 
-## PHASE 5 — Business operations ⬜
+## PHASE 5 — Business operations — in progress
 
 Vendors · clients · contracts · purchase requests · RFQs · quotations · evaluation · purchase orders
 · goods receipt · warehouses · inventory · stock ledger · material requests · assets · asset
@@ -283,6 +283,40 @@ cost centers, project costs, payments).
 
 **Exit criteria:** PR → approval → PO → goods receipt → stock transaction → project cost posts as
 one connected chain (§90).
+
+**Current checkpoint (updated 2026-09-17):**
+
+- **Part 1 — commercial:** vendors, clients and contracts committed in `e774cee`.
+- **Part 2 — procurement:** purchase requests, RFQs, quotations/evaluation, purchase orders and
+  goods receipt committed in `434de06`.
+- **Part 3 — inventory:** warehouses, catalogue, stock ledger and material requests committed in
+  `6bcb0c3`. Receipt acceptance posts accepted, catalogued goods to the selected warehouse and
+  carries the purchase order's project attribution.
+- **Current slice — assets and fleet:** assets, custody history, maintenance, vehicles, fuel logs
+  and vehicle documents are present in the uncommitted working tree. The continuation adds parent
+  ACL/confidentiality protection and inherited department/project scope, linked certificate
+  renewals, complete fuel intervals, locked custody/odometer updates, multi-job maintenance
+  availability, and registration from accepted single-item goods receipts. The assets test folder
+  now contains 48 cases, including HTTP, access, renewal and procurement integration regressions.
+  Full-suite validation passed on 16 September: **492 tests, 2,816 assertions**, plus a focused
+  renewal rerun after the final classification adjustment. The frontend build passed. See the
+  handoff for migration notes and remaining deployment checks.
+- **Current slice — operational finance:** accepting a goods receipt posts one immutable project
+  cost for each accepted line in the same transaction. Each row retains its exact source line,
+  project, organizational unit, supplier, purchase currency, fixed exchange rate and converted
+  organization-currency amount. Direct-to-site and uncatalogued deliveries still post costs, and
+  foreign prices are converted before stock valuation. The connected PR → PO → receipt → stock →
+  project-cost chain is covered end to end.
+- **Current slice — budget control:** cost centers define accountable project or organizational
+  scope. Numbered budgets carry exact allocation lines through draft, submission, approval, return,
+  rejection and closure; approval freezes the signed allocation. Their detail page calculates live
+  actuals and remaining funds from the project-cost ledger over the budget period and scope.
+- **Remaining — finance:** income, manually entered expenses, petty cash and payments. Phase 5
+  remains in progress until those planned operational registers are complete.
+
+See [16-development-handoff.md](16-development-handoff.md) for review findings, validation results
+and the order in which to resume. The earlier Phase 1–4 test totals above are historical results,
+not verification of the current working tree.
 
 ## PHASE 6 — People ⬜
 

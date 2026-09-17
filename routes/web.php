@@ -4,16 +4,20 @@ declare(strict_types=1);
 
 use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\ApprovalController;
+use App\Http\Controllers\AssetController;
+use App\Http\Controllers\AssetMaintenanceController;
 use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\PasswordController;
 use App\Http\Controllers\Auth\PasswordResetController;
+use App\Http\Controllers\BudgetController;
 use App\Http\Controllers\CalendarController;
 use App\Http\Controllers\ChangeRequestController;
 use App\Http\Controllers\ClientContactController;
 use App\Http\Controllers\ClientController;
 use App\Http\Controllers\ContractController;
 use App\Http\Controllers\CorrectiveActionController;
+use App\Http\Controllers\CostCenterController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DeliverableController;
 use App\Http\Controllers\DocumentCategoryController;
@@ -21,6 +25,7 @@ use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\DocumentVersionController;
 use App\Http\Controllers\DrawingController;
 use App\Http\Controllers\EmployeeController;
+use App\Http\Controllers\FuelLogController;
 use App\Http\Controllers\GoodsReceiptController;
 use App\Http\Controllers\HseInspectionController;
 use App\Http\Controllers\HseObservationController;
@@ -39,6 +44,7 @@ use App\Http\Controllers\PermitTypeController;
 use App\Http\Controllers\PositionController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ProjectController;
+use App\Http\Controllers\ProjectCostController;
 use App\Http\Controllers\ProjectDepartmentController;
 use App\Http\Controllers\ProjectMemberController;
 use App\Http\Controllers\PurchaseOrderController;
@@ -62,6 +68,8 @@ use App\Http\Controllers\TrainingCourseController;
 use App\Http\Controllers\TrainingRecordController;
 use App\Http\Controllers\TransmittalController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\VehicleController;
+use App\Http\Controllers\VehicleDocumentController;
 use App\Http\Controllers\VendorContactController;
 use App\Http\Controllers\VendorController;
 use App\Http\Controllers\WarehouseController;
@@ -1889,6 +1897,233 @@ Route::middleware(['auth', 'password.current'])->group(function () {
             ->middleware('permission:material_request.manage')->name('material-requests.close');
         Route::post('material-requests/{material_request}/transition', [MaterialRequestController::class, 'transition'])
             ->middleware('permission:material_request.edit')->name('material-requests.transition');
+    });
+
+    // --- operational finance ------------------------------------------------------------------
+
+    Route::middleware('permission:expense.view')->group(function () {
+        Route::get('project-costs', [ProjectCostController::class, 'index'])->name('project-costs.index');
+        Route::get('project-costs/{project_cost}', [ProjectCostController::class, 'show'])
+            ->whereNumber('project_cost')->name('project-costs.show');
+    });
+
+    Route::middleware('permission:budget.view')->group(function () {
+        Route::get('budgets', [BudgetController::class, 'index'])->name('budgets.index');
+        Route::get('budgets/{budget}', [BudgetController::class, 'show'])->whereNumber('budget')->name('budgets.show');
+        Route::get('cost-centers', [CostCenterController::class, 'index'])->name('cost-centers.index');
+        Route::get('cost-centers/{cost_center}', [CostCenterController::class, 'show'])
+            ->whereNumber('cost_center')->name('cost-centers.show');
+    });
+
+    Route::middleware('permission:budget.create')->group(function () {
+        Route::get('budgets/create', [BudgetController::class, 'create'])->name('budgets.create');
+        Route::post('budgets', [BudgetController::class, 'store'])->name('budgets.store');
+        Route::get('cost-centers/create', [CostCenterController::class, 'create'])->name('cost-centers.create');
+        Route::post('cost-centers', [CostCenterController::class, 'store'])->name('cost-centers.store');
+    });
+
+    Route::whereNumber('budget')->group(function () {
+        Route::get('budgets/{budget}/edit', [BudgetController::class, 'edit'])
+            ->middleware('permission:budget.edit')->name('budgets.edit');
+        Route::put('budgets/{budget}', [BudgetController::class, 'update'])
+            ->middleware('permission:budget.edit')->name('budgets.update');
+        Route::delete('budgets/{budget}', [BudgetController::class, 'destroy'])
+            ->middleware('permission:budget.delete')->name('budgets.destroy');
+        Route::post('budgets/{budget}/submit', [BudgetController::class, 'submit'])
+            ->middleware('permission:budget.edit')->name('budgets.submit');
+        Route::post('budgets/{budget}/approve', [BudgetController::class, 'approve'])
+            ->middleware('permission:budget.approve')->name('budgets.approve');
+        Route::post('budgets/{budget}/return', [BudgetController::class, 'returnForAmendment'])
+            ->middleware('permission:budget.approve')->name('budgets.return');
+        Route::post('budgets/{budget}/reject', [BudgetController::class, 'reject'])
+            ->middleware('permission:budget.approve')->name('budgets.reject');
+        Route::post('budgets/{budget}/close', [BudgetController::class, 'close'])
+            ->middleware('permission:budget.manage')->name('budgets.close');
+    });
+
+    Route::whereNumber('cost_center')->group(function () {
+        Route::get('cost-centers/{cost_center}/edit', [CostCenterController::class, 'edit'])
+            ->middleware('permission:budget.edit')->name('cost-centers.edit');
+        Route::put('cost-centers/{cost_center}', [CostCenterController::class, 'update'])
+            ->middleware('permission:budget.edit')->name('cost-centers.update');
+        Route::delete('cost-centers/{cost_center}', [CostCenterController::class, 'destroy'])
+            ->middleware('permission:budget.delete')->name('cost-centers.destroy');
+    });
+
+    // --- assets --------------------------------------------------------------------------------
+    //
+    // The register of what the company owns. Three verbs are separated from `edit` because each is a
+    // different decision by a different person: `transfer` hands custody to somebody who then
+    // answers for the machine, `dispose` ends its life on the books, and `assign` (on the fleet
+    // below) names the driver whose licence is on the line.
+    //
+    // Retirement has no route of its own. It is reached through `transition`, which intercepts a
+    // target of `retired` and re-routes it into the disposal path, so custody is handed back and
+    // `disposed_on` is stamped whichever door the request came through (§84).
+
+    Route::middleware('permission:asset.view')->group(function () {
+        Route::get('assets', [AssetController::class, 'index'])->name('assets.index');
+        Route::get('assets/{asset}', [AssetController::class, 'show'])
+            ->whereNumber('asset')->name('assets.show');
+    });
+
+    Route::get('assets/create', [AssetController::class, 'create'])
+        ->middleware('permission:asset.create')->name('assets.create');
+    Route::post('assets', [AssetController::class, 'store'])
+        ->middleware('permission:asset.create')->name('assets.store');
+
+    Route::whereNumber('asset')->group(function () {
+        Route::get('assets/{asset}/edit', [AssetController::class, 'edit'])
+            ->middleware('permission:asset.edit')->name('assets.edit');
+        Route::put('assets/{asset}', [AssetController::class, 'update'])
+            ->middleware('permission:asset.edit')->name('assets.update');
+        Route::delete('assets/{asset}', [AssetController::class, 'destroy'])
+            ->middleware('permission:asset.delete')->name('assets.destroy');
+
+        Route::post('assets/{asset}/commission', [AssetController::class, 'commission'])
+            ->middleware('permission:asset.manage')->name('assets.commission');
+        Route::post('assets/{asset}/transfer', [AssetController::class, 'transfer'])
+            ->middleware('permission:asset.transfer')->name('assets.transfer');
+        Route::post('assets/{asset}/retire', [AssetController::class, 'retire'])
+            ->middleware('permission:asset.dispose')->name('assets.retire');
+        Route::post('assets/{asset}/transition', [AssetController::class, 'transition'])
+            ->middleware('permission:asset.edit')->name('assets.transition');
+    });
+
+    // --- asset maintenance ---------------------------------------------------------------------
+    //
+    // Job cards. `asset_maintenance.complete` is its own grant and the reason is worth stating:
+    // certifying that a service happened is the statement "this machine is safe to run again",
+    // read afterwards by an insurer, an inspector and occasionally an accident investigation.
+    // Scheduling the work is clerical; signing it off is not.
+    //
+    // As with retirement above, `transition` refuses a direct move to `completed` and re-routes
+    // `scheduled → in_progress` through `start`, so the costs, the downtime and the odometer are
+    // recorded whichever button was pressed.
+
+    Route::middleware('permission:asset_maintenance.view')->group(function () {
+        Route::get('asset-maintenances', [AssetMaintenanceController::class, 'index'])
+            ->name('asset-maintenances.index');
+        Route::get('asset-maintenances/{asset_maintenance}', [AssetMaintenanceController::class, 'show'])
+            ->whereNumber('asset_maintenance')->name('asset-maintenances.show');
+    });
+
+    Route::get('asset-maintenances/create', [AssetMaintenanceController::class, 'create'])
+        ->middleware('permission:asset_maintenance.create')->name('asset-maintenances.create');
+    Route::post('asset-maintenances', [AssetMaintenanceController::class, 'store'])
+        ->middleware('permission:asset_maintenance.create')->name('asset-maintenances.store');
+
+    Route::whereNumber('asset_maintenance')->group(function () {
+        Route::get('asset-maintenances/{asset_maintenance}/edit', [AssetMaintenanceController::class, 'edit'])
+            ->middleware('permission:asset_maintenance.edit')->name('asset-maintenances.edit');
+        Route::put('asset-maintenances/{asset_maintenance}', [AssetMaintenanceController::class, 'update'])
+            ->middleware('permission:asset_maintenance.edit')->name('asset-maintenances.update');
+        Route::delete('asset-maintenances/{asset_maintenance}', [AssetMaintenanceController::class, 'destroy'])
+            ->middleware('permission:asset_maintenance.delete')->name('asset-maintenances.destroy');
+
+        Route::post('asset-maintenances/{asset_maintenance}/start', [AssetMaintenanceController::class, 'start'])
+            ->middleware('permission:asset_maintenance.edit')->name('asset-maintenances.start');
+        Route::post('asset-maintenances/{asset_maintenance}/complete', [AssetMaintenanceController::class, 'complete'])
+            ->middleware('permission:asset_maintenance.complete')->name('asset-maintenances.complete');
+        Route::post('asset-maintenances/{asset_maintenance}/transition', [AssetMaintenanceController::class, 'transition'])
+            ->middleware('permission:asset_maintenance.edit')->name('asset-maintenances.transition');
+    });
+
+    Route::get('goods-receipt-items/{goods_receipt_item}/assets/create', [AssetController::class, 'createFromReceipt'])
+        ->whereNumber('goods_receipt_item')->middleware('permission:asset.create')->name('assets.from-receipt.create');
+    Route::post('goods-receipt-items/{goods_receipt_item}/assets', [AssetController::class, 'storeFromReceipt'])
+        ->whereNumber('goods_receipt_item')->middleware('permission:asset.create')->name('assets.from-receipt.store');
+
+    // --- fleet ---------------------------------------------------------------------------------
+    //
+    // A vehicle is an asset with a plate, so it has no delete route: a lorry leaves the fleet by
+    // being retired as an ASSET, which keeps its custody trail, its job cards and its fuel history
+    // attached to the thing they belong to.
+    //
+    // The odometer is a route rather than a form field because it is the one number three separate
+    // events write — a fill, a completed service, and a person reading the clock — and all three go
+    // through FleetService, which refuses a reading lower than the one already recorded.
+
+    Route::middleware('permission:vehicle.view')->group(function () {
+        Route::get('vehicles', [VehicleController::class, 'index'])->name('vehicles.index');
+        Route::get('vehicles/{vehicle}', [VehicleController::class, 'show'])
+            ->whereNumber('vehicle')->name('vehicles.show');
+    });
+
+    Route::get('vehicles/create', [VehicleController::class, 'create'])
+        ->middleware('permission:vehicle.create')->name('vehicles.create');
+    Route::post('vehicles', [VehicleController::class, 'store'])
+        ->middleware('permission:vehicle.create')->name('vehicles.store');
+
+    Route::whereNumber('vehicle')->group(function () {
+        Route::get('vehicles/{vehicle}/edit', [VehicleController::class, 'edit'])
+            ->middleware('permission:vehicle.edit')->name('vehicles.edit');
+        Route::put('vehicles/{vehicle}', [VehicleController::class, 'update'])
+            ->middleware('permission:vehicle.edit')->name('vehicles.update');
+
+        Route::post('vehicles/{vehicle}/driver', [VehicleController::class, 'assignDriver'])
+            ->middleware('permission:vehicle.assign')->name('vehicles.driver');
+        Route::post('vehicles/{vehicle}/odometer', [VehicleController::class, 'recordOdometer'])
+            ->middleware('permission:vehicle.edit')->name('vehicles.odometer');
+    });
+
+    // --- fuel ----------------------------------------------------------------------------------
+    //
+    // Receipts, not stock movements. There is no show route: a fill is four facts and a receipt
+    // number, and the register carries all of them — a page of its own would be a back button.
+
+    Route::get('fuel-logs', [FuelLogController::class, 'index'])
+        ->middleware('permission:fuel_log.view')->name('fuel-logs.index');
+
+    Route::get('fuel-logs/create', [FuelLogController::class, 'create'])
+        ->middleware('permission:fuel_log.create')->name('fuel-logs.create');
+    Route::post('fuel-logs', [FuelLogController::class, 'store'])
+        ->middleware('permission:fuel_log.create')->name('fuel-logs.store');
+
+    Route::whereNumber('fuel_log')->group(function () {
+        Route::get('fuel-logs/{fuel_log}/edit', [FuelLogController::class, 'edit'])
+            ->middleware('permission:fuel_log.edit')->name('fuel-logs.edit');
+        Route::put('fuel-logs/{fuel_log}', [FuelLogController::class, 'update'])
+            ->middleware('permission:fuel_log.edit')->name('fuel-logs.update');
+        Route::delete('fuel-logs/{fuel_log}', [FuelLogController::class, 'destroy'])
+            ->middleware('permission:fuel_log.delete')->name('fuel-logs.destroy');
+    });
+
+    // --- vehicle documents ---------------------------------------------------------------------
+    //
+    // Insurance, roadworthiness, permits — and the dates they stop being true. `vehicle_document.renew`
+    // is separate from `.edit` because renewing does not change a date: it files the NEXT certificate
+    // and leaves the old one exactly as it was, which is what answers "were we insured on the 14th".
+    //
+    // The scan lives on the private disk and is served only through `download`, which asks the policy
+    // with the record in hand and builds the filename rather than echoing back the uploaded one (§67).
+
+    Route::middleware('permission:vehicle_document.view')->group(function () {
+        Route::get('vehicle-documents', [VehicleDocumentController::class, 'index'])
+            ->name('vehicle-documents.index');
+        Route::get('vehicle-documents/{vehicle_document}', [VehicleDocumentController::class, 'show'])
+            ->whereNumber('vehicle_document')->name('vehicle-documents.show');
+        Route::get('vehicle-documents/{vehicle_document}/download', [VehicleDocumentController::class, 'download'])
+            ->whereNumber('vehicle_document')->name('vehicle-documents.download');
+    });
+
+    Route::get('vehicle-documents/create', [VehicleDocumentController::class, 'create'])
+        ->middleware('permission:vehicle_document.create')->name('vehicle-documents.create');
+    Route::post('vehicle-documents', [VehicleDocumentController::class, 'store'])
+        ->middleware('permission:vehicle_document.create')->name('vehicle-documents.store');
+
+    Route::whereNumber('vehicle_document')->group(function () {
+        Route::get('vehicle-documents/{vehicle_document}/edit', [VehicleDocumentController::class, 'edit'])
+            ->middleware('permission:vehicle_document.edit')->name('vehicle-documents.edit');
+        Route::put('vehicle-documents/{vehicle_document}', [VehicleDocumentController::class, 'update'])
+            ->middleware('permission:vehicle_document.edit')->name('vehicle-documents.update');
+        Route::delete('vehicle-documents/{vehicle_document}', [VehicleDocumentController::class, 'destroy'])
+            ->middleware('permission:vehicle_document.delete')->name('vehicle-documents.destroy');
+
+        Route::get('vehicle-documents/{vehicle_document}/renew', [VehicleDocumentController::class, 'renewForm'])
+            ->middleware('permission:vehicle_document.renew')->name('vehicle-documents.renew-form');
+        Route::post('vehicle-documents/{vehicle_document}/renew', [VehicleDocumentController::class, 'renew'])
+            ->middleware('permission:vehicle_document.renew')->name('vehicle-documents.renew');
     });
 
     // --- approvals -----------------------------------------------------------------------------

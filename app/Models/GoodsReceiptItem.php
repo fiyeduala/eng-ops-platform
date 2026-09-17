@@ -10,6 +10,7 @@ use App\Engines\Audit\Concerns\Auditable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 /**
@@ -46,6 +47,31 @@ class GoodsReceiptItem extends Model
     public function goodsReceipt(): BelongsTo
     {
         return $this->belongsTo(GoodsReceipt::class);
+    }
+
+    /**
+     * The asset this line became, where it became one — the chain, read forwards (§90).
+     *
+     * MOST LINES HAVE NONE, and that is the ordinary case rather than a gap: cable, gaskets and
+     * diesel arrive by the metre and go to a shelf, not to an asset register. A generator arrives
+     * once and is capitalised, and this is the relation that lets a reader stand on the delivery
+     * and see what it turned into — the mirror of `Asset::goodsReceiptItem()`, which is how "why do
+     * we own this" is answered from the other end.
+     *
+     * `hasOne`, not `hasMany`: a receipt line describes ONE delivered thing. Two generators on one
+     * delivery note are two lines, because they have two serial numbers and each needs its own
+     * custody, service history and eventual disposal.
+     */
+    public function asset(): HasOne
+    {
+        return $this->hasOne(Asset::class);
+    }
+
+    /** The operational-finance ledger row posted when this accepted line became a cost. */
+    public function projectCost(): HasOne
+    {
+        return $this->hasOne(ProjectCost::class, 'source_id')
+            ->where('source_type', $this->getMorphClass());
     }
 
     /**

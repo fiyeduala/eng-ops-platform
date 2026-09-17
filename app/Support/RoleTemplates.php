@@ -873,13 +873,73 @@ final class RoleTemplates
                 'pin' => null,
                 'grants' => [
                     'vehicle.*' => 'organization',
-                    'fuel.*' => 'organization',
+                    'vehicle_document.*' => 'organization',
+                    'fuel_log.*' => 'organization',
                     'asset.*' => 'organization',
                     'asset_maintenance.*' => 'organization',
                     'employee.view' => 'organization',
                     'project.view' => 'organization',
                     'report.export' => 'organization',
                     'approval.act' => 'organization',
+                ],
+            ],
+
+            /*
+             * The person who signs things out, and deliberately CANNOT sign them off.
+             *
+             * `asset.transfer` without `asset.dispose` is the entire shape of this role. A custodian
+             * hands a generator to a site, takes it back, corrects a serial number and records where
+             * it is — every day, on every asset. What they may not do is record that it left the
+             * company, because "disposed" is the one entry that makes a missing thing stop being
+             * missing. Separating the two is why the ability list distinguishes them (§6).
+             *
+             * No fleet reach at all. An asset custodian who could also edit vehicle documents would
+             * be able to record an insurance renewal that never happened, and the plate on the gate
+             * is somebody else's job.
+             */
+            'asset-custodian' => [
+                'name' => 'Asset Custodian',
+                'level' => 50,
+                'description' => 'Keeps the asset register straight: registers equipment, records handovers and tracks where things are. Cannot dispose of anything.',
+                'pin' => null,
+                'grants' => [
+                    'asset.view' => 'organization',
+                    'asset.create' => 'organization',
+                    'asset.edit' => 'organization',
+                    'asset.transfer' => 'organization',
+                    'asset.assign' => 'organization',
+                    'asset_maintenance.view' => 'organization',
+                    'asset_maintenance.create' => 'organization',
+                    'employee.view' => 'organization',
+                    'project.view' => 'organization',
+                    'attendance.create' => 'own',
+                ],
+            ],
+
+            /*
+             * Plans the work, does not certify it done.
+             *
+             * `asset_maintenance.complete` is withheld on purpose: the person who schedules a
+             * service and the person who signs that it happened should be able to be two people,
+             * because a planner marking their own overdue plan complete is the one entry that makes
+             * a maintenance backlog disappear without a spanner being lifted.
+             */
+            'maintenance-planner' => [
+                'name' => 'Maintenance Planner',
+                'level' => 55,
+                'description' => 'Schedules planned maintenance and records breakdowns. Cannot certify work complete.',
+                'pin' => null,
+                'grants' => [
+                    'asset_maintenance.view' => 'organization',
+                    'asset_maintenance.create' => 'organization',
+                    'asset_maintenance.edit' => 'organization',
+                    'asset.view' => 'organization',
+                    'vehicle.view' => 'organization',
+                    'vendor.view' => 'organization',
+                    'purchase_request.create' => 'own',
+                    'purchase_request.submit' => 'own',
+                    'report.export' => 'organization',
+                    'attendance.create' => 'own',
                 ],
             ],
 
@@ -890,8 +950,8 @@ final class RoleTemplates
                 'pin' => null,
                 'grants' => [
                     'vehicle.view' => 'assigned',
-                    'fuel.create' => 'own',
-                    'fuel.view' => 'own',
+                    'fuel_log.create' => 'own',
+                    'fuel_log.view' => 'own',
                     'task.view' => 'assigned',
                     'task.complete' => 'assigned',
                     'attendance.create' => 'own',

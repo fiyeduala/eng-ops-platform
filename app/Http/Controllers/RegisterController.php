@@ -20,6 +20,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * The half of every register screen that is the same on every register screen.
@@ -102,8 +103,17 @@ abstract class RegisterController extends Controller
             $query->forProject($projectId);
         }
 
+        // Guarded on the column existing, because not every register has a discipline. Most do; the
+        // stores, the asset register and the fleet do not, and `?discipline=5` typed onto one of
+        // those URLs would otherwise compile SQL naming a column that is not there — a 500 handed to
+        // anybody who edits a query string, on a page that has no discipline filter to offer them.
+        // The schema lookup only happens when the parameter is actually present, which is rare.
         if ($disciplineId = (int) $request->query('discipline', 0)) {
-            $query->forDiscipline($disciplineId);
+            $model = $query->getModel();
+
+            if (Schema::hasColumn($model->getTable(), 'discipline_id')) {
+                $query->forDiscipline($disciplineId);
+            }
         }
 
         if ($statusId = (int) $request->query('status', 0)) {

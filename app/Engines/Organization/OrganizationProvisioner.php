@@ -247,6 +247,24 @@ class OrganizationProvisioner
             'warehouse.types' => '',
             'material_request.priorities' => '',
 
+            // --- assets & fleet ----------------------------------------------------------
+            // The authoriser requirement defaults ON for the same reason the two separations above
+            // do: the company that most needs it is the company that has never considered it. The
+            // odometer requirement defaults on because a fuel log without a reading can never
+            // contribute to a consumption figure — it is a receipt, not a record.
+            'asset.require_authoriser_on_transfer' => true,
+            'asset.maintenance_warning_days' => 30,
+            'asset.categories' => '',
+            'asset_maintenance.types' => '',
+            'vehicle.types' => '',
+            'vehicle.fuel_types' => '',
+            'vehicle_document.types' => '',
+            // Wider than it feels, and deliberately so: an insurance renewal takes weeks in most
+            // places, and a warning that arrives with a fortnight left is a warning about a vehicle
+            // that is going to be off the road.
+            'vehicle_document.expiry_warning_days' => 60,
+            'fuel_log.odometer_required' => true,
+
             // --- notifications -----------------------------------------------------------
             'notify.channels' => ['database', 'mail'],
             'notify.digest_hour' => 7,

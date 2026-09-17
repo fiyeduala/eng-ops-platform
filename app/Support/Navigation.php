@@ -262,6 +262,43 @@ class Navigation
                 ],
             ],
             [
+                // Assets and fleet are ONE group, not two, because a vehicle here is an asset with
+                // an engine rather than a parallel register — the truck and the generator share a
+                // custody history, an acquisition trail and a retirement. The fleet entries below
+                // are the extra screens a vehicle needs and a generator does not: an odometer, a
+                // fuel account and a wallet of documents that lapse.
+                //
+                // Maintenance is listed second rather than under each asset because the person who
+                // opens it is a planner asking "what is due this month" across everything, not a
+                // custodian looking at one machine. Vehicle documents get their own entry for the
+                // same reason: the question is "what expires soon", which is a date query across
+                // the fleet, and nobody wants to visit forty vehicles to ask it.
+                'label' => 'Assets & fleet',
+                'items' => [
+                    ['label' => 'Asset register', 'route' => 'assets.index', 'icon' => 'archive',
+                        'permission' => 'asset.view', 'active' => 'assets.*'],
+                    ['label' => 'Maintenance', 'route' => 'asset-maintenances.index', 'icon' => 'target',
+                        'permission' => 'asset_maintenance.view', 'active' => 'asset-maintenances.*'],
+                    ['label' => 'Vehicles', 'route' => 'vehicles.index', 'icon' => 'truck',
+                        'permission' => 'vehicle.view', 'active' => 'vehicles.*'],
+                    ['label' => 'Fuel records', 'route' => 'fuel-logs.index', 'icon' => 'clipboard',
+                        'permission' => 'fuel_log.view', 'active' => 'fuel-logs.*'],
+                    ['label' => 'Vehicle documents', 'route' => 'vehicle-documents.index', 'icon' => 'file-text',
+                        'permission' => 'vehicle_document.view', 'active' => 'vehicle-documents.*'],
+                ],
+            ],
+            [
+                'label' => 'Finance',
+                'items' => [
+                    ['label' => 'Project costs', 'route' => 'project-costs.index', 'icon' => 'coins',
+                        'permission' => 'expense.view', 'active' => 'project-costs.*'],
+                    ['label' => 'Budgets', 'route' => 'budgets.index', 'icon' => 'clipboard',
+                        'permission' => 'budget.view', 'active' => 'budgets.*'],
+                    ['label' => 'Cost centers', 'route' => 'cost-centers.index', 'icon' => 'building',
+                        'permission' => 'budget.view', 'active' => 'cost-centers.*'],
+                ],
+            ],
+            [
                 'label' => 'Administration',
                 'items' => [
                     ['label' => 'User accounts', 'route' => 'users.index', 'icon' => 'key',

@@ -16,6 +16,8 @@ use App\Engines\Workflow\AssigneeResolver;
 use App\Events\AnnouncementPublished;
 use App\Events\ApprovalDecided;
 use App\Events\ApprovalRequested;
+use App\Events\AssetCustodyTransferred;
+use App\Events\AssetMaintenanceDue;
 use App\Events\ChangeRequestDecided;
 use App\Events\CorrectiveActionAssigned;
 use App\Events\DocumentApproved;
@@ -49,10 +51,13 @@ use App\Events\StockFellBelowReorderLevel;
 use App\Events\SubmittalReviewed;
 use App\Events\TaskAssigned;
 use App\Events\TransmittalIssued;
+use App\Events\VehicleDocumentExpiring;
 use App\Events\WorkflowStalled;
 use App\Listeners\NotifyAnnouncementAudience;
 use App\Listeners\NotifyApprovalAssignees;
 use App\Listeners\NotifyApprovalOutcome;
+use App\Listeners\NotifyAssetCustodyTransferred;
+use App\Listeners\NotifyAssetMaintenanceDue;
 use App\Listeners\NotifyChangeRequestDecided;
 use App\Listeners\NotifyCorrectiveActionAssigned;
 use App\Listeners\NotifyDocumentApproved;
@@ -86,17 +91,24 @@ use App\Listeners\NotifyStockBelowReorderLevel;
 use App\Listeners\NotifySubmittalReviewed;
 use App\Listeners\NotifyTaskAssignee;
 use App\Listeners\NotifyTransmittalIssued;
+use App\Listeners\NotifyVehicleDocumentExpiring;
 use App\Listeners\NotifyWorkflowStalled;
 use App\Listeners\RecordDocumentSignature;
 use App\Models\ActivityLog;
 use App\Models\Announcement;
 use App\Models\Approval;
+use App\Models\Asset;
+use App\Models\AssetCustodyTransfer;
+use App\Models\AssetMaintenance;
 use App\Models\AuditLog;
+use App\Models\Budget;
+use App\Models\BudgetLine;
 use App\Models\ChangeRequest;
 use App\Models\Client;
 use App\Models\ClientContact;
 use App\Models\Contract;
 use App\Models\CorrectiveAction;
+use App\Models\CostCenter;
 use App\Models\Deliverable;
 use App\Models\Document;
 use App\Models\DocumentCategory;
@@ -104,6 +116,7 @@ use App\Models\DocumentVersion;
 use App\Models\Drawing;
 use App\Models\Employee;
 use App\Models\Follower;
+use App\Models\FuelLog;
 use App\Models\GoodsReceipt;
 use App\Models\GoodsReceiptItem;
 use App\Models\HseInspection;
@@ -132,6 +145,7 @@ use App\Models\PermitPrecaution;
 use App\Models\PermitType;
 use App\Models\Position;
 use App\Models\Project;
+use App\Models\ProjectCost;
 use App\Models\ProjectDepartment;
 use App\Models\ProjectMember;
 use App\Models\ProjectRole;
@@ -173,6 +187,8 @@ use App\Models\TrainingRecord;
 use App\Models\Transmittal;
 use App\Models\TransmittalItem;
 use App\Models\User;
+use App\Models\Vehicle;
+use App\Models\VehicleDocument;
 use App\Models\Vendor;
 use App\Models\VendorContact;
 use App\Models\Warehouse;
@@ -183,12 +199,17 @@ use App\Models\WorkflowStageCondition;
 use App\Models\WorkflowStageInstance;
 use App\Policies\AnnouncementPolicy;
 use App\Policies\ApprovalPolicy;
+use App\Policies\AssetCustodyTransferPolicy;
+use App\Policies\AssetMaintenancePolicy;
+use App\Policies\AssetPolicy;
 use App\Policies\AuditLogPolicy;
+use App\Policies\BudgetPolicy;
 use App\Policies\ChangeRequestPolicy;
 use App\Policies\ClientContactPolicy;
 use App\Policies\ClientPolicy;
 use App\Policies\ContractPolicy;
 use App\Policies\CorrectiveActionPolicy;
+use App\Policies\CostCenterPolicy;
 use App\Policies\DeliverablePolicy;
 use App\Policies\DocumentCategoryPolicy;
 use App\Policies\DocumentPolicy;
@@ -196,6 +217,7 @@ use App\Policies\DocumentVersionPolicy;
 use App\Policies\DrawingPolicy;
 use App\Policies\EmployeePolicy;
 use App\Policies\FollowerPolicy;
+use App\Policies\FuelLogPolicy;
 use App\Policies\GoodsReceiptItemPolicy;
 use App\Policies\GoodsReceiptPolicy;
 use App\Policies\HseInspectionItemPolicy;
@@ -222,6 +244,7 @@ use App\Policies\PermitPolicy;
 use App\Policies\PermitPrecautionPolicy;
 use App\Policies\PermitTypePolicy;
 use App\Policies\PositionPolicy;
+use App\Policies\ProjectCostPolicy;
 use App\Policies\ProjectDepartmentPolicy;
 use App\Policies\ProjectMemberPolicy;
 use App\Policies\ProjectPolicy;
@@ -263,6 +286,8 @@ use App\Policies\TrainingRecordPolicy;
 use App\Policies\TransmittalItemPolicy;
 use App\Policies\TransmittalPolicy;
 use App\Policies\UserPolicy;
+use App\Policies\VehicleDocumentPolicy;
+use App\Policies\VehiclePolicy;
 use App\Policies\VendorContactPolicy;
 use App\Policies\VendorPolicy;
 use App\Policies\WarehousePolicy;
@@ -483,6 +508,25 @@ class AppServiceProvider extends ServiceProvider
             'stock_transaction' => StockTransaction::class,
             'material_request' => MaterialRequest::class,
             'material_request_item' => MaterialRequestItem::class,
+
+            // --- Phase 5: assets and fleet ---------------------------------------------
+            // `asset_custody_transfer` is listed although it is append-only and can never be
+            // edited. That is not a contradiction: the audit engine writes a morph row on CREATE
+            // too, and the creation of a handover is precisely the event somebody will want to
+            // trace back to a user and an IP six months later. A model absent from this map throws
+            // on save, so an unlisted append-only model is a module that cannot write at all.
+            'asset' => Asset::class,
+            'asset_custody_transfer' => AssetCustodyTransfer::class,
+            'asset_maintenance' => AssetMaintenance::class,
+            'vehicle' => Vehicle::class,
+            'fuel_log' => FuelLog::class,
+            'vehicle_document' => VehicleDocument::class,
+
+            // --- Phase 5: operational finance ----------------------------------------
+            'project_cost' => ProjectCost::class,
+            'cost_center' => CostCenter::class,
+            'budget' => Budget::class,
+            'budget_line' => BudgetLine::class,
         ]);
     }
 
@@ -665,6 +709,26 @@ class AppServiceProvider extends ServiceProvider
             StockTransaction::class => StockTransactionPolicy::class,
             MaterialRequest::class => MaterialRequestPolicy::class,
             MaterialRequestItem::class => MaterialRequestItemPolicy::class,
+
+            // Phase 5, part 4 — assets and fleet. AssetCustodyTransferPolicy declares
+            // `$module = 'asset'` rather than a module of its own, matching
+            // AssetCustodyTransfer::permissionModule(): the right to read who has had a machine is
+            // the right to read the machine, and splitting it into two permissions would create
+            // combinations ("may see the history but not the asset") that mean nothing. Like the
+            // stock ledger, it permits no write after the fact — the model throws, and the policy
+            // refuses at the door so nobody meets that exception as a 500.
+            Asset::class => AssetPolicy::class,
+            AssetCustodyTransfer::class => AssetCustodyTransferPolicy::class,
+            AssetMaintenance::class => AssetMaintenancePolicy::class,
+            Vehicle::class => VehiclePolicy::class,
+            FuelLog::class => FuelLogPolicy::class,
+            VehicleDocument::class => VehicleDocumentPolicy::class,
+
+            // Phase 5, part 5 — source-backed finance ledger.
+            ProjectCost::class => ProjectCostPolicy::class,
+            CostCenter::class => CostCenterPolicy::class,
+            Budget::class => BudgetPolicy::class,
+            BudgetLine::class => BudgetPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {
@@ -871,6 +935,20 @@ class AppServiceProvider extends ServiceProvider
             ],
             StockFellBelowReorderLevel::class => [
                 NotifyStockBelowReorderLevel::class,
+            ],
+
+            // Phase 5, part 4 — assets and fleet. Two of these three are raised by a scheduled
+            // sweep rather than by a person, which is why their listeners resolve no causer: the
+            // system noticed, and putting the scheduler's account against the notice would be a
+            // name in the audit trail against a decision that name did not make.
+            AssetCustodyTransferred::class => [
+                NotifyAssetCustodyTransferred::class,
+            ],
+            AssetMaintenanceDue::class => [
+                NotifyAssetMaintenanceDue::class,
+            ],
+            VehicleDocumentExpiring::class => [
+                NotifyVehicleDocumentExpiring::class,
             ],
         ];
 

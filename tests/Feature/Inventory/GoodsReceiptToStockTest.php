@@ -190,6 +190,34 @@ final class GoodsReceiptToStockTest extends TestCase
     }
 
     #[Test]
+    public function foreign_order_prices_are_converted_before_stock_valuation(): void
+    {
+        $order = $this->orderReadyForDelivery();
+        $this->inTenant(function () use ($order) {
+            $order->forceFill(['currency' => 'GBP', 'exchange_rate' => '1.25'])->save();
+        });
+        $receipt = $this->makeGoodsReceipt($this->meridian, $this->segun, $order, null, [
+            'warehouse_id' => $this->store->getKey(),
+        ]);
+
+        $this->inTenant(function () use ($receipt) {
+            $service = app(GoodsReceiptService::class);
+            $service->confirm($receipt, $this->segun);
+            $service->accept($receipt, $this->folake);
+        });
+
+        $movement = $this->inTenant(fn () => StockTransaction::query()->sole());
+        $this->assertSame(51250.0, (float) $movement->unit_cost);
+        $this->assertSame(51250.0, (float) $this->balanceOf($this->store, $this->pipe)->average_cost);
+        $this->assertDatabaseHas('project_costs', [
+            'currency' => 'GBP',
+            'amount' => '984000.00',
+            'base_currency' => 'USD',
+            'base_amount' => '1230000.00',
+        ]);
+    }
+
+    #[Test]
     public function a_delivery_with_no_store_named_reaches_no_shelf(): void
     {
         $order = $this->orderReadyForDelivery();

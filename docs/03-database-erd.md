@@ -164,6 +164,10 @@ material_requests        project_id, requested_by, items, status_id
 assets ──1:N── asset_maintenances / asset_assignments
 vehicles ──1:N── vehicle_maintenances / fuel_records / trips / vehicle_documents
 
+cost_centers             code, name, org_unit_id, project_id, manager_id, is_active
+budgets ──1:N── budget_lines (category, allocated_amount); approved lines are frozen
+project_costs            source_type/id, project_id, org_unit_id, vendor_id,
+                         currency, exchange_rate, amount, base_currency, base_amount
 expenses / incomes / budgets / budget_lines / cost_centers / payments
 ```
 

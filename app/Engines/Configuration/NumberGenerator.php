@@ -338,6 +338,28 @@ class NumberGenerator
             // MR, and deliberately not MRQ or MREQ: it is what is said out loud in a store, and the
             // register it is most confused with — PR — is two letters as well.
             'material_request' => ['prefix' => 'MR', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+
+            /*
+             * --- Phase 5, part 4: assets and fleet ------------------------------------
+             *
+             * ONE ENTRY, NOT FIVE, and the four that are missing are missing for the reason stated
+             * above the inventory block. An asset code is TYPED: a plant manager calls the 250kVA
+             * set GEN-02 because that is what is stencilled on its side, and a vehicle is found by
+             * its plate, which the state issued and we may not invent. A fuel log is identified by
+             * the receipt in the driver's hand, and a vehicle document by the certificate number
+             * printed on it — both are somebody else's number, recorded verbatim.
+             *
+             * A maintenance job is the one EVENT in this part: nothing outside the system issues it
+             * a number, the fitter needs something to write on the job card, and a service in March
+             * and the same service in September must be told apart. MNT rather than WO, because
+             * `work_order_reference` on the same row is where a genuine external work-order number
+             * goes, and two things called WO would be read as one.
+             */
+            'asset_maintenance' => ['prefix' => 'MNT', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+
+            // --- Phase 5, part 5: operational finance --------------------------------
+            'project_cost' => ['prefix' => 'CST', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 6],
+            'budget' => ['prefix' => 'BUD', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
         ];
     }
 }

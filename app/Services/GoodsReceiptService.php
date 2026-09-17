@@ -17,6 +17,7 @@ use App\Models\User;
 use App\Models\Warehouse;
 use App\Services\Concerns\ManagesLineItems;
 use App\Services\Concerns\SeparatesDuties;
+use App\Support\FixedRateMoney;
 use App\Support\OptionList;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
@@ -58,6 +59,7 @@ class GoodsReceiptService extends RegisterService
         private readonly PurchaseOrderService $orders,
         private readonly StockService $stock,
         private readonly StockItemService $catalogue,
+        private readonly ProjectCostService $costs,
     ) {
         parent::__construct($numbers, $statuses, $activity);
     }
@@ -320,15 +322,18 @@ class GoodsReceiptService extends RegisterService
      */
     public function accept(GoodsReceipt $receipt, User $actor, ?string $comment = null): GoodsReceipt
     {
-        if ($receipt->isEditable()) {
-            throw new \DomainException('Confirm the delivery before accepting it.');
-        }
-
-        if ($receipt->statusKey() === 'accepted') {
-            return $receipt;
-        }
-
         return DB::transaction(function () use ($receipt, $actor, $comment) {
+            GoodsReceipt::query()->whereKey($receipt->getKey())->lockForUpdate()->firstOrFail();
+            $receipt->refresh();
+
+            if ($receipt->isEditable()) {
+                throw new \DomainException('Confirm the delivery before accepting it.');
+            }
+
+            if ($receipt->statusKey() === 'accepted') {
+                return $receipt;
+            }
+
             $this->moveTo($receipt, 'accepted');
             $receipt->save();
 
@@ -347,6 +352,7 @@ class GoodsReceiptService extends RegisterService
             // there is no state in which the receipt reads accepted and the store has not been
             // told — which was the whole risk of leaving this to an event listener.
             $this->postToStock($receipt, $actor);
+            $this->costs->postGoodsReceipt($receipt, $actor);
 
             return $receipt;
         });
@@ -462,7 +468,13 @@ class GoodsReceiptService extends RegisterService
                 continue;
             }
 
-            $unitPrice = (float) ($line->purchaseOrderItem?->unit_price ?? 0);
+            $unitPrice = (float) FixedRateMoney::toBase(
+                $line->purchaseOrderItem?->unit_price ?? 0,
+                $order?->currency,
+                $order?->exchange_rate,
+                $actor->organization?->currency,
+                4,
+            );
 
             $this->stock->receive($warehouse, $item, $quantity, $actor, [
                 'unit_cost' => $unitPrice,
