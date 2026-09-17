@@ -109,6 +109,21 @@ class Navigation
                 ],
             ],
             [
+                // Phase 6. Self-service first: nearly everybody in the company books leave, and only
+                // HR sets the rules it is booked against.
+                'label' => 'People',
+                'items' => [
+                    ['label' => 'Leave', 'route' => 'leave.index', 'icon' => 'calendar',
+                        'permission' => 'leave.view', 'active' => ['leave.index', 'leave.show', 'leave.create', 'leave.edit', 'leave.calendar']],
+                    ['label' => 'Leave types', 'route' => 'leave-types.index', 'icon' => 'sliders',
+                        'permission' => 'leave.manage', 'active' => 'leave-types.*'],
+                    ['label' => 'Public holidays', 'route' => 'public-holidays.index', 'icon' => 'flag',
+                        'permission' => 'leave.view', 'active' => 'public-holidays.*'],
+                    ['label' => 'Leave balances', 'route' => 'leave-balances.index', 'icon' => 'coins',
+                        'permission' => 'leave.manage', 'active' => 'leave-balances.*'],
+                ],
+            ],
+            [
                 'label' => 'Delivery',
                 'items' => [
                     ['label' => 'Projects', 'route' => 'projects.index', 'icon' => 'briefcase',

@@ -1095,6 +1095,49 @@ final class StatusCatalogue
                     [null, 'cancelled', 'Cancel', 'asset_maintenance.manage', true],
                 ],
             ],
+
+            // --- Phase 6: people ------------------------------------------------------
+
+            /*
+             * NO TRANSITION HERE IS A BUTTON. Every move a leave request makes is a consequence of
+             * something else: submitting it, the workflow engine closing its route, the requester
+             * withdrawing it. A "Approve" transition in this graph would be a second way to approve
+             * leave that skipped the route — the exact divergence Phase 6's exit criterion forbids.
+             * The graph is listed so administrators can relabel the statuses, not to move records.
+             */
+            'leave_request' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'submitted' => ['label' => 'Awaiting approval', 'color' => 'brand'],
+                    'approved' => ['label' => 'Approved', 'color' => 'success'],
+                    'rejected' => ['label' => 'Rejected', 'color' => 'danger', 'terminal' => true],
+                    'cancelled' => ['label' => 'Cancelled', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [],
+            ],
+
+            // Same rule as leave: every move is a consequence of submitting or of the route closing.
+            // A rejected week is closed; the person starts a fresh sheet for it if the hours were real.
+            'timesheet' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'submitted' => ['label' => 'Awaiting approval', 'color' => 'brand'],
+                    'approved' => ['label' => 'Approved', 'color' => 'success'],
+                    'rejected' => ['label' => 'Rejected', 'color' => 'danger', 'terminal' => true],
+                ],
+                'transitions' => [],
+            ],
+
+            'overtime_request' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'submitted' => ['label' => 'Awaiting approval', 'color' => 'brand'],
+                    'approved' => ['label' => 'Approved', 'color' => 'success'],
+                    'rejected' => ['label' => 'Rejected', 'color' => 'danger', 'terminal' => true],
+                    'cancelled' => ['label' => 'Cancelled', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [],
+            ],
         ];
     }
 

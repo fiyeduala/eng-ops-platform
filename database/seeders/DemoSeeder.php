@@ -21,6 +21,7 @@ use App\Models\DocumentCategory;
 use App\Models\DocumentVersion;
 use App\Models\Employee;
 use App\Models\GoodsReceiptItem;
+use App\Models\LeaveType;
 use App\Models\Location;
 use App\Models\Meeting;
 use App\Models\Memo;
@@ -31,6 +32,7 @@ use App\Models\Position;
 use App\Models\Project;
 use App\Models\ProjectRole;
 use App\Models\ProjectType;
+use App\Models\PublicHoliday;
 use App\Models\PurchaseOrder;
 use App\Models\Quotation;
 use App\Models\Rfi;
@@ -67,6 +69,7 @@ use App\Services\HseObservationService;
 use App\Services\IncidentService;
 use App\Services\IncomeService;
 use App\Services\InvestigationService;
+use App\Services\LeaveService;
 use App\Services\MaterialRequestService;
 use App\Services\MeetingService;
 use App\Services\MemoService;
@@ -256,6 +259,34 @@ class DemoSeeder extends Seeder
         // order, and every approved claim and petty cash voucher lands on a project's cost line.
         $this->seedMeridianFinance($meridian);
         $this->seedKestrelFinance($kestrel);
+
+        // People: public holidays and leave. Every decided request below went through the same
+        // route engine as the documents above — the line manager acted on a stage, nothing more.
+        // Week numbers are counted from 1 January, so the leave lands in this year however late
+        // the demo is seeded; working days are Monday to Friday.
+        $this->seedPeople($meridian, $this->context->within($meridian, fn () => $this->accountOf($this->staff(), 'MEI-0017')), [
+            ['New Year\'s Day', now()->year.'-01-01', true],
+            ['Workers\' Day', now()->year.'-05-01', true],
+            ['Independence Day', now()->year.'-10-01', true],
+            ['Christmas Day', now()->year.'-12-25', true],
+            ['Boxing Day', now()->year.'-12-26', true],
+        ], [
+            ['MEI-0006', 'ANNUAL', 10, 5, 'approved', 'MEI-0005', 'Enjoy the break — Ibrahim covers the slab checks.'],
+            ['MEI-0009', 'ANNUAL', 30, 4, 'pending', null, null],
+            ['MEI-0006', 'SICK', 14, 2, 'approved', 'MEI-0005', 'Get well soon.'],
+            ['MEI-0009', 'ANNUAL', 12, 5, 'rejected', 'MEI-0005', 'Pile tests are that week. Pick another week and I will approve it.'],
+            ['MEI-0014', 'ANNUAL', 40, 3, 'draft', null, null],
+        ]);
+        $this->seedPeople($kestrel, $this->context->within($kestrel, fn () => $this->accountOf($this->staff(), 'KFM-008')), [
+            ['New Year\'s Day', now()->year.'-01-01', true],
+            ['Spring bank holiday', now()->year.'-05-25', false],
+            ['Summer bank holiday', now()->year.'-08-31', false],
+            ['Christmas Day', now()->year.'-12-25', true],
+        ], [
+            ['KFM-005', 'ANNUAL', 20, 5, 'approved', 'KFM-003', 'Approved. Erin is on call that week.'],
+            ['KFM-006', 'ANNUAL', 33, 3, 'pending', null, null],
+            ['KFM-006', 'UNPAID', 8, 2, 'rejected', 'KFM-003', 'Chiller changeover needs both technicians.'],
+        ]);
 
         // The rows above were written straight to the database, so nothing observed them happening.
         // A demo whose record timelines are all blank teaches the wrong lesson about Engine 4 — the
@@ -7749,7 +7780,67 @@ class DemoSeeder extends Seeder
         });
     }
 
-    // ================================================================= narrative history
+    // ================================================================= people (Phase 6)
+
+    /**
+     * Holidays and leave, with every approval decided through the workflow engine.
+     *
+     * Each company has leave in every state an evaluator should be able to open: approved (the line
+     * manager decided it through the route), waiting in a manager's inbox, rejected with a reason,
+     * and a draft nobody has sent. The holidays differ because they are company data (§47).
+     *
+     * @param  array<int,array{0:string,1:string,2:bool}>  $holidays  name, date (Y-m-d), recurring
+     * @param  array<int,array{0:string,1:string,2:int,3:int,4:string,5:?string,6:?string}>  $leave
+     *                                                                                               employee no, type code, week of year, working days, state, decider employee no, comment
+     */
+    private function seedPeople(Organization $organization, User $hr, array $holidays, array $leave): void
+    {
+        $this->context->within($organization, function () use ($organization, $hr, $holidays, $leave) {
+            $service = app(LeaveService::class);
+            $staff = $this->staff();
+            $types = LeaveType::query()->get()->keyBy('code');
+
+            foreach ($holidays as [$name, $date, $recurring]) {
+                PublicHoliday::create([
+                    'organization_id' => $organization->id,
+                    'name' => $name,
+                    'holiday_date' => $date,
+                    'is_recurring' => $recurring,
+                    'created_by' => $hr->id,
+                ]);
+            }
+
+            foreach ($leave as [$employeeNo, $code, $week, $days, $state, $deciderNo, $comment]) {
+                $employee = $staff[$employeeNo];
+                $requester = $this->accountOf($staff, $employeeNo);
+
+                // Always inside this calendar year, whenever the demo is seeded: leave never spans a
+                // year boundary, because balances are kept per year.
+                $start = now()->startOfYear()->addWeeks($week)->startOfWeek();
+                $end = $start->copy()->addDays($days - 1);
+
+                $request = $service->create([
+                    'employee_id' => $employee->id,
+                    'leave_type_id' => $types[$code]->id,
+                    'start_date' => $start->toDateString(),
+                    'end_date' => $end->toDateString(),
+                    'reason' => $code === 'SICK' ? 'Unwell.' : 'Family time.',
+                    'contact_while_away' => 'Mobile, urgent matters only',
+                ], $requester);
+
+                if ($state === 'draft') {
+                    continue;
+                }
+
+                $service->submit($request, $requester);
+
+                if ($deciderNo !== null) {
+                    $decision = $state === 'rejected' ? Decision::Reject : Decision::Approve;
+                    $this->decide($request->refresh(), $this->accountOf($staff, $deciderNo), $decision, (string) $comment);
+                }
+            }
+        });
+    }
 
     /**
      * A plausible past for a company that was set up months ago (section 60).

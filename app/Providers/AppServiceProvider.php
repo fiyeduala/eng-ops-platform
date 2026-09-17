@@ -133,6 +133,9 @@ use App\Models\Incident;
 use App\Models\IncidentPerson;
 use App\Models\Income;
 use App\Models\Investigation;
+use App\Models\LeaveBalance;
+use App\Models\LeaveRequest;
+use App\Models\LeaveType;
 use App\Models\Location;
 use App\Models\MaterialRequest;
 use App\Models\MaterialRequestItem;
@@ -161,6 +164,7 @@ use App\Models\ProjectDepartment;
 use App\Models\ProjectMember;
 use App\Models\ProjectRole;
 use App\Models\ProjectType;
+use App\Models\PublicHoliday;
 use App\Models\PurchaseOrder;
 use App\Models\PurchaseOrderItem;
 use App\Models\PurchaseRequest;
@@ -240,6 +244,8 @@ use App\Policies\IncidentPersonPolicy;
 use App\Policies\IncidentPolicy;
 use App\Policies\IncomePolicy;
 use App\Policies\InvestigationPolicy;
+use App\Policies\LeaveRequestPolicy;
+use App\Policies\LeaveSettingsPolicy;
 use App\Policies\LocationPolicy;
 use App\Policies\MaterialRequestItemPolicy;
 use App\Policies\MaterialRequestPolicy;
@@ -551,6 +557,11 @@ class AppServiceProvider extends ServiceProvider
             'payment' => Payment::class,
             'petty_cash_account' => PettyCashAccount::class,
             'petty_cash_transaction' => PettyCashTransaction::class,
+
+            'leave_type' => LeaveType::class,
+            'public_holiday' => PublicHoliday::class,
+            'leave_balance' => LeaveBalance::class,
+            'leave_request' => LeaveRequest::class,
         ]);
     }
 
@@ -759,6 +770,10 @@ class AppServiceProvider extends ServiceProvider
             Payment::class => PaymentPolicy::class,
             PettyCashAccount::class => PettyCashAccountPolicy::class,
             PettyCashTransaction::class => PettyCashTransactionPolicy::class,
+            LeaveType::class => LeaveSettingsPolicy::class,
+            PublicHoliday::class => LeaveSettingsPolicy::class,
+            LeaveBalance::class => LeaveSettingsPolicy::class,
+            LeaveRequest::class => LeaveRequestPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {

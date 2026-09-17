@@ -46,13 +46,25 @@ final class RoleTemplates
     private const BASELINE = [
         'employee.view' => 'own',        // my own personnel record
         'user.view' => 'own',            // my own account and sign-in details
-        'leave.view' => 'own',
+        'leave.view' => 'assigned',     // my own leave, and the leave of people who report to me
         'leave.create' => 'own',
+        'leave.edit' => 'own',          // a request sent back for changes returns as a draft
         'leave.submit' => 'own',
-        'timesheet.view' => 'own',
+        'leave.delete' => 'own',        // a draft that was never sent
+        // Time records. `.view` at `assigned` for the same reason as leave: the default routes send
+        // them to the line manager, and `assigned` is "people who report to me" on these models.
+        'timesheet.view' => 'assigned',
         'timesheet.create' => 'own',
+        'timesheet.edit' => 'own',       // filling in the week, and a sheet sent back for changes
         'timesheet.submit' => 'own',
-        'attendance.view' => 'own',
+        'timesheet.delete' => 'own',     // a draft that was never sent
+        'attendance.view' => 'assigned',
+        'attendance.create' => 'own',    // clocking in and out
+        'overtime.view' => 'assigned',
+        'overtime.create' => 'own',
+        'overtime.edit' => 'own',
+        'overtime.submit' => 'own',
+        'overtime.delete' => 'own',
         'expense.view' => 'own',
         'expense.create' => 'own',
         'expense.edit' => 'own',         // a claim returned for amendment comes back as a draft
@@ -60,6 +72,14 @@ final class RoleTemplates
         'task.view' => 'assigned',       // tasks given to me
         'task.complete' => 'assigned',
         'announcement.view' => 'organization',
+
+        // Decisions somebody was actually asked to make. A line manager is the approver on their
+        // team's leave and timesheets whatever else their role says, and without these the request
+        // would sit in an inbox its approver cannot open. `assigned` is the frozen assignee list on
+        // the stage (WorkflowStageInstance::applyAssignedScope), and the policy re-checks that list
+        // before any decision — so this reaches no stage a person was not routed.
+        'approval.view' => 'assigned',
+        'approval.act' => 'assigned',
 
         // Communication addressed to me personally (§18, §19). At `assigned` scope, which for these
         // two modules means the distribution list and the participant list — so this grants sight of
@@ -1121,7 +1141,7 @@ final class RoleTemplates
                     'memo.view' => 'assigned',
                     'leave.create' => 'own',
                     'leave.submit' => 'own',
-                    'leave.view' => 'own',
+                    'leave.view' => 'assigned',
                     'attendance.create' => 'own',
                     'attendance.view' => 'own',
                     'timesheet.create' => 'own',

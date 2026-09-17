@@ -178,6 +178,9 @@ final class PermissionCatalogue
             'employee' => ['People', 'Employees', [...self::CRUD, 'manage', 'view_contact', 'view_confidential']],
             'attendance' => ['People', 'Attendance', [...self::CRUD, 'manage', 'approve']],
             'timesheet' => ['People', 'Timesheets', [...self::CRUD, 'manage', 'submit', 'approve']],
+            // Pre-approval for extra hours. Deciding it is acting on its workflow stage, as with
+            // leave and timesheets, so there is no `approve` here to grant by mistake.
+            'overtime' => ['People', 'Overtime', [...self::CRUD, 'manage', 'submit']],
             'leave' => ['People', 'Leave', [...self::CRUD, 'manage', 'submit', 'approve', 'reject']],
             'recruitment' => ['People', 'Recruitment', [...self::CRUD, 'manage']],
             'performance' => ['People', 'Performance', [...self::CRUD, 'manage', 'approve', 'view_confidential']],

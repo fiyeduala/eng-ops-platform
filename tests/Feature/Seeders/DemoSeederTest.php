@@ -6,6 +6,7 @@ namespace Tests\Feature\Seeders;
 
 use App\Engines\Access\OrganizationContext;
 use App\Models\Announcement;
+use App\Models\LeaveRequest;
 use App\Models\Meeting;
 use App\Models\Memo;
 use App\Models\Organization;
@@ -14,6 +15,7 @@ use App\Models\ProjectMember;
 use App\Models\Status;
 use App\Models\Task;
 use App\Models\User;
+use App\Models\WorkflowStageInstance;
 use App\Services\TaskService;
 use Database\Seeders\DemoSeeder;
 use Database\Seeders\PermissionSeeder;
@@ -443,6 +445,31 @@ final class DemoSeederTest extends TestCase
             (string) $stamps->max(),
             'the demo contains communications from the future.',
         );
+    }
+
+    #[Test]
+    public function leave_was_decided_by_line_managers_through_the_route_engine(): void
+    {
+        foreach ([$this->meridian, $this->kestrel] as $organization) {
+            $states = $this->within($organization, fn () => LeaveRequest::query()->with('status')->get()
+                ->map(fn (LeaveRequest $leave) => $leave->statusKey())->countBy()->all());
+
+            $this->assertArrayHasKey('approved', $states, $organization->name.' has no approved leave.');
+            $this->assertArrayHasKey('submitted', $states, $organization->name.' has no leave awaiting a decision.');
+            $this->assertArrayHasKey('rejected', $states, $organization->name.' has no rejected leave.');
+
+            // Nothing was approved behind the engine's back: every decided request has a closed route.
+            $unrouted = $this->within($organization, fn () => LeaveRequest::query()
+                ->whereHas('status', fn ($q) => $q->whereIn('key', ['approved', 'rejected']))
+                ->whereDoesntHave('workflowInstances')
+                ->count());
+            $this->assertSame(0, $unrouted, $organization->name.' has leave decided outside a workflow.');
+
+            $waiting = $this->within($organization, fn () => WorkflowStageInstance::query()->pending()
+                ->whereHas('instance', fn ($q) => $q->where('subject_type', 'leave_request'))
+                ->count());
+            $this->assertGreaterThan(0, $waiting, $organization->name.' has no leave in anybody\'s inbox.');
+        }
     }
 
     // ------------------------------------------------------------------ helpers

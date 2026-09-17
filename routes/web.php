@@ -33,6 +33,8 @@ use App\Http\Controllers\HseObservationController;
 use App\Http\Controllers\IncidentController;
 use App\Http\Controllers\IncomeController;
 use App\Http\Controllers\InvestigationController;
+use App\Http\Controllers\LeaveRequestController;
+use App\Http\Controllers\LeaveSettingsController;
 use App\Http\Controllers\LocationController;
 use App\Http\Controllers\MaterialRequestController;
 use App\Http\Controllers\MeetingController;
@@ -2070,6 +2072,52 @@ Route::middleware(['auth', 'password.current'])->group(function () {
         Route::delete('tax-codes/{tax_code}', [TaxCodeController::class, 'destroy'])
             ->middleware('permission:tax_code.delete')->name('tax-codes.destroy');
     });
+
+    // --- leave (Phase 6) -----------------------------------------------------------------------
+    //
+    // No approve or reject routes: a leave request is decided at approvals.decide, the same endpoint
+    // that decides a drawing. That is the phase's exit criterion, and the absence here is the proof.
+    //
+    Route::middleware('permission:leave.view')->group(function () {
+        Route::get('leave', [LeaveRequestController::class, 'index'])->name('leave.index');
+        Route::get('leave/calendar', [LeaveRequestController::class, 'calendar'])->name('leave.calendar');
+        Route::get('leave/{leave}', [LeaveRequestController::class, 'show'])->whereNumber('leave')->name('leave.show');
+    });
+    Route::middleware('permission:leave.create')->group(function () {
+        Route::get('leave/create', [LeaveRequestController::class, 'create'])->name('leave.create');
+        Route::post('leave', [LeaveRequestController::class, 'store'])->name('leave.store');
+    });
+    Route::whereNumber('leave')->group(function () {
+        Route::get('leave/{leave}/edit', [LeaveRequestController::class, 'edit'])
+            ->middleware('permission:leave.edit')->name('leave.edit');
+        Route::put('leave/{leave}', [LeaveRequestController::class, 'update'])
+            ->middleware('permission:leave.edit')->name('leave.update');
+        Route::delete('leave/{leave}', [LeaveRequestController::class, 'destroy'])
+            ->middleware('permission:leave.delete')->name('leave.destroy');
+        Route::post('leave/{leave}/submit', [LeaveRequestController::class, 'submit'])
+            ->middleware('permission:leave.submit')->name('leave.submit');
+        Route::post('leave/{leave}/cancel', [LeaveRequestController::class, 'cancel'])
+            ->middleware('permission:leave.submit,leave.manage')->name('leave.cancel');
+    });
+
+    // The company's leave rules. The policy narrows every write to organisation-wide leave.manage.
+    Route::middleware('permission:leave.manage')->group(function () {
+        Route::get('leave-types', [LeaveSettingsController::class, 'types'])->name('leave-types.index');
+        Route::get('leave-types/create', [LeaveSettingsController::class, 'createType'])->name('leave-types.create');
+        Route::post('leave-types', [LeaveSettingsController::class, 'storeType'])->name('leave-types.store');
+        Route::whereNumber('leave_type')->group(function () {
+            Route::get('leave-types/{leave_type}/edit', [LeaveSettingsController::class, 'editType'])->name('leave-types.edit');
+            Route::put('leave-types/{leave_type}', [LeaveSettingsController::class, 'updateType'])->name('leave-types.update');
+            Route::delete('leave-types/{leave_type}', [LeaveSettingsController::class, 'destroyType'])->name('leave-types.destroy');
+        });
+        Route::post('public-holidays', [LeaveSettingsController::class, 'storeHoliday'])->name('public-holidays.store');
+        Route::delete('public-holidays/{public_holiday}', [LeaveSettingsController::class, 'destroyHoliday'])
+            ->whereNumber('public_holiday')->name('public-holidays.destroy');
+        Route::get('leave-balances', [LeaveSettingsController::class, 'balances'])->name('leave-balances.index');
+        Route::put('leave-balances/{leave_balance}', [LeaveSettingsController::class, 'updateBalance'])
+            ->whereNumber('leave_balance')->name('leave-balances.update');
+    });
+    Route::middleware('permission:leave.view')->get('public-holidays', [LeaveSettingsController::class, 'holidays'])->name('public-holidays.index');
 
     // --- assets --------------------------------------------------------------------------------
     //

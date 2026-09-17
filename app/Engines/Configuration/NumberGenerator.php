@@ -367,6 +367,11 @@ class NumberGenerator
             'income' => ['prefix' => 'INC', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 5],
             'payment' => ['prefix' => 'PAY', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 5],
             'petty_cash_transaction' => ['prefix' => 'PCV', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 5],
+
+            // --- Phase 6: people ------------------------------------------------------
+            'leave_request' => ['prefix' => 'LV', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 5],
+            'timesheet' => ['prefix' => 'TS', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 5],
+            'overtime_request' => ['prefix' => 'OT', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 5],
         ];
     }
 }

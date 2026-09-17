@@ -7,6 +7,7 @@ namespace App\Engines\Organization;
 use App\Engines\Access\OrganizationContext;
 use App\Engines\Configuration\NumberGenerator;
 use App\Models\DocumentCategory;
+use App\Models\LeaveType;
 use App\Models\NumberingScheme;
 use App\Models\Organization;
 use App\Models\ProjectRole;
@@ -71,6 +72,9 @@ class OrganizationProvisioner
                 // unrouted, and nobody would find out until the first document was submitted.
                 $workflow = $this->seedDocumentWorkflow($organization);
                 $this->seedDocumentRegisters($organization, $workflow);
+
+                $this->seedLeaveWorkflow($organization);
+                $this->seedLeaveTypes($organization);
             });
 
             return $organization->refresh();
@@ -571,6 +575,91 @@ class OrganizationProvisioner
         ]);
 
         return $workflow;
+    }
+
+    /**
+     * The default leave route: one stage, the requester's line manager.
+     *
+     * THE SAME ENGINE AS A DOCUMENT (Phase 6's exit criterion). This is an ordinary workflow row an
+     * administrator edits in the ordinary workflow builder — add an HR stage, a condition on
+     * `days`, a second approver for long absences — and nothing about leave changes in code.
+     */
+    public function seedLeaveWorkflow(Organization $organization): ?Workflow
+    {
+        $existing = Workflow::query()
+            ->where('entity_type', 'leave_request')
+            ->where('name', 'Leave approval')
+            ->first();
+
+        if ($existing !== null) {
+            return $existing;
+        }
+
+        $workflow = Workflow::create([
+            'organization_id' => $organization->id,
+            'name' => 'Leave approval',
+            'description' => 'The route a leave request takes when it is submitted: the requester\'s '
+                .'line manager decides. Add stages or conditions to suit how the company approves leave.',
+            'entity_type' => 'leave_request',
+            'trigger' => 'submitted',
+            'version' => 1,
+            'is_default' => true,
+            'is_active' => true,
+            'published_at' => now(),
+        ]);
+
+        WorkflowStage::create([
+            'organization_id' => $organization->id,
+            'workflow_id' => $workflow->id,
+            'sequence' => 1,
+            'name' => 'Line manager',
+            'instructions' => 'Check the dates work for the team. Returning the request sends it back '
+                .'to the requester to change; rejecting it closes it.',
+            'assignee_type' => 'supervisor',
+            'assignee_ref' => null,
+            'action_type' => 'approve',
+            'quorum' => WorkflowStage::QUORUM_ANY,
+            'sla_hours' => 48,
+            'on_reject' => WorkflowStage::ON_REJECT_TERMINATE,
+            'allow_delegate' => true,
+            'allow_self_approval' => false,
+            'is_active' => true,
+        ]);
+
+        return $workflow;
+    }
+
+    /**
+     * Starter leave types. Opinions, not entitlements (§47): every number here is a row HR edits.
+     */
+    public function seedLeaveTypes(Organization $organization): void
+    {
+        $types = [
+            ['ANNUAL', 'Annual leave', '20.00', '5.00', null, 0, true],
+            ['SICK', 'Sick leave', '10.00', '0.00', null, 0, true],
+            ['UNPAID', 'Unpaid leave', null, '0.00', null, 0, false],
+        ];
+
+        foreach ($types as $sort => [$code, $name, $days, $carry, $max, $notice, $paid]) {
+            if (LeaveType::withTrashed()->where('code', $code)->exists()) {
+                continue;
+            }
+
+            LeaveType::create([
+                'organization_id' => $organization->id,
+                'code' => $code,
+                'name' => $name,
+                'days_per_year' => $days,
+                'carry_over_limit' => $carry,
+                'max_consecutive_days' => $max,
+                'min_notice_days' => $notice,
+                'is_paid' => $paid,
+                'requires_approval' => true,
+                'allow_half_days' => true,
+                'is_active' => true,
+                'sort' => $sort,
+            ]);
+        }
     }
 
     /**

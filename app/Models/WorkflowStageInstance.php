@@ -102,6 +102,19 @@ class WorkflowStageInstance extends Model
         return ['acted_by'];
     }
 
+    /**
+     * `assigned` means the frozen assignee list — the stages a person was actually asked to decide.
+     *
+     * Without this the stage has no assignee column, so an `assigned` grant would fall back to
+     * `acted_by` alone and a person could never reach a stage before deciding it.
+     *
+     * @param  Builder<static>  $query
+     */
+    public function applyAssignedScope(Builder $query, User $user): void
+    {
+        $query->orWhere(fn (Builder $q) => $this->scopeAssignedTo($q, $user));
+    }
+
     public static function permissionModule(): string
     {
         return 'approval';
