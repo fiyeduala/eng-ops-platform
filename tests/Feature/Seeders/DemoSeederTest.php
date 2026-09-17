@@ -6,14 +6,17 @@ namespace Tests\Feature\Seeders;
 
 use App\Engines\Access\OrganizationContext;
 use App\Models\Announcement;
+use App\Models\AttendanceRecord;
 use App\Models\LeaveRequest;
 use App\Models\Meeting;
 use App\Models\Memo;
 use App\Models\Organization;
+use App\Models\OvertimeRequest;
 use App\Models\Project;
 use App\Models\ProjectMember;
 use App\Models\Status;
 use App\Models\Task;
+use App\Models\Timesheet;
 use App\Models\User;
 use App\Models\WorkflowStageInstance;
 use App\Services\TaskService;
@@ -469,6 +472,47 @@ final class DemoSeederTest extends TestCase
                 ->whereHas('instance', fn ($q) => $q->where('subject_type', 'leave_request'))
                 ->count());
             $this->assertGreaterThan(0, $waiting, $organization->name.' has no leave in anybody\'s inbox.');
+        }
+    }
+
+    #[Test]
+    public function hours_were_clocked_booked_and_decided_on_the_same_route_as_everything_else(): void
+    {
+        foreach ([$this->meridian, $this->kestrel] as $organization) {
+            [$shifts, $open, $corrected, $sheets, $overtime, $worked, $waiting] = $this->within($organization, fn () => [
+                AttendanceRecord::query()->count(),
+                AttendanceRecord::query()->open()->count(),
+                AttendanceRecord::query()->whereNotNull('adjusted_by')->count(),
+                Timesheet::query()->with('status')->get()->map(fn (Timesheet $s) => $s->statusKey())->countBy()->all(),
+                OvertimeRequest::query()->with('status')->get()->map(fn (OvertimeRequest $o) => $o->statusKey())->countBy()->all(),
+                OvertimeRequest::query()->whereNotNull('worked_hours')->count(),
+                WorkflowStageInstance::query()->pending()
+                    ->whereHas('instance', fn ($q) => $q->whereIn('subject_type', ['timesheet', 'overtime_request']))
+                    ->count(),
+            ]);
+
+            $this->assertGreaterThan(5, $shifts, $organization->name.' has barely any attendance.');
+            $this->assertSame(1, $corrected, $organization->name.' shows no shift put right by hand.');
+            $this->assertLessThanOrEqual(1, $open, $organization->name.' has people clocked in twice over.');
+
+            $this->assertArrayHasKey('approved', $sheets, $organization->name.' has no approved timesheet.');
+            $this->assertArrayHasKey('submitted', $sheets, $organization->name.' has no timesheet awaiting a decision.');
+            $this->assertArrayHasKey('draft', $sheets, $organization->name.' has no timesheet still being filled in.');
+            $this->assertArrayHasKey('approved', $overtime, $organization->name.' has no approved overtime.');
+            $this->assertGreaterThan(0, $worked, $organization->name.' has no overtime with the hours actually worked.');
+            $this->assertGreaterThan(0, $waiting, $organization->name.' has no hours in anybody\'s inbox.');
+
+            // Nothing was decided behind the engine's back — the same check leave gets above.
+            $unrouted = $this->within($organization, fn () => Timesheet::query()
+                ->whereHas('status', fn ($q) => $q->whereIn('key', ['approved', 'rejected']))
+                ->whereDoesntHave('workflowInstances')
+                ->count());
+            $this->assertSame(0, $unrouted, $organization->name.' has timesheets decided outside a workflow.');
+
+            // And no overtime claims more hours than were approved (§ the payroll reads this).
+            $overclaimed = $this->within($organization, fn () => OvertimeRequest::query()
+                ->whereColumn('worked_hours', '>', 'hours')->count());
+            $this->assertSame(0, $overclaimed, $organization->name.' pays for overtime nobody approved.');
         }
     }
 

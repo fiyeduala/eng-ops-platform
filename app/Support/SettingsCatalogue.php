@@ -87,6 +87,8 @@ final class SettingsCatalogue
                     'work.day_start' => ['label' => 'Working day starts', 'type' => 'time'],
                     'work.day_end' => ['label' => 'Working day ends', 'type' => 'time'],
                     'work.hours_per_day' => ['label' => 'Standard hours per day', 'type' => 'integer', 'rules' => ['required', 'integer', 'between:1,24']],
+                    'attendance.capture_location' => ['label' => 'Record where people clock in from', 'type' => 'boolean', 'help' => 'Asks the phone for its position when somebody clocks in or out. Off by default: a location is personal data, and a refused request never stops the clock-in.'],
+                    'timesheet.max_hours_per_day' => ['label' => 'Most hours one person may book in a day', 'type' => 'integer', 'rules' => ['required', 'integer', 'between:1,24']],
                 ],
             ],
 

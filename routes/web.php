@@ -6,6 +6,7 @@ use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\ApprovalController;
 use App\Http\Controllers\AssetController;
 use App\Http\Controllers\AssetMaintenanceController;
+use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\PasswordController;
@@ -43,6 +44,7 @@ use App\Http\Controllers\NcrController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\OrganizationController;
 use App\Http\Controllers\OrgUnitController;
+use App\Http\Controllers\OvertimeRequestController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\PermitController;
 use App\Http\Controllers\PermitTypeController;
@@ -70,6 +72,7 @@ use App\Http\Controllers\TaskController;
 use App\Http\Controllers\TaskDependencyController;
 use App\Http\Controllers\TaxCodeController;
 use App\Http\Controllers\TemplateController;
+use App\Http\Controllers\TimesheetController;
 use App\Http\Controllers\ToolboxTalkController;
 use App\Http\Controllers\TrainingCourseController;
 use App\Http\Controllers\TrainingRecordController;
@@ -2118,6 +2121,62 @@ Route::middleware(['auth', 'password.current'])->group(function () {
             ->whereNumber('leave_balance')->name('leave-balances.update');
     });
     Route::middleware('permission:leave.view')->get('public-holidays', [LeaveSettingsController::class, 'holidays'])->name('public-holidays.index');
+
+    // --- attendance, timesheets, overtime (Phase 6) --------------------------------------------
+    //
+    // Clocking in takes no employee and no time from the request: whose shift comes from the session
+    // and when from the server's clock. Timesheets and overtime, like leave, have no approve route.
+    //
+    Route::middleware('permission:attendance.view')->get('attendance', [AttendanceController::class, 'index'])->name('attendance.index');
+    Route::middleware('permission:attendance.create')->group(function () {
+        Route::post('attendance/clock-in', [AttendanceController::class, 'clockIn'])->name('attendance.clock-in');
+        Route::post('attendance/clock-out', [AttendanceController::class, 'clockOut'])->name('attendance.clock-out');
+    });
+    Route::middleware('permission:attendance.edit')->group(function () {
+        Route::get('attendance/create', [AttendanceController::class, 'create'])->name('attendance.create');
+        Route::post('attendance', [AttendanceController::class, 'store'])->name('attendance.store');
+        Route::get('attendance/{attendance}/edit', [AttendanceController::class, 'edit'])->whereNumber('attendance')->name('attendance.edit');
+        Route::put('attendance/{attendance}', [AttendanceController::class, 'update'])->whereNumber('attendance')->name('attendance.update');
+    });
+
+    Route::middleware('permission:timesheet.view')->group(function () {
+        Route::get('timesheets', [TimesheetController::class, 'index'])->name('timesheets.index');
+        Route::get('timesheets/{timesheet}', [TimesheetController::class, 'show'])->whereNumber('timesheet')->name('timesheets.show');
+    });
+    Route::middleware('permission:timesheet.create')->post('timesheets', [TimesheetController::class, 'store'])->name('timesheets.store');
+    Route::whereNumber('timesheet')->group(function () {
+        Route::get('timesheets/{timesheet}/edit', [TimesheetController::class, 'edit'])
+            ->middleware('permission:timesheet.edit')->name('timesheets.edit');
+        Route::put('timesheets/{timesheet}', [TimesheetController::class, 'update'])
+            ->middleware('permission:timesheet.edit')->name('timesheets.update');
+        Route::delete('timesheets/{timesheet}', [TimesheetController::class, 'destroy'])
+            ->middleware('permission:timesheet.delete')->name('timesheets.destroy');
+        Route::post('timesheets/{timesheet}/submit', [TimesheetController::class, 'submit'])
+            ->middleware('permission:timesheet.submit')->name('timesheets.submit');
+    });
+
+    Route::middleware('permission:overtime.view')->group(function () {
+        Route::get('overtime', [OvertimeRequestController::class, 'index'])->name('overtime.index');
+        Route::get('overtime/{overtime}', [OvertimeRequestController::class, 'show'])->whereNumber('overtime')->name('overtime.show');
+    });
+    Route::middleware('permission:overtime.create')->group(function () {
+        Route::get('overtime/create', [OvertimeRequestController::class, 'create'])->name('overtime.create');
+        Route::post('overtime', [OvertimeRequestController::class, 'store'])->name('overtime.store');
+    });
+    Route::whereNumber('overtime')->group(function () {
+        Route::get('overtime/{overtime}/edit', [OvertimeRequestController::class, 'edit'])
+            ->middleware('permission:overtime.edit')->name('overtime.edit');
+        Route::put('overtime/{overtime}', [OvertimeRequestController::class, 'update'])
+            ->middleware('permission:overtime.edit')->name('overtime.update');
+        Route::delete('overtime/{overtime}', [OvertimeRequestController::class, 'destroy'])
+            ->middleware('permission:overtime.delete')->name('overtime.destroy');
+        Route::post('overtime/{overtime}/submit', [OvertimeRequestController::class, 'submit'])
+            ->middleware('permission:overtime.submit')->name('overtime.submit');
+        Route::post('overtime/{overtime}/cancel', [OvertimeRequestController::class, 'cancel'])
+            ->middleware('permission:overtime.submit,overtime.manage')->name('overtime.cancel');
+        Route::post('overtime/{overtime}/worked', [OvertimeRequestController::class, 'recordWorked'])
+            ->middleware('permission:overtime.submit,overtime.manage')->name('overtime.worked');
+    });
 
     // --- assets --------------------------------------------------------------------------------
     //

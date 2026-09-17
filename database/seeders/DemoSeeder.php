@@ -14,6 +14,7 @@ use App\Engines\Organization\OrgUnitService;
 use App\Engines\Workflow\WorkflowEngine;
 use App\Models\Announcement;
 use App\Models\Asset;
+use App\Models\AttendanceRecord;
 use App\Models\Client;
 use App\Models\Contract;
 use App\Models\Document;
@@ -53,6 +54,7 @@ use App\Models\WorkflowStageInstance;
 use App\Services\AnnouncementService;
 use App\Services\AssetMaintenanceService;
 use App\Services\AssetService;
+use App\Services\AttendanceService;
 use App\Services\ChangeRequestService;
 use App\Services\ClientService;
 use App\Services\ContractService;
@@ -74,6 +76,7 @@ use App\Services\MaterialRequestService;
 use App\Services\MeetingService;
 use App\Services\MemoService;
 use App\Services\NcrService;
+use App\Services\OvertimeService;
 use App\Services\PaymentService;
 use App\Services\PermitService;
 use App\Services\PettyCashService;
@@ -94,6 +97,7 @@ use App\Services\TaskDependencyService;
 use App\Services\TaskService;
 use App\Services\TaxCodeService;
 use App\Services\TemplateService;
+use App\Services\TimesheetService;
 use App\Services\ToolboxTalkService;
 use App\Services\TrainingRecordService;
 use App\Services\TransmittalService;
@@ -286,6 +290,28 @@ class DemoSeeder extends Seeder
             ['KFM-005', 'ANNUAL', 20, 5, 'approved', 'KFM-003', 'Approved. Erin is on call that week.'],
             ['KFM-006', 'ANNUAL', 33, 3, 'pending', null, null],
             ['KFM-006', 'UNPAID', 8, 2, 'rejected', 'KFM-003', 'Chiller changeover needs both technicians.'],
+        ]);
+
+        // Hours: the shifts people clocked, the weeks they booked against projects, and the overtime
+        // they asked for beforehand. Last week's sheet has been decided, this week's is still open —
+        // which is what a Monday morning actually looks like.
+        $this->seedTime($meridian, $this->context->within($meridian, fn () => $this->accountOf($this->staff(), 'MEI-0017')), [
+            ['MEI-0006', 2, 'approved', 'MEI-0005', 'Matches the site register. Approved.'],
+            ['MEI-0006', 1, 'pending', null, null],
+            ['MEI-0009', 1, 'pending', null, null],
+            ['MEI-0014', 0, 'draft', null, null],
+        ], [
+            ['MEI-0006', 9, '3', 'approved', 'Concrete pour has to finish the same day.', 'MEI-0005', '2.5'],
+            ['MEI-0009', 2, '4', 'pending', 'Pile test rig is only on site until Friday.', null, null],
+            ['MEI-0009', 12, '5', 'rejected', 'Catching up on the reinforcement schedule.', 'MEI-0005', null],
+        ]);
+        $this->seedTime($kestrel, $this->context->within($kestrel, fn () => $this->accountOf($this->staff(), 'KFM-008')), [
+            ['KFM-005', 2, 'approved', 'KFM-003', 'Approved.'],
+            ['KFM-005', 1, 'pending', null, null],
+            ['KFM-006', 1, 'draft', null, null],
+        ], [
+            ['KFM-006', 6, '2', 'approved', 'Chiller changeover has to run out of hours.', 'KFM-003', '2'],
+            ['KFM-005', 3, '3', 'pending', 'Call-out for the tenant fit-out snag list.', null, null],
         ]);
 
         // The rows above were written straight to the database, so nothing observed them happening.
@@ -7839,6 +7865,170 @@ class DemoSeeder extends Seeder
                     $this->decide($request->refresh(), $this->accountOf($staff, $deciderNo), $decision, (string) $comment);
                 }
             }
+        });
+    }
+
+    /**
+     * Attendance, timesheets and overtime — the second half of people.
+     *
+     * The shape to notice is that a timesheet and an overtime request are decided EXACTLY as the
+     * leave above is, and as a drawing three chapters up is: the line manager acts on a stage. The
+     * seeder therefore calls the same `decide()` helper for all four.
+     *
+     * Attendance is the exception, and deliberately so — a clock-in is a fact, not a request, so
+     * nothing here waits in an inbox. Past shifts are written as rows rather than through
+     * `clockIn()`, because that method stamps the server clock and a demo needs a fortnight of
+     * history; the one shift entered by hand and the one open shift go through the service, so the
+     * corrected-by-HR and currently-on-site states are real rather than painted on.
+     *
+     * @param  array<int,array{0:string,1:int,2:string,3:?string,4:?string}>  $sheets
+     *                                                                                 employee no, weeks ago, state, decider employee no, comment
+     * @param  array<int,array{0:string,1:int,2:string,3:string,4:string,5:?string,6:?string}>  $overtime
+     *                                                                                                     employee no, days ago, hours asked, state, reason, decider employee no, hours worked
+     */
+    private function seedTime(Organization $organization, User $hr, array $sheets, array $overtime): void
+    {
+        $this->context->within($organization, function () use ($hr, $sheets, $overtime) {
+            $timesheets = app(TimesheetService::class);
+            $overtimeService = app(OvertimeService::class);
+            $attendance = app(AttendanceService::class);
+            $staff = $this->staff();
+            $clocked = [];   // employee id + date, so two sheets for one person never double-book a day
+
+            foreach ($sheets as [$employeeNo, $weeksAgo, $state, $deciderNo, $comment]) {
+                $employee = $staff[$employeeNo];
+                $owner = $this->accountOf($staff, $employeeNo);
+                $week = $timesheets->weekStart(now()->subWeeks($weeksAgo));
+                $projects = $timesheets->allowedProjectIds($employee, $owner);
+
+                if ($projects === []) {
+                    continue;   // somebody on no project has nothing to book hours against
+                }
+
+                // Monday to Friday on site, with the odd late finish. The hours booked below match
+                // what was clocked, which is the point of showing both rows on the sheet.
+                $pattern = [['07:30', '16:30', '8'], ['07:30', '16:30', '8'], ['07:30', '17:15', '8.75'],
+                    ['07:30', '16:30', '8'], ['07:30', '15:00', '6.5']];
+                $hours = [];
+
+                foreach ($pattern as $index => [$in, $out, $booked]) {
+                    $day = $week->addDays($index);
+
+                    if ($day->isFuture()) {
+                        break;
+                    }
+
+                    $hours[$day->toDateString()] = $booked;
+                    $key = $employee->getKey().' '.$day->toDateString();
+
+                    if (isset($clocked[$key])) {
+                        continue;
+                    }
+
+                    $clocked[$key] = true;
+                    $from = $day->setTimeFromTimeString($in);
+                    $to = $day->setTimeFromTimeString($out);
+
+                    AttendanceRecord::create([
+                        'organization_id' => $employee->organization_id,
+                        'employee_id' => $employee->getKey(),
+                        'user_id' => $employee->user_id,
+                        'org_unit_id' => $employee->org_unit_id,
+                        'project_id' => $projects[0],
+                        'work_date' => $day->toDateString(),
+                        'clock_in_at' => $from,
+                        'clock_out_at' => $to,
+                        'minutes' => (int) $from->diffInMinutes($to),
+                        'source' => AttendanceRecord::SOURCE_SELF,
+                        'created_by' => $employee->user_id,
+                    ]);
+                }
+
+                if ($hours === []) {
+                    continue;
+                }
+
+                $sheet = $timesheets->create([
+                    'employee_id' => $employee->getKey(),
+                    'period_start' => $week->toDateString(),
+                ], $owner);
+
+                $timesheets->saveEntries($sheet, [[
+                    'project_id' => $projects[0],
+                    'description' => 'Site supervision and progress checks',
+                    'hours' => $hours,
+                ]], $owner, $state === 'draft' ? 'Still filling this in.' : null);
+
+                if ($state === 'draft') {
+                    continue;
+                }
+
+                $timesheets->submit($sheet->refresh(), $owner);
+
+                if ($deciderNo !== null) {
+                    $decision = $state === 'rejected' ? Decision::Reject : Decision::Approve;
+                    $this->decide($sheet->refresh(), $this->accountOf($staff, $deciderNo), $decision, (string) $comment);
+                }
+            }
+
+            foreach ($overtime as [$employeeNo, $daysAgo, $asked, $state, $reason, $deciderNo, $worked]) {
+                $employee = $staff[$employeeNo];
+                $owner = $this->accountOf($staff, $employeeNo);
+                $projects = $timesheets->allowedProjectIds($employee, $owner);
+
+                $request = $overtimeService->create([
+                    'employee_id' => $employee->getKey(),
+                    'project_id' => $projects[0] ?? null,
+                    'work_date' => now()->subDays($daysAgo)->toDateString(),
+                    'hours' => $asked,
+                    'reason' => $reason,
+                ], $owner);
+
+                if ($state === 'draft') {
+                    continue;
+                }
+
+                $overtimeService->submit($request, $owner);
+
+                if ($deciderNo === null) {
+                    continue;
+                }
+
+                $this->decide(
+                    $request->refresh(),
+                    $this->accountOf($staff, $deciderNo),
+                    $state === 'rejected' ? Decision::Reject : Decision::Approve,
+                    $state === 'rejected' ? 'Bring the work forward into normal hours instead.' : 'Approved — log the hours once they are worked.',
+                );
+
+                if ($worked !== null) {
+                    $overtimeService->recordWorked($request->refresh(), $worked, $owner);
+                }
+            }
+
+            // One person still on site, and one shift somebody forgot to clock, put right by HR.
+            // The personnel record is handed over rather than looked up again: `staff()` loads
+            // accounts without it, and clocking in reads `$actor->employee`.
+            $onSite = $this->accountOf($staff, $sheets[0][0])->setRelation('employee', $staff[$sheets[0][0]]);
+
+            if ($attendance->openShift($staff[$sheets[0][0]]) === null && ! now()->isWeekend()) {
+                $attendance->clockIn($onSite, ['notes' => 'On site for the morning inspection.']);
+            }
+
+            // The sixth day of last week: a Saturday call-out, which is exactly the shift nobody
+            // remembers to clock, and the one day the weekday pattern above leaves free.
+            // Not the person clocked in above: an open shift and a hand-entered one on the same
+            // personnel record is a state worth showing, but not the first one an evaluator opens.
+            $forgot = $staff[end($sheets)[0]];
+            $missed = $timesheets->weekStart(now()->subWeek())->addDays(5);
+
+            $attendance->recordManual(
+                $forgot,
+                $missed->setTimeFromTimeString('07:45'),
+                $missed->setTimeFromTimeString('16:15'),
+                'Phone battery was flat at the gate; times taken from the site register.',
+                $hr,
+            );
         });
     }
 

@@ -75,6 +75,8 @@ class OrganizationProvisioner
 
                 $this->seedLeaveWorkflow($organization);
                 $this->seedLeaveTypes($organization);
+                $this->seedTimesheetWorkflow($organization);
+                $this->seedOvertimeWorkflow($organization);
             });
 
             return $organization->refresh();
@@ -149,6 +151,10 @@ class OrganizationProvisioner
             'work.day_start' => '08:00',
             'work.day_end' => '17:00',
             'work.hours_per_day' => 8,
+
+            // --- attendance and timesheets ----------------------------------------------
+            'attendance.capture_location' => false,   // opt-in: a phone's position is personal data
+            'timesheet.max_hours_per_day' => 24,
 
             // --- workflow behaviour ------------------------------------------------------
             'workflow.escalate_after_days' => 3,
@@ -586,9 +592,61 @@ class OrganizationProvisioner
      */
     public function seedLeaveWorkflow(Organization $organization): ?Workflow
     {
+        return $this->seedLineManagerWorkflow(
+            $organization,
+            'leave_request',
+            'Leave approval',
+            'The route a leave request takes when it is submitted: the requester\'s line manager decides. '
+                .'Add stages or conditions to suit how the company approves leave.',
+            'Check the dates work for the team. Returning the request sends it back to the requester to '
+                .'change; rejecting it closes it.',
+        );
+    }
+
+    /** The default timesheet route — the same single line-manager stage, edited in the same builder. */
+    public function seedTimesheetWorkflow(Organization $organization): ?Workflow
+    {
+        return $this->seedLineManagerWorkflow(
+            $organization,
+            'timesheet',
+            'Timesheet approval',
+            'The route a weekly timesheet takes when it is submitted: the employee\'s line manager confirms '
+                .'the hours. Add a project manager stage or a condition on `total_hours` if the company needs one.',
+            'Check the hours and projects match the week. Return the sheet to have it corrected; reject it '
+                .'only if it should not be paid at all.',
+        );
+    }
+
+    /** The default overtime route. Asked for before it is worked, so the SLA is short. */
+    public function seedOvertimeWorkflow(Organization $organization): ?Workflow
+    {
+        return $this->seedLineManagerWorkflow(
+            $organization,
+            'overtime_request',
+            'Overtime approval',
+            'The route an overtime request takes when it is submitted: the employee\'s line manager decides '
+                .'whether the extra hours are needed.',
+            'Approve only overtime the work needs. The hours actually worked are recorded against the '
+                .'request afterwards and cannot exceed what you approve.',
+            slaHours: 24,
+        );
+    }
+
+    /**
+     * One published route with a single supervisor stage, created only if the company has none by
+     * that name — so re-running provisioning never undoes an administrator's edits.
+     */
+    private function seedLineManagerWorkflow(
+        Organization $organization,
+        string $entityType,
+        string $name,
+        string $description,
+        string $instructions,
+        int $slaHours = 48,
+    ): ?Workflow {
         $existing = Workflow::query()
-            ->where('entity_type', 'leave_request')
-            ->where('name', 'Leave approval')
+            ->where('entity_type', $entityType)
+            ->where('name', $name)
             ->first();
 
         if ($existing !== null) {
@@ -597,10 +655,9 @@ class OrganizationProvisioner
 
         $workflow = Workflow::create([
             'organization_id' => $organization->id,
-            'name' => 'Leave approval',
-            'description' => 'The route a leave request takes when it is submitted: the requester\'s '
-                .'line manager decides. Add stages or conditions to suit how the company approves leave.',
-            'entity_type' => 'leave_request',
+            'name' => $name,
+            'description' => $description,
+            'entity_type' => $entityType,
             'trigger' => 'submitted',
             'version' => 1,
             'is_default' => true,
@@ -613,13 +670,12 @@ class OrganizationProvisioner
             'workflow_id' => $workflow->id,
             'sequence' => 1,
             'name' => 'Line manager',
-            'instructions' => 'Check the dates work for the team. Returning the request sends it back '
-                .'to the requester to change; rejecting it closes it.',
+            'instructions' => $instructions,
             'assignee_type' => 'supervisor',
             'assignee_ref' => null,
             'action_type' => 'approve',
             'quorum' => WorkflowStage::QUORUM_ANY,
-            'sla_hours' => 48,
+            'sla_hours' => $slaHours,
             'on_reject' => WorkflowStage::ON_REJECT_TERMINATE,
             'allow_delegate' => true,
             'allow_self_approval' => false,

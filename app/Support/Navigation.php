@@ -121,6 +121,12 @@ class Navigation
                         'permission' => 'leave.view', 'active' => 'public-holidays.*'],
                     ['label' => 'Leave balances', 'route' => 'leave-balances.index', 'icon' => 'coins',
                         'permission' => 'leave.manage', 'active' => 'leave-balances.*'],
+                    ['label' => 'Attendance', 'route' => 'attendance.index', 'icon' => 'clock',
+                        'permission' => 'attendance.view', 'active' => 'attendance.*'],
+                    ['label' => 'Timesheets', 'route' => 'timesheets.index', 'icon' => 'clipboard',
+                        'permission' => 'timesheet.view', 'active' => 'timesheets.*'],
+                    ['label' => 'Overtime', 'route' => 'overtime.index', 'icon' => 'activity',
+                        'permission' => 'overtime.view', 'active' => 'overtime.*'],
                 ],
             ],
             [

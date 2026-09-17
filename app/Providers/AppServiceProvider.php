@@ -106,6 +106,7 @@ use App\Models\Approval;
 use App\Models\Asset;
 use App\Models\AssetCustodyTransfer;
 use App\Models\AssetMaintenance;
+use App\Models\AttendanceRecord;
 use App\Models\AuditLog;
 use App\Models\Budget;
 use App\Models\BudgetLine;
@@ -151,6 +152,7 @@ use App\Models\NumberingScheme;
 use App\Models\NumberSequence;
 use App\Models\Organization;
 use App\Models\OrgUnit;
+use App\Models\OvertimeRequest;
 use App\Models\Payment;
 use App\Models\Permit;
 use App\Models\PermitPrecaution;
@@ -196,6 +198,8 @@ use App\Models\TaskChecklistItem;
 use App\Models\TaskDependency;
 use App\Models\TaxCode;
 use App\Models\Template;
+use App\Models\Timesheet;
+use App\Models\TimesheetEntry;
 use App\Models\ToolboxTalk;
 use App\Models\ToolboxTalkAttendee;
 use App\Models\TrainingCourse;
@@ -218,6 +222,7 @@ use App\Policies\ApprovalPolicy;
 use App\Policies\AssetCustodyTransferPolicy;
 use App\Policies\AssetMaintenancePolicy;
 use App\Policies\AssetPolicy;
+use App\Policies\AttendanceRecordPolicy;
 use App\Policies\AuditLogPolicy;
 use App\Policies\BudgetPolicy;
 use App\Policies\ChangeRequestPolicy;
@@ -260,6 +265,7 @@ use App\Policies\NumberingSchemePolicy;
 use App\Policies\NumberSequencePolicy;
 use App\Policies\OrganizationPolicy;
 use App\Policies\OrgUnitPolicy;
+use App\Policies\OvertimeRequestPolicy;
 use App\Policies\PaymentPolicy;
 use App\Policies\PermitPolicy;
 use App\Policies\PermitPrecautionPolicy;
@@ -303,6 +309,7 @@ use App\Policies\TaskDependencyPolicy;
 use App\Policies\TaskPolicy;
 use App\Policies\TaxCodePolicy;
 use App\Policies\TemplatePolicy;
+use App\Policies\TimesheetPolicy;
 use App\Policies\ToolboxTalkAttendeePolicy;
 use App\Policies\ToolboxTalkPolicy;
 use App\Policies\TrainingCoursePolicy;
@@ -562,6 +569,10 @@ class AppServiceProvider extends ServiceProvider
             'public_holiday' => PublicHoliday::class,
             'leave_balance' => LeaveBalance::class,
             'leave_request' => LeaveRequest::class,
+            'attendance_record' => AttendanceRecord::class,
+            'timesheet' => Timesheet::class,
+            'timesheet_entry' => TimesheetEntry::class,
+            'overtime_request' => OvertimeRequest::class,
         ]);
     }
 
@@ -774,6 +785,9 @@ class AppServiceProvider extends ServiceProvider
             PublicHoliday::class => LeaveSettingsPolicy::class,
             LeaveBalance::class => LeaveSettingsPolicy::class,
             LeaveRequest::class => LeaveRequestPolicy::class,
+            AttendanceRecord::class => AttendanceRecordPolicy::class,
+            Timesheet::class => TimesheetPolicy::class,
+            OvertimeRequest::class => OvertimeRequestPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {
