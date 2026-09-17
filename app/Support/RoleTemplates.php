@@ -55,6 +55,7 @@ final class RoleTemplates
         'attendance.view' => 'own',
         'expense.view' => 'own',
         'expense.create' => 'own',
+        'expense.edit' => 'own',         // a claim returned for amendment comes back as a draft
         'expense.submit' => 'own',
         'task.view' => 'assigned',       // tasks given to me
         'task.complete' => 'assigned',
@@ -685,6 +686,8 @@ final class RoleTemplates
                     'expense.*' => 'organization',
                     'income.*' => 'organization',
                     'payment.*' => 'organization',
+                    'petty_cash.*' => 'organization',
+                    'tax_code.*' => 'organization',
                     // Finance registers the contract, because finance is who tracks what it is
                     // worth, what is retained against it and when the retention falls due.
                     'contract.create' => 'organization',
@@ -727,9 +730,17 @@ final class RoleTemplates
                     'expense.view' => 'department',
                     'expense.submit' => 'department',
                     'income.create' => 'department',
+                    'income.edit' => 'department',
                     'income.view' => 'department',
                     'payment.create' => 'department',
+                    'payment.edit' => 'department',
                     'payment.view' => 'department',
+                    // The officer keeps the tins and writes the vouchers; closing a tin or
+                    // reversing a voucher is the manager's (petty_cash.manage).
+                    'petty_cash.view' => 'department',
+                    'petty_cash.disburse' => 'department',
+                    'petty_cash.replenish' => 'department',
+                    'tax_code.view' => 'organization',
                     'budget.view' => 'department',
                     'vendor.view' => 'organization',
                     'purchase_order.view' => 'department',

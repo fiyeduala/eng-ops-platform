@@ -274,49 +274,56 @@ corrective action's idempotence key is its configured title, so two actions with
 one stage collapse into one · `submitForApproval()` is wired to a route on incidents only; the other
 registers inherit the method but have no submit endpoint until a company asks for one.
 
-## PHASE 5 — Business operations — in progress
+## PHASE 5 — Business operations ✅
 
-Vendors · clients · contracts · purchase requests · RFQs · quotations · evaluation · purchase orders
-· goods receipt · warehouses · inventory · stock ledger · material requests · assets · asset
-maintenance · fleet · fuel · vehicle documents · finance (income, expenses, petty cash, budgets,
-cost centers, project costs, payments).
+Vendors ✅ · clients ✅ · contracts ✅ · purchase requests ✅ · RFQs ✅ · quotations ✅ · evaluation ✅ ·
+purchase orders ✅ · goods receipt ✅ · warehouses ✅ · inventory ✅ · stock ledger ✅ · material
+requests ✅ · assets ✅ · asset maintenance ✅ · fleet ✅ · fuel ✅ · vehicle documents ✅ · finance
+(tax codes ✅, income ✅, expenses ✅, petty cash ✅, budgets ✅, cost centers ✅, project costs ✅,
+payments ✅).
 
 **Exit criteria:** PR → approval → PO → goods receipt → stock transaction → project cost posts as
-one connected chain (§90).
+one connected chain (§90). **Met**, and pinned end to end by `ProjectCostTest`.
 
-**Current checkpoint (updated 2026-09-17):**
+**Delivered (completed 2026-09-17):**
 
-- **Part 1 — commercial:** vendors, clients and contracts committed in `e774cee`.
+- **Part 1 — commercial:** vendors, clients and contracts (`e774cee`).
 - **Part 2 — procurement:** purchase requests, RFQs, quotations/evaluation, purchase orders and
-  goods receipt committed in `434de06`.
-- **Part 3 — inventory:** warehouses, catalogue, stock ledger and material requests committed in
-  `6bcb0c3`. Receipt acceptance posts accepted, catalogued goods to the selected warehouse and
-  carries the purchase order's project attribution.
-- **Current slice — assets and fleet:** assets, custody history, maintenance, vehicles, fuel logs
-  and vehicle documents are present in the uncommitted working tree. The continuation adds parent
-  ACL/confidentiality protection and inherited department/project scope, linked certificate
-  renewals, complete fuel intervals, locked custody/odometer updates, multi-job maintenance
-  availability, and registration from accepted single-item goods receipts. The assets test folder
-  now contains 48 cases, including HTTP, access, renewal and procurement integration regressions.
-  Full-suite validation passed on 16 September: **492 tests, 2,816 assertions**, plus a focused
-  renewal rerun after the final classification adjustment. The frontend build passed. See the
-  handoff for migration notes and remaining deployment checks.
-- **Current slice — operational finance:** accepting a goods receipt posts one immutable project
-  cost for each accepted line in the same transaction. Each row retains its exact source line,
-  project, organizational unit, supplier, purchase currency, fixed exchange rate and converted
-  organization-currency amount. Direct-to-site and uncatalogued deliveries still post costs, and
-  foreign prices are converted before stock valuation. The connected PR → PO → receipt → stock →
-  project-cost chain is covered end to end.
-- **Current slice — budget control:** cost centers define accountable project or organizational
-  scope. Numbered budgets carry exact allocation lines through draft, submission, approval, return,
-  rejection and closure; approval freezes the signed allocation. Their detail page calculates live
-  actuals and remaining funds from the project-cost ledger over the budget period and scope.
-- **Remaining — finance:** income, manually entered expenses, petty cash and payments. Phase 5
-  remains in progress until those planned operational registers are complete.
+  goods receipt (`434de06`).
+- **Part 3 — inventory:** warehouses, catalogue, stock ledger and material requests (`6bcb0c3`).
+  Receipt acceptance posts accepted, catalogued goods to the selected warehouse and carries the
+  purchase order's project attribution.
+- **Part 4 — assets, fleet, project costs and budgets** (`ad0a976`): custody history, maintenance,
+  vehicles, fuel logs and vehicle documents; immutable, source-linked project costs posted on
+  receipt acceptance in purchase and organization currency; cost centers and controlled budgets
+  whose actuals are read live from the cost ledger.
+- **Part 5 — operational finance:**
+  - **Tax codes** are company data (§47): rate, sales/purchases/both, recoverable or not. The rate
+    and recoverability are copied onto each record when it is saved, so changing a code never
+    rewrites an issued invoice or an approved claim. A code in use cannot be deleted.
+  - **Expenses:** draft → submitted → approved → paid, with return-for-amendment (back to an
+    editable draft) and rejection, both requiring a reason. Tax and totals are computed on the
+    server. Approval posts a project cost (net when tax is recoverable, gross when not). The
+    claimant cannot approve their own claim unless the company waives
+    `finance.separate_claimant_and_approver`; a waiver is recorded on the activity entry.
+  - **Income:** draft → issued → part received → received, or cancelled with a reason. An income
+    raised against a client contract takes its client and project from the contract. The two
+    received statuses are never chosen by a person; they follow from recorded receipts.
+  - **Payments** against a purchase order, an approved expense or an issued income. Outgoing:
+    draft → submitted → approved → paid, and the approver cannot release the money unless
+    `finance.separate_payment_approver_and_payer` is waived (the waiver is recorded). Incoming
+    receipts are recorded as paid immediately. Payee, currency, project and confidentiality are
+    copied from what is paid. No payable can be over-committed: drafts and approvals count against
+    the outstanding balance, under a row lock.
+  - **Petty cash:** tins with a custodian, an optional float ceiling and an append-only voucher
+    ledger. Balance is a cache of the ledger. Disbursements post project costs; an optional
+    `petty_cash.single_disbursement_limit` sends larger payouts to an expense claim. Mistakes are
+    reversed once, by their own voucher, which also reverses the cost. Closed tins move no cash.
+  - Custodians reach their own tin at `assigned` scope; claimants reach claims typed in on their
+    behalf at `own` scope.
 
 See [16-development-handoff.md](16-development-handoff.md) for review findings, validation results
-and the order in which to resume. The earlier Phase 1–4 test totals above are historical results,
-not verification of the current working tree.
+and deployment notes. The earlier Phase 1–4 test totals above are historical results.
 
 ## PHASE 6 — People ⬜
 

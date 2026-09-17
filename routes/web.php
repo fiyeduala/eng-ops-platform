@@ -25,11 +25,13 @@ use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\DocumentVersionController;
 use App\Http\Controllers\DrawingController;
 use App\Http\Controllers\EmployeeController;
+use App\Http\Controllers\ExpenseController;
 use App\Http\Controllers\FuelLogController;
 use App\Http\Controllers\GoodsReceiptController;
 use App\Http\Controllers\HseInspectionController;
 use App\Http\Controllers\HseObservationController;
 use App\Http\Controllers\IncidentController;
+use App\Http\Controllers\IncomeController;
 use App\Http\Controllers\InvestigationController;
 use App\Http\Controllers\LocationController;
 use App\Http\Controllers\MaterialRequestController;
@@ -39,8 +41,10 @@ use App\Http\Controllers\NcrController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\OrganizationController;
 use App\Http\Controllers\OrgUnitController;
+use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\PermitController;
 use App\Http\Controllers\PermitTypeController;
+use App\Http\Controllers\PettyCashAccountController;
 use App\Http\Controllers\PositionController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ProjectController;
@@ -62,6 +66,7 @@ use App\Http\Controllers\SubmittalController;
 use App\Http\Controllers\TaskChecklistItemController;
 use App\Http\Controllers\TaskController;
 use App\Http\Controllers\TaskDependencyController;
+use App\Http\Controllers\TaxCodeController;
 use App\Http\Controllers\TemplateController;
 use App\Http\Controllers\ToolboxTalkController;
 use App\Http\Controllers\TrainingCourseController;
@@ -1948,6 +1953,122 @@ Route::middleware(['auth', 'password.current'])->group(function () {
             ->middleware('permission:budget.edit')->name('cost-centers.update');
         Route::delete('cost-centers/{cost_center}', [CostCenterController::class, 'destroy'])
             ->middleware('permission:budget.delete')->name('cost-centers.destroy');
+    });
+
+    // Expenses: drafted by the claimant, decided by somebody else, posted to costs on approval.
+    Route::middleware('permission:expense.view')->group(function () {
+        Route::get('expenses', [ExpenseController::class, 'index'])->name('expenses.index');
+        Route::get('expenses/{expense}', [ExpenseController::class, 'show'])->whereNumber('expense')->name('expenses.show');
+    });
+    Route::middleware('permission:expense.create')->group(function () {
+        Route::get('expenses/create', [ExpenseController::class, 'create'])->name('expenses.create');
+        Route::post('expenses', [ExpenseController::class, 'store'])->name('expenses.store');
+    });
+    Route::whereNumber('expense')->group(function () {
+        Route::get('expenses/{expense}/edit', [ExpenseController::class, 'edit'])
+            ->middleware('permission:expense.edit')->name('expenses.edit');
+        Route::put('expenses/{expense}', [ExpenseController::class, 'update'])
+            ->middleware('permission:expense.edit')->name('expenses.update');
+        Route::delete('expenses/{expense}', [ExpenseController::class, 'destroy'])
+            ->middleware('permission:expense.delete')->name('expenses.destroy');
+        Route::post('expenses/{expense}/submit', [ExpenseController::class, 'submit'])
+            ->middleware('permission:expense.submit')->name('expenses.submit');
+        Route::post('expenses/{expense}/approve', [ExpenseController::class, 'approve'])
+            ->middleware('permission:expense.approve')->name('expenses.approve');
+        Route::post('expenses/{expense}/return', [ExpenseController::class, 'returnForAmendment'])
+            ->middleware('permission:expense.approve')->name('expenses.return');
+        Route::post('expenses/{expense}/reject', [ExpenseController::class, 'reject'])
+            ->middleware('permission:expense.reject')->name('expenses.reject');
+    });
+
+    // Income: drafted, issued to the client, then received through payments.
+    Route::middleware('permission:income.view')->group(function () {
+        Route::get('incomes', [IncomeController::class, 'index'])->name('incomes.index');
+        Route::get('incomes/{income}', [IncomeController::class, 'show'])->whereNumber('income')->name('incomes.show');
+    });
+    Route::middleware('permission:income.create')->group(function () {
+        Route::get('incomes/create', [IncomeController::class, 'create'])->name('incomes.create');
+        Route::post('incomes', [IncomeController::class, 'store'])->name('incomes.store');
+    });
+    Route::whereNumber('income')->group(function () {
+        Route::get('incomes/{income}/edit', [IncomeController::class, 'edit'])
+            ->middleware('permission:income.edit')->name('incomes.edit');
+        Route::put('incomes/{income}', [IncomeController::class, 'update'])
+            ->middleware('permission:income.edit')->name('incomes.update');
+        Route::delete('incomes/{income}', [IncomeController::class, 'destroy'])
+            ->middleware('permission:income.delete')->name('incomes.destroy');
+        Route::post('incomes/{income}/issue', [IncomeController::class, 'issue'])
+            ->middleware('permission:income.issue')->name('incomes.issue');
+        Route::post('incomes/{income}/cancel', [IncomeController::class, 'cancel'])
+            ->middleware('permission:income.manage')->name('incomes.cancel');
+    });
+
+    // Payments: `approve` and `pay` are separate permissions held, by default, by separate people.
+    Route::middleware('permission:payment.view')->group(function () {
+        Route::get('payments', [PaymentController::class, 'index'])->name('payments.index');
+        Route::get('payments/{payment}', [PaymentController::class, 'show'])->whereNumber('payment')->name('payments.show');
+    });
+    Route::middleware('permission:payment.create')->group(function () {
+        Route::get('payments/create', [PaymentController::class, 'create'])->name('payments.create');
+        Route::post('payments', [PaymentController::class, 'store'])->name('payments.store');
+    });
+    Route::whereNumber('payment')->group(function () {
+        Route::get('payments/{payment}/edit', [PaymentController::class, 'edit'])
+            ->middleware('permission:payment.edit')->name('payments.edit');
+        Route::put('payments/{payment}', [PaymentController::class, 'update'])
+            ->middleware('permission:payment.edit')->name('payments.update');
+        Route::delete('payments/{payment}', [PaymentController::class, 'destroy'])
+            ->middleware('permission:payment.delete')->name('payments.destroy');
+        Route::post('payments/{payment}/submit', [PaymentController::class, 'submit'])
+            ->middleware('permission:payment.edit')->name('payments.submit');
+        Route::post('payments/{payment}/approve', [PaymentController::class, 'approve'])
+            ->middleware('permission:payment.approve')->name('payments.approve');
+        Route::post('payments/{payment}/reject', [PaymentController::class, 'reject'])
+            ->middleware('permission:payment.approve')->name('payments.reject');
+        Route::post('payments/{payment}/cancel', [PaymentController::class, 'cancel'])
+            ->middleware('permission:payment.manage')->name('payments.cancel');
+        Route::post('payments/{payment}/pay', [PaymentController::class, 'pay'])
+            ->middleware('permission:payment.pay')->name('payments.pay');
+    });
+
+    // Petty cash: money moves only through replenish, disburse and reverse.
+    Route::middleware('permission:petty_cash.view')->group(function () {
+        Route::get('petty-cash', [PettyCashAccountController::class, 'index'])->name('petty-cash.index');
+        Route::get('petty-cash/{petty_cash_account}', [PettyCashAccountController::class, 'show'])
+            ->whereNumber('petty_cash_account')->name('petty-cash.show');
+    });
+    Route::middleware('permission:petty_cash.create')->group(function () {
+        Route::get('petty-cash/create', [PettyCashAccountController::class, 'create'])->name('petty-cash.create');
+        Route::post('petty-cash', [PettyCashAccountController::class, 'store'])->name('petty-cash.store');
+    });
+    Route::whereNumber('petty_cash_account')->group(function () {
+        Route::get('petty-cash/{petty_cash_account}/edit', [PettyCashAccountController::class, 'edit'])
+            ->middleware('permission:petty_cash.edit')->name('petty-cash.edit');
+        Route::put('petty-cash/{petty_cash_account}', [PettyCashAccountController::class, 'update'])
+            ->middleware('permission:petty_cash.edit')->name('petty-cash.update');
+        Route::delete('petty-cash/{petty_cash_account}', [PettyCashAccountController::class, 'destroy'])
+            ->middleware('permission:petty_cash.delete')->name('petty-cash.destroy');
+        Route::post('petty-cash/{petty_cash_account}/replenish', [PettyCashAccountController::class, 'replenish'])
+            ->middleware('permission:petty_cash.replenish')->name('petty-cash.replenish');
+        Route::post('petty-cash/{petty_cash_account}/disburse', [PettyCashAccountController::class, 'disburse'])
+            ->middleware('permission:petty_cash.disburse')->name('petty-cash.disburse');
+    });
+    Route::post('petty-cash/vouchers/{petty_cash_transaction}/reverse', [PettyCashAccountController::class, 'reverse'])
+        ->whereNumber('petty_cash_transaction')->middleware('permission:petty_cash.manage')->name('petty-cash.reverse');
+
+    // Tax codes: company data, never a country's rules baked into code (§47).
+    Route::middleware('permission:tax_code.view')->get('tax-codes', [TaxCodeController::class, 'index'])->name('tax-codes.index');
+    Route::middleware('permission:tax_code.create')->group(function () {
+        Route::get('tax-codes/create', [TaxCodeController::class, 'create'])->name('tax-codes.create');
+        Route::post('tax-codes', [TaxCodeController::class, 'store'])->name('tax-codes.store');
+    });
+    Route::whereNumber('tax_code')->group(function () {
+        Route::get('tax-codes/{tax_code}/edit', [TaxCodeController::class, 'edit'])
+            ->middleware('permission:tax_code.edit')->name('tax-codes.edit');
+        Route::put('tax-codes/{tax_code}', [TaxCodeController::class, 'update'])
+            ->middleware('permission:tax_code.edit')->name('tax-codes.update');
+        Route::delete('tax-codes/{tax_code}', [TaxCodeController::class, 'destroy'])
+            ->middleware('permission:tax_code.delete')->name('tax-codes.destroy');
     });
 
     // --- assets --------------------------------------------------------------------------------

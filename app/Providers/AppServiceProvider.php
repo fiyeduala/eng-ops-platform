@@ -22,6 +22,8 @@ use App\Events\ChangeRequestDecided;
 use App\Events\CorrectiveActionAssigned;
 use App\Events\DocumentApproved;
 use App\Events\DocumentRevisionRequested;
+use App\Events\ExpenseDecided;
+use App\Events\ExpenseSubmitted;
 use App\Events\GoodsReceiptConfirmed;
 use App\Events\GoodsReceiptDisputed;
 use App\Events\IncidentReported;
@@ -35,6 +37,7 @@ use App\Events\MeetingRescheduled;
 use App\Events\MemoIssued;
 use App\Events\NcrDispositioned;
 use App\Events\NcrIssued;
+use App\Events\PaymentAwaitingAction;
 use App\Events\PermitIssued;
 use App\Events\PermitSuspended;
 use App\Events\PurchaseOrderDecided;
@@ -62,6 +65,8 @@ use App\Listeners\NotifyChangeRequestDecided;
 use App\Listeners\NotifyCorrectiveActionAssigned;
 use App\Listeners\NotifyDocumentApproved;
 use App\Listeners\NotifyDocumentRevisionRequested;
+use App\Listeners\NotifyExpenseDecided;
+use App\Listeners\NotifyExpenseSubmitted;
 use App\Listeners\NotifyGoodsReceiptConfirmed;
 use App\Listeners\NotifyGoodsReceiptDisputed;
 use App\Listeners\NotifyIncidentReported;
@@ -75,6 +80,7 @@ use App\Listeners\NotifyMeetingRescheduled;
 use App\Listeners\NotifyMemoRecipients;
 use App\Listeners\NotifyNcrDispositioned;
 use App\Listeners\NotifyNcrIssued;
+use App\Listeners\NotifyPaymentAwaitingAction;
 use App\Listeners\NotifyPermitIssued;
 use App\Listeners\NotifyPermitSuspended;
 use App\Listeners\NotifyPurchaseOrderDecided;
@@ -115,6 +121,7 @@ use App\Models\DocumentCategory;
 use App\Models\DocumentVersion;
 use App\Models\Drawing;
 use App\Models\Employee;
+use App\Models\Expense;
 use App\Models\Follower;
 use App\Models\FuelLog;
 use App\Models\GoodsReceipt;
@@ -124,6 +131,7 @@ use App\Models\HseInspectionItem;
 use App\Models\HseObservation;
 use App\Models\Incident;
 use App\Models\IncidentPerson;
+use App\Models\Income;
 use App\Models\Investigation;
 use App\Models\Location;
 use App\Models\MaterialRequest;
@@ -140,9 +148,12 @@ use App\Models\NumberingScheme;
 use App\Models\NumberSequence;
 use App\Models\Organization;
 use App\Models\OrgUnit;
+use App\Models\Payment;
 use App\Models\Permit;
 use App\Models\PermitPrecaution;
 use App\Models\PermitType;
+use App\Models\PettyCashAccount;
+use App\Models\PettyCashTransaction;
 use App\Models\Position;
 use App\Models\Project;
 use App\Models\ProjectCost;
@@ -179,6 +190,7 @@ use App\Models\SubmittalItem;
 use App\Models\Task;
 use App\Models\TaskChecklistItem;
 use App\Models\TaskDependency;
+use App\Models\TaxCode;
 use App\Models\Template;
 use App\Models\ToolboxTalk;
 use App\Models\ToolboxTalkAttendee;
@@ -216,6 +228,7 @@ use App\Policies\DocumentPolicy;
 use App\Policies\DocumentVersionPolicy;
 use App\Policies\DrawingPolicy;
 use App\Policies\EmployeePolicy;
+use App\Policies\ExpensePolicy;
 use App\Policies\FollowerPolicy;
 use App\Policies\FuelLogPolicy;
 use App\Policies\GoodsReceiptItemPolicy;
@@ -225,6 +238,7 @@ use App\Policies\HseInspectionPolicy;
 use App\Policies\HseObservationPolicy;
 use App\Policies\IncidentPersonPolicy;
 use App\Policies\IncidentPolicy;
+use App\Policies\IncomePolicy;
 use App\Policies\InvestigationPolicy;
 use App\Policies\LocationPolicy;
 use App\Policies\MaterialRequestItemPolicy;
@@ -240,9 +254,12 @@ use App\Policies\NumberingSchemePolicy;
 use App\Policies\NumberSequencePolicy;
 use App\Policies\OrganizationPolicy;
 use App\Policies\OrgUnitPolicy;
+use App\Policies\PaymentPolicy;
 use App\Policies\PermitPolicy;
 use App\Policies\PermitPrecautionPolicy;
 use App\Policies\PermitTypePolicy;
+use App\Policies\PettyCashAccountPolicy;
+use App\Policies\PettyCashTransactionPolicy;
 use App\Policies\PositionPolicy;
 use App\Policies\ProjectCostPolicy;
 use App\Policies\ProjectDepartmentPolicy;
@@ -278,6 +295,7 @@ use App\Policies\SubmittalPolicy;
 use App\Policies\TaskChecklistItemPolicy;
 use App\Policies\TaskDependencyPolicy;
 use App\Policies\TaskPolicy;
+use App\Policies\TaxCodePolicy;
 use App\Policies\TemplatePolicy;
 use App\Policies\ToolboxTalkAttendeePolicy;
 use App\Policies\ToolboxTalkPolicy;
@@ -527,6 +545,12 @@ class AppServiceProvider extends ServiceProvider
             'cost_center' => CostCenter::class,
             'budget' => Budget::class,
             'budget_line' => BudgetLine::class,
+            'tax_code' => TaxCode::class,
+            'expense' => Expense::class,
+            'income' => Income::class,
+            'payment' => Payment::class,
+            'petty_cash_account' => PettyCashAccount::class,
+            'petty_cash_transaction' => PettyCashTransaction::class,
         ]);
     }
 
@@ -729,6 +753,12 @@ class AppServiceProvider extends ServiceProvider
             CostCenter::class => CostCenterPolicy::class,
             Budget::class => BudgetPolicy::class,
             BudgetLine::class => BudgetPolicy::class,
+            TaxCode::class => TaxCodePolicy::class,
+            Expense::class => ExpensePolicy::class,
+            Income::class => IncomePolicy::class,
+            Payment::class => PaymentPolicy::class,
+            PettyCashAccount::class => PettyCashAccountPolicy::class,
+            PettyCashTransaction::class => PettyCashTransactionPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {
@@ -905,6 +935,15 @@ class AppServiceProvider extends ServiceProvider
             ],
             PurchaseRequestDecided::class => [
                 NotifyPurchaseRequestDecided::class,
+            ],
+            ExpenseSubmitted::class => [
+                NotifyExpenseSubmitted::class,
+            ],
+            ExpenseDecided::class => [
+                NotifyExpenseDecided::class,
+            ],
+            PaymentAwaitingAction::class => [
+                NotifyPaymentAwaitingAction::class,
             ],
             RfqIssued::class => [
                 NotifyRfqIssued::class,

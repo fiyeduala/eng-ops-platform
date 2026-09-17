@@ -36,14 +36,62 @@ Node runtime on the production server. Node is used to build browser assets. See
 |---|---|
 | Phases 1–4 | Recorded complete in the roadmap: foundation, core operations, documents/workflow, engineering/HSE/quality |
 | Phase 5, parts 1–3 | Committed commercial, procurement and inventory work: vendors, clients, contracts, purchase requests, RFQs, quotations, orders, receipts, warehouses, stock ledger and material requests |
-| Phase 5, assets and fleet | Current uncommitted checkpoint: assets, custody transfers, maintenance, vehicles, fuel logs and vehicle documents, with associated application layers and tests |
-| Phase 5, finance | Project-cost posting, cost centers and controlled budgets are implemented in the current working tree; income, manual expenses, petty cash and payments remain |
-| Phase 5 exit criterion | Implemented in the current working tree: purchase request → approval → purchase order → goods receipt → stock transaction → project cost |
+| Phase 5, part 4 | Committed in `ad0a976`: assets, custody transfers, maintenance, vehicles, fuel logs, vehicle documents, project-cost posting, cost centers and controlled budgets |
+| Phase 5, part 5 | Operational finance: tax codes, expenses, income, payments and petty cash — see [below](#phase-5-part-5--operational-finance--17-september-2026) |
+| Phase 5 exit criterion | Met: purchase request → approval → purchase order → goods receipt → stock transaction → project cost. **Phase 5 is complete.** |
 
 At the start of this review, the [README status](../README.md#status) and
 [roadmap](14-roadmap.md) still described Phase 5 as unstarted. The review reconciles that stale
 checkpoint with the committed work. Commercial, procurement and inventory already exist; their
 verification and remaining integration are the continuation point.
+
+## Phase 5 part 5 — operational finance — 17 September 2026
+
+One additive migration (`2026_09_18_000001_create_finance_registers`) creates `tax_codes`,
+`expenses`, `incomes`, `payments`, `petty_cash_accounts` and `petty_cash_transactions`. Each
+register follows the full slice: model, policy, service, form request, controller, routes, views,
+events/notifications, tests and demo data.
+
+Decisions worth knowing before changing this code:
+
+- **Server-side money (§84).** Tax, totals, currency, status, payee and the paid/received caches are
+  protected attributes. Rates and recoverability are copied onto each record when saved, so a later
+  change to a tax code never rewrites history. Recoverable tax is excluded from project cost.
+- **Duty separation is a setting, not a hard rule.** `finance.separate_claimant_and_approver` and
+  `finance.separate_payment_approver_and_payer` default on. When a company waives one, the action
+  succeeds and the activity entry records `self_approved` / `self_released`.
+- **No over-commitment.** Outstanding balance subtracts draft, submitted, approved and paid
+  payments, checked under a row lock on the payable at create, update, submit, approve and pay.
+- **Payables are resolved server-side.** The form sends `type:id`; only `purchase_order`,
+  `expense` and `income` morphs resolve, only within the tenant, and the user must be able to
+  view the payable (403 otherwise, and it is not offered in the picker).
+- **Petty cash is a ledger.** Vouchers are append-only (update/delete throw); the balance is a
+  cache verified by `balanceMatchesLedger()`. Corrections are one reversal voucher per original,
+  which also reverses the posted project cost. A top-up whose cash is already spent cannot be
+  reversed below zero.
+- **Access fixes found while testing.** `Expense::accessOwnerColumns()` includes `claimant_id`, so
+  the baseline `own` grants reach claims entered on a claimant's behalf. The baseline gained
+  `expense.edit:own` so a returned claim can be amended. Finance manager/officer templates gained
+  `petty_cash` and `tax_code` grants; see the [RBAC matrix](06-rbac-matrix.md).
+
+Demo data: Meridian has 7.5% VAT, claims in each state (paid, approved, submitted, returned), a
+supplier advance paid and a balance awaiting approval against the first payable purchase order, a
+part-received interim valuation against its client contract, and a site tin with vouchers and one
+reversal. Kestrel has 20% VAT, a fully received maintenance invoice, and a mileage claim approved by
+the MD whose payment waits for release because nobody there holds `payment.pay`.
+
+Tests live in `tests/Feature/Finance` (`ExpenseTest`, `PaymentTest`, `PettyCashTest`,
+`FinanceAccessTest`; 26 new cases) with fixtures in `tests/Support/BuildsFinance.php`, covering
+IDOR and cross-tenant 404s (§75, §94), foreign tax code/client/project rejection, and
+permission-less refusal of every register and write.
+
+Validation on 17 September 2026: `php vendor/phpunit/phpunit/phpunit --no-progress` **passed, 528
+tests and 3,124 assertions** (22 minutes 32 seconds, in-memory SQLite). The finance folder alone:
+35 tests, 244 assertions. `migrate:fresh --seed` completed on the local MySQL database; seeded tin
+balances, receipts and project-cost rows reconcile with their ledgers. Pint passed on touched files.
+
+Not in this slice: bank reconciliation, multi-currency payments against a single payable, and
+accounting exports. Payments inherit their payable's currency.
 
 ## Continuation implemented — 16 September 2026
 

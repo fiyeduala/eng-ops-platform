@@ -59,17 +59,21 @@ use App\Services\DeliverableService;
 use App\Services\DocumentService;
 use App\Services\DocumentVersionService;
 use App\Services\DrawingService;
+use App\Services\ExpenseService;
 use App\Services\FleetService;
 use App\Services\GoodsReceiptService;
 use App\Services\HseInspectionService;
 use App\Services\HseObservationService;
 use App\Services\IncidentService;
+use App\Services\IncomeService;
 use App\Services\InvestigationService;
 use App\Services\MaterialRequestService;
 use App\Services\MeetingService;
 use App\Services\MemoService;
 use App\Services\NcrService;
+use App\Services\PaymentService;
 use App\Services\PermitService;
+use App\Services\PettyCashService;
 use App\Services\ProjectService;
 use App\Services\ProjectTeamService;
 use App\Services\PurchaseOrderService;
@@ -85,6 +89,7 @@ use App\Services\SubmittalService;
 use App\Services\TaskChecklistService;
 use App\Services\TaskDependencyService;
 use App\Services\TaskService;
+use App\Services\TaxCodeService;
 use App\Services\TemplateService;
 use App\Services\ToolboxTalkService;
 use App\Services\TrainingRecordService;
@@ -245,6 +250,12 @@ class DemoSeeder extends Seeder
         // anywhere; that one joint is what fixes the order (§90).
         $this->seedMeridianAssets($meridian);
         $this->seedKestrelAssets($kestrel);
+
+        // Finance last among the content chapters, because it is where the others are paid for: an
+        // income is raised against a client contract, a payment is released against a purchase
+        // order, and every approved claim and petty cash voucher lands on a project's cost line.
+        $this->seedMeridianFinance($meridian);
+        $this->seedKestrelFinance($kestrel);
 
         // The rows above were written straight to the database, so nothing observed them happening.
         // A demo whose record timelines are all blank teaches the wrong lesson about Engine 4 — the
@@ -7415,6 +7426,327 @@ class DemoSeeder extends Seeder
         $asset = $assets->create($attributes, $actor);
 
         return $assets->commission($asset, $actor);
+    }
+
+    // ================================================================= finance
+
+    private function seedMeridianFinance(Organization $organization): void
+    {
+        $this->context->within($organization, function () use ($organization) {
+            $this->bootDelivery();
+
+            $settings = app(SettingsRepository::class);
+            $taxes = app(TaxCodeService::class);
+            $expenses = app(ExpenseService::class);
+            $incomes = app(IncomeService::class);
+            $payments = app(PaymentService::class);
+            $cash = app(PettyCashService::class);
+
+            // Nobody signs off their own claim or releases money they approved — the defaults, set
+            // out loud so the settings screen shows a decision rather than a blank.
+            $settings->set('finance.separate_claimant_and_approver', true, $organization->id, 'finance');
+            $settings->set('finance.separate_payment_approver_and_payer', true, $organization->id, 'finance');
+            $settings->set('petty_cash.single_disbursement_limit', '150000', $organization->id, 'finance');
+
+            $staff = $this->staff();
+            $job = Project::query()->get()->keyBy('code');
+
+            $md = $this->accountOf($staff, 'MEI-0001');             // Adaeze Okonkwo
+            $projectManager = $this->accountOf($staff, 'MEI-0011'); // Daniel Mbeki
+            $siteManager = $this->accountOf($staff, 'MEI-0012');    // Kelechi Nwosu
+            $finance = $this->accountOf($staff, 'MEI-0018');        // Victor Anyanwu
+
+            // The rate is data, not code (§47): a company in another jurisdiction types its own.
+            $vat = $taxes->create([
+                'code' => 'VAT', 'name' => 'Value added tax 7.5%', 'rate' => '7.5',
+                'applies_to' => 'both', 'is_recoverable' => true, 'is_active' => true,
+            ], $finance);
+            $taxes->create([
+                'code' => 'EXEMPT', 'name' => 'Exempt supply', 'rate' => '0',
+                'applies_to' => 'both', 'is_recoverable' => false, 'is_active' => true,
+            ], $finance);
+
+            $dte = $job['DTE'] ?? null;
+
+            // ------------------------------------------------------------ claims
+            // Approved and paid: the whole route, claimant → finance approval → MD sign-off on the
+            // payment → finance releases it.
+            $hotel = $expenses->create([
+                'title' => 'Accommodation for tie-in survey — Warri',
+                'category' => 'accommodation',
+                'expense_date' => now()->subDays(24)->toDateString(),
+                'amount' => '186000',
+                'tax_code_id' => $vat->id,
+                'payee_name' => 'Delta Crest Hotel',
+                'receipt_reference' => 'DCH-44120',
+                'project_id' => $dte?->id,
+                'confidentiality' => 'internal',
+            ], $siteManager);
+            $expenses->submit($hotel, $siteManager);
+            $expenses->approve($hotel, $finance, 'Receipts match the site diary.');
+
+            $refund = $payments->create([
+                'direction' => 'outgoing', 'payable_type' => 'expense', 'payable_id' => $hotel->id,
+                'amount' => (string) $hotel->fresh()->total_amount, 'method' => 'bank_transfer',
+                'confidentiality' => 'internal',
+            ], $finance);
+            $payments->submit($refund, $finance);
+            $payments->approve($refund, $md);
+            $payments->pay($refund, $finance, now()->subDays(18)->toDateString(), 'NIP-2026-0917-1142');
+
+            // Approved, not yet paid — what a finance manager's "to pay" list looks like on a Monday.
+            $fuel = $expenses->create([
+                'title' => 'Diesel for site generator — week 36',
+                'category' => 'fuel',
+                'expense_date' => now()->subDays(9)->toDateString(),
+                'amount' => '94500',
+                'payee_name' => 'Ekpan Filling Station',
+                'receipt_reference' => 'EFS-7781',
+                'project_id' => $dte?->id,
+                'confidentiality' => 'internal',
+            ], $siteManager);
+            $expenses->submit($fuel, $siteManager);
+            $expenses->approve($fuel, $finance);
+
+            // Waiting on a decision.
+            $courier = $expenses->create([
+                'title' => 'Courier of weld procedure records to client',
+                'category' => 'courier',
+                'expense_date' => now()->subDays(3)->toDateString(),
+                'amount' => '18500',
+                'payee_name' => 'Swiftline Dispatch',
+                'project_id' => $dte?->id,
+                'confidentiality' => 'internal',
+            ], $projectManager);
+            $expenses->submit($courier, $projectManager);
+
+            // Sent back for a receipt — a draft again, in the claimant's hands, with the reason on it.
+            $meals = $expenses->create([
+                'title' => 'Crew meals during night pour',
+                'category' => 'meals',
+                'expense_date' => now()->subDays(6)->toDateString(),
+                'amount' => '42000',
+                'project_id' => $dte?->id,
+                'confidentiality' => 'internal',
+            ], $siteManager);
+            $expenses->submit($meals, $siteManager);
+            $expenses->returnForAmendment($meals, $finance, 'Attach the canteen receipt, and split the two nights.');
+
+            // ------------------------------------------------------------ a supplier paid
+            // §90: the order the procurement chapter issued is the thing the money goes against.
+            $order = PurchaseOrder::query()
+                ->with('status')->orderBy('id')
+                ->get()
+                ->first(fn (PurchaseOrder $po) => $payments->isPayable($po));
+
+            if ($order !== null) {
+                $outstanding = (float) $payments->outstandingOn($order);
+
+                if ($outstanding > 0) {
+                    $advance = $payments->create([
+                        'direction' => 'outgoing', 'payable_type' => 'purchase_order', 'payable_id' => $order->id,
+                        'amount' => number_format($outstanding * 0.3, 2, '.', ''), 'method' => 'bank_transfer',
+                        'reference' => 'Advance 30% per PO terms', 'confidentiality' => 'internal',
+                    ], $finance);
+                    $payments->submit($advance, $finance);
+                    $payments->approve($advance, $md);
+                    $payments->pay($advance, $finance, now()->subDays(12)->toDateString(), 'NIP-2026-0905-0833');
+
+                    // The balance is raised and waiting for the MD.
+                    $balance = $payments->create([
+                        'direction' => 'outgoing', 'payable_type' => 'purchase_order', 'payable_id' => $order->id,
+                        'amount' => number_format($outstanding * 0.7, 2, '.', ''), 'method' => 'bank_transfer',
+                        'reference' => 'Balance on delivery', 'confidentiality' => 'internal',
+                    ], $finance);
+                    $payments->submit($balance, $finance);
+                }
+            }
+
+            // ------------------------------------------------------------ billing the client
+            $contract = Contract::query()
+                ->where('direction', 'client')
+                ->when($dte !== null, fn (Builder $query) => $query->where('project_id', $dte->id))
+                ->orderBy('id')
+                ->first()
+                ?? Contract::query()->where('direction', 'client')->orderBy('id')->first();
+
+            $valuation = $incomes->create([
+                'title' => 'Interim valuation 2 — civil and mechanical works',
+                'category' => 'contract_billing',
+                'income_date' => now()->subDays(40)->toDateString(),
+                'due_on' => now()->subDays(10)->toDateString(),
+                'invoice_reference' => 'MEI-INV-2026-014',
+                'amount' => '48500000',
+                'tax_code_id' => $vat->id,
+                'contract_id' => $contract?->id,
+                'confidentiality' => 'confidential',
+            ], $finance);
+            $incomes->issue($valuation, $finance);
+
+            // Part received: the client paid on the certified amount, not the invoiced one.
+            $payments->create([
+                'direction' => 'incoming', 'payable_type' => 'income', 'payable_id' => $valuation->id,
+                'amount' => '30000000', 'method' => 'bank_transfer', 'reference' => 'RTGS-RPDC-88213',
+                'paid_on' => now()->subDays(8)->toDateString(), 'confidentiality' => 'confidential',
+            ], $finance);
+
+            $incomes->create([
+                'title' => 'Interim valuation 3 — draft for QS review',
+                'category' => 'contract_billing',
+                'income_date' => now()->toDateString(),
+                'amount' => '21750000',
+                'tax_code_id' => $vat->id,
+                'contract_id' => $contract?->id,
+                'confidentiality' => 'confidential',
+            ], $finance);
+
+            // ------------------------------------------------------------ the site tin
+            $tin = $cash->createAccount([
+                'code' => 'PC-DTE',
+                'name' => 'Delta terminal site office tin',
+                'custodian_id' => $siteManager->id,
+                'float_amount' => '500000',
+                'project_id' => $dte?->id,
+                'is_active' => true,
+                'confidentiality' => 'internal',
+                'notes' => 'Counted every Friday by the site manager; topped up by finance on request.',
+            ], $finance);
+
+            $cash->replenish($tin, [
+                'amount' => '400000', 'transacted_on' => now()->subDays(21)->toDateString(),
+                'description' => 'Opening float — cash withdrawn from operating account', 'receipt_reference' => 'CHQ-004417',
+            ], $finance);
+
+            foreach ([
+                [19, '35000', 'Bottled water for the crew', 'meals', 'Warri Mega Stores'],
+                [15, '62000', 'Hire of tricycle for material runs', 'travel', 'Keke rider — Musa'],
+                [11, '28500', 'Padlocks and chain for container store', 'consumables', 'Effurun hardware'],
+                [7, '140000', 'Emergency repair to site water pump', 'repairs', 'Okpe Plumbing Works'],
+            ] as [$daysAgo, $amount, $what, $category, $payee]) {
+                $cash->disburse($tin, [
+                    'amount' => $amount, 'transacted_on' => now()->subDays($daysAgo)->toDateString(),
+                    'description' => $what, 'category' => $category, 'payee_name' => $payee,
+                ], $siteManager);
+            }
+
+            // Booked to the tin by mistake, and put right by its own voucher rather than an edit.
+            $wrong = $cash->disburse($tin, [
+                'amount' => '15000', 'transacted_on' => now()->subDays(5)->toDateString(),
+                'description' => 'Printer toner — head office', 'category' => 'consumables',
+            ], $siteManager);
+            $cash->reverse($wrong, 'Head office purchase, paid from the wrong tin.', $finance);
+
+        });
+    }
+
+    private function seedKestrelFinance(Organization $organization): void
+    {
+        $this->context->within($organization, function () use ($organization) {
+            $this->bootDelivery();
+
+            $settings = app(SettingsRepository::class);
+            $taxes = app(TaxCodeService::class);
+            $expenses = app(ExpenseService::class);
+            $incomes = app(IncomeService::class);
+            $payments = app(PaymentService::class);
+            $cash = app(PettyCashService::class);
+
+            $staff = $this->staff();
+            $job = Project::query()->get()->keyBy('code');
+
+            $md = $this->accountOf($staff, 'KFM-001');              // Rowan Calder
+            $maintenanceHead = $this->accountOf($staff, 'KFM-003'); // Duncan Reilly
+            $fitter = $this->accountOf($staff, 'KFM-005');          // Callum Whitfield
+            $finance = $this->accountOf($staff, 'KFM-008');         // Marianne Ellis
+
+            // A small company with no treasurer: the payer rule stays on, so an approved payment
+            // waits for someone who holds `payment.pay` rather than being released by its approver.
+            $settings->set('petty_cash.single_disbursement_limit', '75', $organization->id, 'finance');
+
+            $vat = $taxes->create([
+                'code' => 'S20', 'name' => 'Standard rate 20%', 'rate' => '20',
+                'applies_to' => 'both', 'is_recoverable' => true, 'is_active' => true,
+            ], $md);
+            $taxes->create([
+                'code' => 'Z0', 'name' => 'Zero rated', 'rate' => '0',
+                'applies_to' => 'both', 'is_recoverable' => true, 'is_active' => true,
+            ], $md);
+
+            $tpa = $job['TPA'] ?? null;
+            $contract = Contract::query()
+                ->where('direction', 'client')
+                ->when($tpa !== null, fn (Builder $query) => $query->where('project_id', $tpa->id))
+                ->orderBy('id')
+                ->first()
+                ?? Contract::query()->where('direction', 'client')->orderBy('id')->first();
+
+            // ------------------------------------------------------------ the monthly PPM invoice
+            $invoice = $incomes->create([
+                'title' => 'Planned maintenance — August',
+                'category' => 'contract_billing',
+                'income_date' => now()->subDays(30)->toDateString(),
+                'due_on' => now()->toDateString(),
+                'invoice_reference' => 'KFM-INV-0231',
+                'amount' => '14250',
+                'tax_code_id' => $vat->id,
+                'contract_id' => $contract?->id,
+                'confidentiality' => 'confidential',
+            ], $finance);
+            $incomes->issue($invoice, $finance);
+            $payments->create([
+                'direction' => 'incoming', 'payable_type' => 'income', 'payable_id' => $invoice->id,
+                'amount' => (string) $invoice->fresh()->total_amount, 'method' => 'bank_transfer',
+                'reference' => 'BACS TPE LLP 0231', 'paid_on' => now()->subDays(2)->toDateString(),
+                'confidentiality' => 'confidential',
+            ], $finance);
+
+            // ------------------------------------------------------------ a claim, approved by the MD
+            $mileage = $expenses->create([
+                'title' => 'Mileage — emergency call-out to Trafford Point',
+                'category' => 'travel',
+                'expense_date' => now()->subDays(10)->toDateString(),
+                'amount' => '38.70',
+                'description' => '86 miles at 45p, own vehicle, AHU-3 alarm out of hours.',
+                'project_id' => $tpa?->id,
+                'confidentiality' => 'internal',
+            ], $fitter);
+            $expenses->submit($mileage, $fitter);
+            $expenses->approve($mileage, $md);
+
+            // Raised and approved; nobody here holds the release, so it waits (see above).
+            $reimburse = $payments->create([
+                'direction' => 'outgoing', 'payable_type' => 'expense', 'payable_id' => $mileage->id,
+                'amount' => (string) $mileage->fresh()->total_amount, 'method' => 'bank_transfer',
+                'confidentiality' => 'internal',
+            ], $finance);
+            $payments->submit($reimburse, $finance);
+            $payments->approve($reimburse, $md);
+
+            // ------------------------------------------------------------ the van tin
+            $tin = $cash->createAccount([
+                'code' => 'PC-TPA',
+                'name' => 'Trafford Point maintenance van tin',
+                'custodian_id' => $maintenanceHead->id,
+                'float_amount' => '200',
+                'project_id' => $tpa?->id,
+                'is_active' => true,
+                'confidentiality' => 'internal',
+            ], $finance);
+            $cash->replenish($tin, [
+                'amount' => '200', 'transacted_on' => now()->subDays(14)->toDateString(),
+                'description' => 'Float issued from the office safe',
+            ], $finance);
+            $cash->disburse($tin, [
+                'amount' => '12.40', 'transacted_on' => now()->subDays(9)->toDateString(),
+                'description' => 'Parking — Trafford Point visitor bays', 'category' => 'travel',
+                'payee_name' => 'Trafford Point car park', 'receipt_reference' => 'TP-PARK-5561',
+            ], $maintenanceHead);
+            $cash->disburse($tin, [
+                'amount' => '46.95', 'transacted_on' => now()->subDays(4)->toDateString(),
+                'description' => 'Cable ties, fuses and PTFE tape', 'category' => 'consumables',
+                'payee_name' => 'Parkside Trade Counter', 'receipt_reference' => 'PTC-889104',
+            ], $maintenanceHead);
+        });
     }
 
     // ================================================================= narrative history

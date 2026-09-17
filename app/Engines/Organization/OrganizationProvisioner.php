@@ -265,6 +265,16 @@ class OrganizationProvisioner
             'vehicle_document.expiry_warning_days' => 60,
             'fuel_log.odometer_required' => true,
 
+            // --- finance -----------------------------------------------------------------
+            // Both separations on, for the reason procurement's are. No tax code is provisioned:
+            // which taxes exist and at what rate is the company's to say, not ours (§47).
+            'finance.separate_claimant_and_approver' => true,
+            'finance.separate_payment_approver_and_payer' => true,
+            'expense.categories' => '',
+            'income.categories' => '',
+            'payment.methods' => '',
+            'petty_cash.single_disbursement_limit' => '',
+
             // --- notifications -----------------------------------------------------------
             'notify.channels' => ['database', 'mail'],
             'notify.digest_hour' => 7,

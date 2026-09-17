@@ -926,6 +926,69 @@ final class StatusCatalogue
                 ],
             ],
 
+            /*
+             * An expense costs the project the moment it is APPROVED, not when it is paid. That is
+             * the accruals view and it is the one a budget holder needs: a claim approved on the
+             * 28th is money the project has spent, whether or not finance pays it on the 2nd.
+             * `paid` is set by PaymentService when payments cover the total, never clicked.
+             */
+            'expense' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'submitted' => ['label' => 'Awaiting approval', 'color' => 'brand'],
+                    'approved' => ['label' => 'Approved', 'color' => 'success'],
+                    'paid' => ['label' => 'Paid', 'color' => 'success', 'terminal' => true],
+                    'rejected' => ['label' => 'Rejected', 'color' => 'danger', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['draft', 'submitted', 'Submit for approval', 'expense.submit'],
+                    ['submitted', 'approved', 'Approve', 'expense.approve'],
+                    ['submitted', 'draft', 'Return for amendment', 'expense.approve', true],
+                    ['submitted', 'rejected', 'Reject', 'expense.reject', true],
+                ],
+            ],
+
+            // Money the company is owed. The two receipt statuses are set by incoming payments.
+            'income' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'issued' => ['label' => 'Issued', 'color' => 'brand'],
+                    'part_received' => ['label' => 'Part received', 'color' => 'warning'],
+                    'received' => ['label' => 'Received', 'color' => 'success', 'terminal' => true],
+                    'cancelled' => ['label' => 'Cancelled', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['draft', 'issued', 'Issue', 'income.issue'],
+                    ['draft', 'cancelled', 'Cancel', 'income.manage', true],
+                    ['issued', 'cancelled', 'Cancel', 'income.manage', true],
+                ],
+            ],
+
+            /*
+             * THREE PEOPLE CAN TOUCH AN OUTGOING PAYMENT and the graph is drawn so they can be three
+             * different people: somebody prepares it, somebody approves it, somebody releases it.
+             * Incoming payments are recorded straight to `paid` — money that has arrived is not a
+             * proposal anybody needs to approve.
+             */
+            'payment' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'submitted' => ['label' => 'Awaiting approval', 'color' => 'brand'],
+                    'approved' => ['label' => 'Approved to pay', 'color' => 'warning'],
+                    'paid' => ['label' => 'Paid', 'color' => 'success', 'terminal' => true],
+                    'rejected' => ['label' => 'Rejected', 'color' => 'danger', 'terminal' => true],
+                    'cancelled' => ['label' => 'Cancelled', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['draft', 'submitted', 'Submit for approval', 'payment.edit'],
+                    ['submitted', 'approved', 'Approve', 'payment.approve'],
+                    ['submitted', 'rejected', 'Reject', 'payment.approve', true],
+                    ['approved', 'paid', 'Mark paid', 'payment.pay'],
+                    ['draft', 'cancelled', 'Cancel', 'payment.manage', true],
+                    ['approved', 'cancelled', 'Cancel', 'payment.manage', true],
+                ],
+            ],
+
             // A budget is editable only while draft. Approval freezes both its scope and lines so
             // variance reports always compare actual costs with the allocation that was signed.
             'budget' => [

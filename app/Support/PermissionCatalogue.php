@@ -186,8 +186,18 @@ final class PermissionCatalogue
             // ------------------------------------------------------------- finance
             'budget' => ['Finance', 'Budgets', [...self::CRUD, 'manage', 'approve']],
             'expense' => ['Finance', 'Expenses', [...self::CRUD, 'manage', 'submit', 'approve', 'reject']],
-            'income' => ['Finance', 'Income', [...self::CRUD, 'manage']],
-            'payment' => ['Finance', 'Payments', [...self::CRUD, 'manage', 'approve']],
+            // `issue` is separate from `create`: drafting an invoice line is clerical, telling a
+            // client they owe money is not, and the second is what makes the figure receivable.
+            'income' => ['Finance', 'Income', [...self::CRUD, 'manage', 'issue']],
+            // `pay` IS NOT `approve`. Approving says the company owes it; paying says the money has
+            // left the bank. The person who can do both alone is the person every payment-fraud
+            // case turns out to have been.
+            'payment' => ['Finance', 'Payments', [...self::CRUD, 'manage', 'approve', 'pay']],
+            // The cash tin. `disburse` and `replenish` are separate because the custodian hands out
+            // cash every day and should never be the person who decides how much goes back in.
+            'petty_cash' => ['Finance', 'Petty Cash', [...self::CRUD, 'manage', 'disburse', 'replenish']],
+            // Rates are company data (§47). Nothing in the application knows any country's tax.
+            'tax_code' => ['Finance', 'Tax Codes', self::CRUD],
             'payroll' => ['Finance', 'Payroll', ['view', 'create', 'edit', 'export', 'run', 'approve', 'view_confidential']],
 
             // ------------------------------------------------------------- intelligence

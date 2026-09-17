@@ -168,8 +168,33 @@ cost_centers             code, name, org_unit_id, project_id, manager_id, is_act
 budgets ──1:N── budget_lines (category, allocated_amount); approved lines are frozen
 project_costs            source_type/id, project_id, org_unit_id, vendor_id,
                          currency, exchange_rate, amount, base_currency, base_amount
-expenses / incomes / budgets / budget_lines / cost_centers / payments
+
+tax_codes                code, name, rate, applies_to(sales|purchases|both), is_recoverable,
+                         is_active — company data (§47); copied onto records, never re-read
+expenses                 number, category, expense_date, claimant_id, vendor_id, payee_name,
+                         currency, amount, tax_code_id, tax_rate, tax_recoverable, tax_amount,
+                         total_amount, paid_amount (cache), project_id, org_unit_id,
+                         cost_center_id, status_id, submitted/approved/rejected by+at,
+                         decision_reason                      → project_costs on approval
+incomes                  number, category, income_date, due_on, client_id, contract_id,
+                         invoice_reference, currency, amount, tax_code_id, tax_rate, tax_amount,
+                         total_amount, received_amount (cache), project_id, status_id, issued by+at
+payments                 number, direction(outgoing|incoming), payable_type/id
+                         (purchase_order|expense|income), vendor_id, client_id, payee_name,
+                         currency, amount, method, reference, paid_on, project_id, status_id,
+                         submitted/approved/paid by+at
+petty_cash_accounts ──1:N── petty_cash_transactions
+petty_cash_accounts      code, name, custodian_id, float_amount, balance (cache of ledger),
+                         project_id, org_unit_id, is_active
+petty_cash_transactions  number, type(replenishment|disbursement|reversal), amount(+/-),
+                         balance_after, category, payee_name, receipt_reference, project_id,
+                         reversal_of_id — append-only       → project_costs on disbursement/reversal
 ```
+
+Finance integrity: a payable's live payments (draft, submitted, approved, paid) may never exceed
+its outstanding total, checked under a row lock on the payable. `expenses.paid_amount`,
+`incomes.received_amount` and `petty_cash_accounts.balance` are caches rebuilt from their ledgers,
+never edited directly.
 
 ---
 

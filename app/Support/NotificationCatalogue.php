@@ -357,6 +357,25 @@ final class NotificationCatalogue
             'Insurance, a licence or a permit on a vehicle reaches its expiry date shortly.',
             'urgent', true, [true, true, true],
         ],
+
+        // ------------------------------------------------------------------ finance
+        // Mandatory for the same reason as requisitions: a claim nobody is told about is a
+        // claimant out of pocket, and a decision the claimant never hears is the same thing.
+        'expense.submitted' => [
+            'expense', 'Finance', 'An expense claim is waiting for you',
+            'Somebody submitted an expense that needs a decision.',
+            'high', true, [true, true, false],
+        ],
+        'expense.decided' => [
+            'expense', 'Finance', 'Your expense claim was answered',
+            'An expense you claimed was approved, returned or rejected.',
+            'high', true, [true, true, false],
+        ],
+        'payment.awaiting_action' => [
+            'payment', 'Finance', 'A payment is waiting for you',
+            'A payment needs approving, or has been approved and is waiting to be released.',
+            'high', true, [true, true, false],
+        ],
     ];
 
     /**

@@ -42,16 +42,15 @@ that configures a route through the same three HTTP endpoints the builder screen
 an incident against it, and watches the review stage open an investigation and raise a corrective
 action — neither of which the engine or the controller names.
 
-**Phase 5 is in progress.** Commercial registers, procurement, warehouses, inventory and the stock
-ledger are committed. The current working tree also contains assets, custody, maintenance, fleet,
-fuel and vehicle documents. The continuation adds parent access protections, lifecycle fixes and
-registration from accepted goods receipts, with targeted regression coverage.
-The first operational-finance slice is now present: accepting a receipt posts immutable,
-source-linked project costs in both the purchase currency and organization currency, including
-direct-to-site deliveries. Foreign order prices are also converted before stock valuation. Cost
-centers and controlled budgets now compare approved allocations with that ledger. Income, manual
-expenses, petty cash and payments remain. See the
-[development handoff](docs/16-development-handoff.md) for the reviewed stopping point and next tasks,
+**Phase 5 is complete.** Commercial registers, procurement, warehouses, the stock ledger, assets and
+fleet, project costs, cost centers and budgets, and operational finance are all in: tax codes held
+as company data, expense claims, client income, payments against orders, claims and invoices, and
+petty cash with an append-only voucher ledger. The exit criterion — purchase request → approval →
+purchase order → goods receipt → stock → project cost — runs as one chain, and approved claims and
+petty cash payouts land on the same cost ledger that budgets read. Claimant/approver and
+approver/payer separation are enforced by default and can be waived per company, with the waiver
+recorded. See the [development handoff](docs/16-development-handoff.md) for the checkpoint and
+deployment notes,
 [docs/14-roadmap.md](docs/14-roadmap.md) for what each phase covers and what is deliberately out of
 V1, and [docs/15-hse-quality-architecture.md](docs/15-hse-quality-architecture.md) for how the
 registers fit together.

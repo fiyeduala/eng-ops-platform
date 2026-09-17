@@ -360,6 +360,13 @@ class NumberGenerator
             // --- Phase 5, part 5: operational finance --------------------------------
             'project_cost' => ['prefix' => 'CST', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 6],
             'budget' => ['prefix' => 'BUD', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+            // Every one of these is an EVENT the company originates, so every one is numbered. An
+            // income row's own number is not the invoice number the client sees — that is typed
+            // into `invoice_reference`, because many companies invoice from an accounting package.
+            'expense' => ['prefix' => 'EXP', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 5],
+            'income' => ['prefix' => 'INC', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 5],
+            'payment' => ['prefix' => 'PAY', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 5],
+            'petty_cash_transaction' => ['prefix' => 'PCV', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 5],
         ];
     }
 }

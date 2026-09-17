@@ -11,15 +11,18 @@ use App\Models\Contract;
 use App\Models\CorrectiveAction;
 use App\Models\Deliverable;
 use App\Models\Drawing;
+use App\Models\Expense;
 use App\Models\GoodsReceipt;
 use App\Models\HseInspection;
 use App\Models\HseInspectionItem;
 use App\Models\HseObservation;
 use App\Models\Incident;
 use App\Models\IncidentPerson;
+use App\Models\Income;
 use App\Models\Investigation;
 use App\Models\MaterialRequest;
 use App\Models\Ncr;
+use App\Models\Payment;
 use App\Models\PurchaseRequest;
 use App\Models\QualityInspection;
 use App\Models\QualityInspectionItem;
@@ -324,6 +327,20 @@ final class SettingsCatalogue
                     'vehicle_document.types' => ['label' => 'Vehicle documents you track', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:900'], 'help' => 'The papers a vehicle must carry where you operate. Nothing in the system knows what any of these mean — they are your words. Leave blank to use: '.implode(', ', VehicleDocument::DEFAULT_TYPES)],
                     'vehicle_document.expiry_warning_days' => ['label' => 'Warn about expiring vehicle documents', 'type' => 'integer', 'rules' => ['required', 'integer', 'between:7,365'], 'help' => 'Days ahead. Renewals take weeks in most places, so this is usually set wider than it feels.'],
                     'fuel_log.odometer_required' => ['label' => 'A fuel log must carry an odometer reading', 'type' => 'boolean', 'help' => 'Without a reading the fill can never contribute to a consumption figure. Turn this off only for plant where nobody reads the meter at the pump.'],
+                ],
+            ],
+            'finance' => [
+                'label' => 'Finance',
+                'description' => 'Who may approve and release money, and the words your expenses, income and payments use. Tax rates are kept under Finance → Tax codes. Separate each list entry with a comma.',
+                'settings' => [
+                    'finance.separate_claimant_and_approver' => ['label' => 'An expense may not be approved by the person who claimed it', 'type' => 'boolean'],
+                    'finance.separate_payment_approver_and_payer' => ['label' => 'A payment may not be released by the person who approved it', 'type' => 'boolean', 'help' => 'Turn this off only where one person genuinely does both.'],
+                    // Category keys double as budget-line categories: an approved "travel" expense
+                    // counts against a budget line called "travel".
+                    'expense.categories' => ['label' => 'Expense categories', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:900'], 'help' => 'These are also the categories budget lines are compared against. Leave blank to use: '.implode(', ', Expense::DEFAULT_CATEGORIES)],
+                    'income.categories' => ['label' => 'Income categories', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:600'], 'help' => 'Leave blank to use: '.implode(', ', Income::DEFAULT_CATEGORIES)],
+                    'payment.methods' => ['label' => 'Payment methods', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:400'], 'help' => 'Leave blank to use: '.implode(', ', Payment::DEFAULT_METHODS)],
+                    'petty_cash.single_disbursement_limit' => ['label' => 'Largest single petty-cash payout', 'type' => 'string', 'rules' => ['nullable', 'numeric', 'min:0'], 'help' => 'In your base currency. Anything bigger has to go through an expense claim. Leave blank for no limit.'],
                 ],
             ],
             'notify' => [

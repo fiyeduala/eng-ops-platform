@@ -59,8 +59,8 @@ administrator may rename, edit or delete them. Only `Super Administrator` is pro
 | **Document Controller** | `document.manage:organization`, `document.archive:organization`, `transmittal.manage:organization`, `numbering.manage:organization` |
 | **HR Manager** | `employee.manage:organization`, `leave.approve:organization`, `attendance.manage:organization`, `recruitment.manage:organization`, `payroll.run:organization` |
 | **HR Officer** | `employee.view:organization`, `attendance.edit:organization`, `leave.view:organization`, `recruitment.edit:organization` |
-| **Finance Manager** | `expense.approve:organization`, `budget.manage:organization`, `payment.manage:organization`, `income.manage:organization`, `report.export:organization` |
-| **Finance Officer** | `expense.create:department`, `expense.view:department`, `payment.create:department`, `income.create:department` |
+| **Finance Manager** | `expense.*:organization`, `income.*:organization`, `payment.*:organization`, `petty_cash.*:organization`, `tax_code.*:organization`, `budget.*:organization`, `contract.manage:organization`, `report.export:organization` |
+| **Finance Officer** | `expense.create/edit/view/submit:department`, `income.create/edit/view:department`, `payment.create/edit/view:department`, `petty_cash.view/disburse/replenish:department`, `tax_code.view:organization`, `budget.view:department` — **no** approval, **no** release of payments |
 | **Procurement Manager** | `purchase_request.manage:organization`, `rfq.manage:organization`, `purchase_order.approve:organization`, `vendor.manage:organization` |
 | **Procurement Officer** | `purchase_request.view:department`, `rfq.create:department`, `quotation.manage:department`, `purchase_order.create:department` |
 | **Store Manager** | `warehouse.manage:organization`, `stock.manage:organization`, `goods_receipt.approve:organization`, `material_request.approve:organization` |
@@ -75,6 +75,11 @@ administrator may rename, edit or delete them. Only `Super Administrator` is pro
 | **General Employee** | `task.view:assigned`, `document.view:assigned`, `leave.create:own`, `attendance.create:own`, `daily_report.create:own`, `meeting.view:assigned` |
 | **Client** | `project.view:assigned`, `document.view:assigned` (external portal, ACL-driven) |
 | **Contractor / Consultant** | `project.view:project`, `task.view:assigned`, `document.view:assigned`, `daily_report.create:own` |
+
+Every template also starts from a small `own`-scope baseline (self-service on the person's own
+profile, leave and similar). It includes `expense.view/create/edit/submit:own`, where *own* means
+the claim was created by the person **or** names them as claimant, so a claim finance typed in on
+someone's behalf is still theirs to see, and to amend when returned.
 
 Note the deliberate absence of unlimited access on every administrator variant (§10).
 
