@@ -127,10 +127,13 @@ use App\Models\DocumentCategory;
 use App\Models\DocumentVersion;
 use App\Models\Drawing;
 use App\Models\Employee;
+use App\Models\EmployeeBankAccount;
 use App\Models\EmployeeChecklist;
 use App\Models\EmployeeChecklistItem;
 use App\Models\EmployeeExit;
 use App\Models\EmployeeMovement;
+use App\Models\EmployeePayComponent;
+use App\Models\EmployeeSalary;
 use App\Models\Expense;
 use App\Models\Follower;
 use App\Models\FuelLog;
@@ -162,7 +165,12 @@ use App\Models\NumberSequence;
 use App\Models\Organization;
 use App\Models\OrgUnit;
 use App\Models\OvertimeRequest;
+use App\Models\PayComponent;
+use App\Models\PayComponentBand;
 use App\Models\Payment;
+use App\Models\PayrollRun;
+use App\Models\Payslip;
+use App\Models\PayslipLine;
 use App\Models\PerformanceReview;
 use App\Models\PerformanceReviewItem;
 use App\Models\Permit;
@@ -258,6 +266,7 @@ use App\Policies\EmployeeChecklistPolicy;
 use App\Policies\EmployeeExitPolicy;
 use App\Policies\EmployeeMovementPolicy;
 use App\Policies\EmployeePolicy;
+use App\Policies\EmployeeSalaryPolicy;
 use App\Policies\ExpensePolicy;
 use App\Policies\FollowerPolicy;
 use App\Policies\FuelLogPolicy;
@@ -287,7 +296,10 @@ use App\Policies\NumberSequencePolicy;
 use App\Policies\OrganizationPolicy;
 use App\Policies\OrgUnitPolicy;
 use App\Policies\OvertimeRequestPolicy;
+use App\Policies\PayComponentPolicy;
 use App\Policies\PaymentPolicy;
+use App\Policies\PayrollRunPolicy;
+use App\Policies\PayslipPolicy;
 use App\Policies\PerformanceReviewPolicy;
 use App\Policies\PermitPolicy;
 use App\Policies\PermitPrecautionPolicy;
@@ -624,6 +636,25 @@ class AppServiceProvider extends ServiceProvider
             'performance_review_item' => PerformanceReviewItem::class,
             'employee_movement' => EmployeeMovement::class,
             'disciplinary_case' => DisciplinaryCase::class,
+            // --- Phase 6, part 5: payroll ----------------------------------------------
+            // EVERY ONE OF THESE IS AUDITABLE, and the morph map is required, so a model missing
+            // from this list cannot be saved at all — the audit entry throws before the row is
+            // written. That is the behaviour we want and the reason the map is strict: a payroll
+            // table that wrote rows with no audit trail would be far worse than one that refuses.
+            'pay_component' => PayComponent::class,
+            'pay_component_band' => PayComponentBand::class,
+            // The three that hold what somebody earns and where it is sent. Their audit entries are
+            // the record of who changed a salary or a bank account and when — which is the evidence
+            // any payroll fraud investigation starts from (§59).
+            'employee_salary' => EmployeeSalary::class,
+            'employee_pay_component' => EmployeePayComponent::class,
+            'employee_bank_account' => EmployeeBankAccount::class,
+            // A payroll run is the subject of a workflow instance like any other routed record.
+            // Without this line a run could be calculated and never sent anywhere, which is the one
+            // failure mode payroll cannot have.
+            'payroll_run' => PayrollRun::class,
+            'payslip' => Payslip::class,
+            'payslip_line' => PayslipLine::class,
         ]);
     }
 
@@ -862,6 +893,18 @@ class AppServiceProvider extends ServiceProvider
             PerformanceReviewItem::class => PerformanceReviewPolicy::class,
             EmployeeMovement::class => EmployeeMovementPolicy::class,
             DisciplinaryCase::class => DisciplinaryCasePolicy::class,
+
+            // Payroll. A band is part of its component and a payslip line is part of its payslip, so
+            // each shares the parent's policy — a rate table that could be read on its own terms
+            // would be a way round the component's own gate.
+            PayComponent::class => PayComponentPolicy::class,
+            PayComponentBand::class => PayComponentPolicy::class,
+            EmployeeSalary::class => EmployeeSalaryPolicy::class,
+            EmployeePayComponent::class => EmployeeSalaryPolicy::class,
+            EmployeeBankAccount::class => EmployeeSalaryPolicy::class,
+            PayrollRun::class => PayrollRunPolicy::class,
+            Payslip::class => PayslipPolicy::class,
+            PayslipLine::class => PayslipPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {

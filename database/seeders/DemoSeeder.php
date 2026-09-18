@@ -30,6 +30,7 @@ use App\Models\Meeting;
 use App\Models\Memo;
 use App\Models\Organization;
 use App\Models\OrgUnit;
+use App\Models\PayrollRun;
 use App\Models\PerformanceReview;
 use App\Models\PermitType;
 use App\Models\Position;
@@ -87,6 +88,8 @@ use App\Services\MemoService;
 use App\Services\NcrService;
 use App\Services\OvertimeService;
 use App\Services\PaymentService;
+use App\Services\PayrollService;
+use App\Services\PayStructureService;
 use App\Services\PerformanceReviewService;
 use App\Services\PermitService;
 use App\Services\PettyCashService;
@@ -344,6 +347,15 @@ class DemoSeeder extends Seeder
         // inbox as a drawing, and neither register has an approve button of its own.
         $this->seedMeridianDevelopment($meridian);
         $this->seedKestrelDevelopment($kestrel);
+
+        // Payroll comes last of the people chapters because it reads all of them: the roster, the
+        // joiners and leavers, the org units and the approved overtime. Two structures, two
+        // currencies, two sets of tax bands and ONE calculator — the demonstration that no country
+        // is written into this software (§47). Meridian's last month is approved and locked;
+        // Kestrel's is sitting in the Managing Director's inbox, decided by the same engine that
+        // decides everything else.
+        $this->seedMeridianPayroll($meridian);
+        $this->seedKestrelPayroll($kestrel);
 
         // The rows above were written straight to the database, so nothing observed them happening.
         // A demo whose record timelines are all blank teaches the wrong lesson about Engine 4 — the
@@ -9386,6 +9398,439 @@ class DemoSeeder extends Seeder
         }
 
         return $rows;
+    }
+
+    // ================================================================= payroll
+
+    /**
+     * Meridian's pay structure, in naira, and one month actually paid.
+     *
+     * THE POINT OF SEEDING TWO COUNTRIES IS THAT NEITHER OF THEM IS IN THE CODE. Everything below —
+     * the eight per cent pension, the two and a half per cent housing fund, the consolidated relief,
+     * the six PAYE bands — is rows in this company's own tables, put there by this company's own HR
+     * manager through the same form anybody else would use. Nigeria appears nowhere in
+     * `PayrollCalculator`, and the British structure seeded next door produces correct British
+     * figures through the identical code path (§47). If a reader wants to know whether the tax rules
+     * are hard-coded, the answer is on this page: change a rate here and next month's payroll
+     * changes, with no deployment.
+     *
+     * The run for last month is calculated, sent for approval and APPROVED THROUGH THE INBOX, by the
+     * Managing Director, on the same engine that decided a drawing in the documents chapter. There
+     * is no approve button on a payroll run anywhere in this system. The current month is left open
+     * and calculated so that the editable half of the register has something in it too.
+     */
+    private function seedMeridianPayroll(Organization $organization): void
+    {
+        $this->context->within($organization, function () {
+            $structure = app(PayStructureService::class);
+            $payroll = app(PayrollService::class);
+
+            $staff = $this->staff();
+            $hr = $this->accountOf($staff, 'MEI-0017'); // Amina Tijani, who runs payroll
+            $md = $this->accountOf($staff, 'MEI-0001'); // Adaeze Okonkwo, who signs it off
+
+            // ------------------------------------------------------------ what the company pays
+            //
+            // Sequence is everything. The buckets run in this order and each one reads what the
+            // ones before it left behind: allowances build the gross, the pension and housing fund
+            // come off the taxable base because they are marked `reduces_taxable`, the consolidated
+            // relief comes off next, and only then does PAYE look at what is left. Put PAYE at
+            // sequence 20 and it would tax money the employee never sees.
+            $component = [];
+
+            $component['BASIC'] = $structure->createComponent([
+                'code' => 'BASIC', 'name' => 'Basic salary', 'kind' => 'earning',
+                'method' => 'percent', 'basis' => 'basic', 'rate' => '100',
+                'is_taxable' => true, 'is_pensionable' => true, 'is_prorated' => true,
+                'applies_to_all' => true, 'is_active' => true, 'sequence' => 10,
+                'description' => 'The figure on the contract. Pro-rated for anybody who joined or left mid-month.',
+            ], $hr);
+
+            $component['HOUSING'] = $structure->createComponent([
+                'code' => 'HOUSING', 'name' => 'Housing allowance', 'kind' => 'earning',
+                'method' => 'percent', 'basis' => 'basic', 'rate' => '25',
+                'is_taxable' => true, 'is_pensionable' => true, 'is_prorated' => true,
+                'applies_to_all' => true, 'is_active' => true, 'sequence' => 20,
+            ], $hr);
+
+            $component['TRANSPORT'] = $structure->createComponent([
+                'code' => 'TRANSPORT', 'name' => 'Transport allowance', 'kind' => 'earning',
+                'method' => 'percent', 'basis' => 'basic', 'rate' => '12.5',
+                'is_taxable' => true, 'is_pensionable' => true, 'is_prorated' => true,
+                'applies_to_all' => true, 'is_active' => true, 'sequence' => 30,
+            ], $hr);
+
+            // Priced off approved overtime hours in the period and nothing else. Hours that were
+            // never approved are not paid, which is the whole reason the timesheet chapter exists.
+            $component['OT'] = $structure->createComponent([
+                'code' => 'OT', 'name' => 'Overtime', 'kind' => 'earning',
+                'method' => 'hourly', 'basis' => 'overtime_hours', 'rate' => '1.5',
+                'is_taxable' => true, 'is_pensionable' => false,
+                'applies_to_all' => true, 'is_active' => true, 'sequence' => 40,
+                'description' => 'Time and a half on the hourly rate, for approved hours only.',
+            ], $hr);
+
+            // Not on everybody — `applies_to_all` is false, so it reaches exactly the people it is
+            // assigned to, with the amount and the end date on the assignment rather than here.
+            $component['LOAN'] = $structure->createComponent([
+                'code' => 'LOAN', 'name' => 'Staff loan repayment', 'kind' => 'deduction',
+                'method' => 'fixed', 'basis' => 'none', 'amount' => '0',
+                'applies_to_all' => false, 'is_active' => true, 'sequence' => 45,
+                'description' => 'Recovered monthly against the balance agreed with Finance. Never reduces tax.',
+            ], $hr);
+
+            $component['PENSION'] = $structure->createComponent([
+                'code' => 'PENSION', 'name' => 'Pension (employee)', 'kind' => 'deduction',
+                'method' => 'percent', 'basis' => 'pensionable', 'rate' => '8',
+                'reduces_taxable' => true, 'applies_to_all' => true, 'is_active' => true, 'sequence' => 50,
+                'description' => 'Eight per cent of basic, housing and transport. Comes off before tax is worked out.',
+            ], $hr);
+
+            $component['NHF'] = $structure->createComponent([
+                'code' => 'NHF', 'name' => 'National Housing Fund', 'kind' => 'deduction',
+                'method' => 'percent', 'basis' => 'basic', 'rate' => '2.5',
+                'reduces_taxable' => true, 'applies_to_all' => true, 'is_active' => true, 'sequence' => 55,
+            ], $hr);
+
+            $component['CRA'] = $structure->createComponent([
+                'code' => 'CRA', 'name' => 'Consolidated relief allowance', 'kind' => 'relief',
+                'method' => 'percent', 'basis' => 'gross', 'rate' => '20',
+                'applies_to_all' => true, 'is_active' => true, 'sequence' => 60,
+                'description' => 'Relief, not a deduction: it lowers what PAYE is charged on and takes nothing home.',
+            ], $hr);
+
+            // Marginal, like every progressive table: each band charges its own rate on its own
+            // slice. The top band has no ceiling, which is what "and everything above" means.
+            $component['PAYE'] = $structure->createComponent([
+                'code' => 'PAYE', 'name' => 'PAYE', 'kind' => 'deduction',
+                'method' => 'banded', 'basis' => 'taxable_gross',
+                'applies_to_all' => true, 'is_active' => true, 'sequence' => 70,
+                'description' => 'Monthly equivalent of the annual table. Reviewed by Finance every January.',
+                'bands' => [
+                    ['from_amount' => '0', 'to_amount' => '25000', 'rate' => '7'],
+                    ['from_amount' => '25000', 'to_amount' => '50000', 'rate' => '11'],
+                    ['from_amount' => '50000', 'to_amount' => '91666.67', 'rate' => '15'],
+                    ['from_amount' => '91666.67', 'to_amount' => '133333.33', 'rate' => '19'],
+                    ['from_amount' => '133333.33', 'to_amount' => '266666.67', 'rate' => '21'],
+                    ['from_amount' => '266666.67', 'to_amount' => null, 'rate' => '24'],
+                ],
+            ], $hr);
+
+            // Employer cost: it is what the month costs the company and it is NOT deducted from
+            // anybody. It appears on the run's employer total and on no payslip's net pay.
+            $component['PENSION-ER'] = $structure->createComponent([
+                'code' => 'PENSION-ER', 'name' => 'Pension (employer)', 'kind' => 'employer_cost',
+                'method' => 'percent', 'basis' => 'pensionable', 'rate' => '10',
+                'applies_to_all' => true, 'is_active' => true, 'sequence' => 80,
+            ], $hr);
+
+            $component['NSITF-ER'] = $structure->createComponent([
+                'code' => 'NSITF-ER', 'name' => 'Employee compensation contribution', 'kind' => 'employer_cost',
+                'method' => 'percent', 'basis' => 'gross', 'rate' => '1',
+                'applies_to_all' => true, 'is_active' => true, 'sequence' => 85,
+            ], $hr);
+
+            // ------------------------------------------------------------ what each person is on
+            //
+            // TWO PEOPLE ARE DELIBERATELY ABSENT FROM THIS TABLE, for the two different reasons a
+            // run can fail to pay somebody, because both failures are silent if the software takes
+            // the easy way out. MEI-0027 started three weeks ago and Finance has not set them up
+            // yet: no salary on record. MEI-0002 is seconded from the group's European office and
+            // paid in euros, below — a naira run cannot pay him, and inventing an exchange rate to
+            // do it anyway would mean the platform paying a figure nobody agreed.
+            //
+            // Both get a payslip in the run that pays nothing and SAYS WHY. Dropping them from the
+            // run, or paying them zero, would look identical on every screen until pay day.
+            $salaries = [
+                'MEI-0001' => '2500000', 'MEI-0003' => '1750000',
+                'MEI-0004' => '1350000', 'MEI-0005' => '950000', 'MEI-0006' => '640000',
+                'MEI-0007' => '610000', 'MEI-0008' => '620000', 'MEI-0009' => '640000',
+                'MEI-0010' => '420000', 'MEI-0011' => '1050000', 'MEI-0012' => '820000',
+                'MEI-0013' => '980000', 'MEI-0014' => '520000', 'MEI-0015' => '900000',
+                'MEI-0016' => '480000', 'MEI-0017' => '870000', 'MEI-0018' => '920000',
+                'MEI-0019' => '880000', 'MEI-0020' => '460000', 'MEI-0021' => '340000',
+                'MEI-0022' => '700000', 'MEI-0023' => '310000', 'MEI-0024' => '380000',
+                'MEI-0025' => '520000', 'MEI-0026' => '560000',
+            ];
+
+            $this->payPeople($staff, $salaries, 'NGN', '176', $hr, [
+                'Zenith Bank', 'Guaranty Trust Bank', 'Access Bank', 'First Bank of Nigeria', 'United Bank for Africa',
+            ], fn (int $n) => '30'.str_pad((string) (14827361 + $n * 4397), 8, '0', STR_PAD_LEFT));
+
+            // Two raises, so the salary register is a HISTORY rather than a single current figure.
+            // `setSalary` closes the row that was in force the day before and opens the new one, in
+            // one transaction — which is what makes "what was she on in March" a question with one
+            // answer. Payroll reads the row covering the period, not the latest row, so a run for a
+            // month before the raise still pays the old figure.
+            $structure->setSalary($staff['MEI-0006'], [
+                'effective_from' => now()->subMonths(2)->startOfMonth()->toDateString(),
+                'basic_amount' => '720000',
+                'currency' => 'NGN',
+                'frequency' => 'monthly',
+                'hours_per_period' => '176',
+                'reason' => 'Promotion to Senior Structural Engineer.',
+            ], $hr);
+
+            $structure->setSalary($staff['MEI-0016'], [
+                'effective_from' => now()->subMonths(3)->startOfMonth()->toDateString(),
+                'basic_amount' => '525000',
+                'currency' => 'NGN',
+                'frequency' => 'monthly',
+                'hours_per_period' => '176',
+                'reason' => 'Confirmed in post after probation.',
+            ], $hr);
+
+            // The secondment. A perfectly valid salary that this run cannot pay.
+            $structure->setSalary($staff['MEI-0002'], [
+                'effective_from' => now()->subMonths(6)->startOfMonth()->toDateString(),
+                'basic_amount' => '4200',
+                'currency' => 'EUR',
+                'frequency' => 'monthly',
+                'hours_per_period' => '176',
+                'reason' => 'Seconded from the group office in Rotterdam; paid on the group payroll in euros.',
+            ], $hr);
+
+            $structure->assignComponent($staff['MEI-0021'], [
+                'pay_component_id' => $component['LOAN']->getKey(),
+                'amount' => '25000',
+                'effective_from' => now()->subMonths(4)->startOfMonth()->toDateString(),
+                'effective_to' => now()->addMonths(8)->endOfMonth()->toDateString(),
+                'reference' => 'Staff loan 2026-04, twelve instalments.',
+            ], $hr);
+
+            // ------------------------------------------------------------ last month, paid
+            $last = $this->payrollRun($payroll, $hr, now()->subMonth(), 'NGN',
+                'Month-end payroll, all staff. Overtime from the approved timesheets only.');
+
+            $payroll->calculate($last, $hr);
+            $payroll->submit($last, $hr);
+            $this->decide($last, $md, Decision::Approve,
+                'Checked against the headcount and last month\'s totals. Approved for payment.');
+
+            // ------------------------------------------------------------ this month, still open
+            $current = $this->payrollRun($payroll, $hr, now(), 'NGN',
+                'Opened early so the new starter\'s details can be added before cut-off.');
+
+            $payroll->calculate($current, $hr);
+        });
+    }
+
+    /**
+     * Kestrel's pay structure, in sterling, through exactly the same calculator.
+     *
+     * NOTHING BELOW SHARES A ROW WITH MERIDIAN. Different bands, different names, a personal
+     * allowance expressed as a nil-rate band rather than as a relief component, and an employer cost
+     * that is itself banded. The only thing the two companies have in common is the code that reads
+     * them, which is the claim §47 is actually making.
+     *
+     * This run is left SITTING IN THE MANAGING DIRECTOR'S INBOX rather than approved, so the demo
+     * shows both halves of the same mechanism: a locked run next door that nobody can touch, and one
+     * here that is still somebody's decision to make.
+     */
+    private function seedKestrelPayroll(Organization $organization): void
+    {
+        $this->context->within($organization, function () {
+            $structure = app(PayStructureService::class);
+            $payroll = app(PayrollService::class);
+
+            $staff = $this->staff();
+            $hr = $this->accountOf($staff, 'KFM-008'); // Marianne Ellis, who does payroll among everything else
+
+            $component = [];
+
+            $component['BASIC'] = $structure->createComponent([
+                'code' => 'BASIC', 'name' => 'Basic salary', 'kind' => 'earning',
+                'method' => 'percent', 'basis' => 'basic', 'rate' => '100',
+                'is_taxable' => true, 'is_pensionable' => true, 'is_prorated' => true,
+                'applies_to_all' => true, 'is_active' => true, 'sequence' => 10,
+            ], $hr);
+
+            $component['OT'] = $structure->createComponent([
+                'code' => 'OT', 'name' => 'Overtime and call-out', 'kind' => 'earning',
+                'method' => 'hourly', 'basis' => 'overtime_hours', 'rate' => '1.5',
+                'is_taxable' => true, 'applies_to_all' => true, 'is_active' => true, 'sequence' => 20,
+                'description' => 'Out-of-hours work on the chillers and the tenant call-out rota.',
+            ], $hr);
+
+            // Salary sacrifice: it lowers the taxable base as well as the take-home, which is the
+            // whole point of it and the reason `reduces_taxable` is a flag on the component rather
+            // than a rule in the calculator.
+            $component['CYCLE'] = $structure->createComponent([
+                'code' => 'CYCLE', 'name' => 'Cycle to work', 'kind' => 'deduction',
+                'method' => 'fixed', 'basis' => 'none', 'amount' => '0',
+                'reduces_taxable' => true, 'applies_to_all' => false, 'is_active' => true, 'sequence' => 25,
+            ], $hr);
+
+            $component['PENSION'] = $structure->createComponent([
+                'code' => 'PENSION', 'name' => 'Workplace pension (employee)', 'kind' => 'deduction',
+                'method' => 'percent', 'basis' => 'pensionable', 'rate' => '5',
+                'reduces_taxable' => true, 'applies_to_all' => true, 'is_active' => true, 'sequence' => 30,
+            ], $hr);
+
+            // The personal allowance is the nil-rate band at the bottom of this table. There is no
+            // relief component here at all — the same outcome reached a different way, in a company
+            // that never had to tell the software which country it is in.
+            $component['PAYE'] = $structure->createComponent([
+                'code' => 'PAYE', 'name' => 'PAYE', 'kind' => 'deduction',
+                'method' => 'banded', 'basis' => 'taxable_gross',
+                'applies_to_all' => true, 'is_active' => true, 'sequence' => 40,
+                'description' => 'Monthly table. The nil-rate band is the personal allowance divided by twelve.',
+                'bands' => [
+                    ['from_amount' => '0', 'to_amount' => '1047.50', 'rate' => '0'],
+                    ['from_amount' => '1047.50', 'to_amount' => '4189.00', 'rate' => '20'],
+                    ['from_amount' => '4189.00', 'to_amount' => '10428.00', 'rate' => '40'],
+                    ['from_amount' => '10428.00', 'to_amount' => null, 'rate' => '45'],
+                ],
+            ], $hr);
+
+            // Charged on gross, not on the taxed figure, and the top band falls rather than rises —
+            // a table the calculator has no opinion about, which is the test of whether it really is
+            // reading the rows or quietly assuming they go one way.
+            $component['NI'] = $structure->createComponent([
+                'code' => 'NI', 'name' => 'National Insurance (employee)', 'kind' => 'deduction',
+                'method' => 'banded', 'basis' => 'gross',
+                'applies_to_all' => true, 'is_active' => true, 'sequence' => 50,
+                'bands' => [
+                    ['from_amount' => '0', 'to_amount' => '1048.00', 'rate' => '0'],
+                    ['from_amount' => '1048.00', 'to_amount' => '4189.00', 'rate' => '8'],
+                    ['from_amount' => '4189.00', 'to_amount' => null, 'rate' => '2'],
+                ],
+            ], $hr);
+
+            $component['NI-ER'] = $structure->createComponent([
+                'code' => 'NI-ER', 'name' => 'National Insurance (employer)', 'kind' => 'employer_cost',
+                'method' => 'banded', 'basis' => 'gross',
+                'applies_to_all' => true, 'is_active' => true, 'sequence' => 60,
+                'bands' => [
+                    ['from_amount' => '0', 'to_amount' => '758.00', 'rate' => '0'],
+                    ['from_amount' => '758.00', 'to_amount' => null, 'rate' => '13.8'],
+                ],
+            ], $hr);
+
+            $component['PENSION-ER'] = $structure->createComponent([
+                'code' => 'PENSION-ER', 'name' => 'Workplace pension (employer)', 'kind' => 'employer_cost',
+                'method' => 'percent', 'basis' => 'pensionable', 'rate' => '3',
+                'applies_to_all' => true, 'is_active' => true, 'sequence' => 70,
+            ], $hr);
+
+            // Everybody who was here in the period. KFM-009 joined a fortnight ago and so falls
+            // outside last month's run entirely — which is correct, and is a different thing from
+            // being skipped inside it.
+            $salaries = [
+                'KFM-001' => '7500', 'KFM-002' => '5200', 'KFM-003' => '4400', 'KFM-004' => '3950',
+                'KFM-005' => '3100', 'KFM-006' => '3000', 'KFM-007' => '2450', 'KFM-008' => '3300',
+            ];
+
+            $this->payPeople($staff, $salaries, 'GBP', '173', $hr,
+                ['Lloyds Bank', 'NatWest', 'Santander UK', 'Barclays'],
+                fn (int $n) => str_pad((string) (20741903 + $n * 1277), 8, '0', STR_PAD_LEFT),
+                fn (int $n) => ['30-96-26', '60-16-13', '09-01-29', '20-45-45'][$n % 4]);
+
+            $structure->setSalary($staff['KFM-005'], [
+                'effective_from' => now()->subMonths(2)->startOfMonth()->toDateString(),
+                'basic_amount' => '3350',
+                'currency' => 'GBP',
+                'frequency' => 'monthly',
+                'hours_per_period' => '173',
+                'reason' => 'F-gas category I completed.',
+            ], $hr);
+
+            $structure->assignComponent($staff['KFM-006'], [
+                'pay_component_id' => $component['CYCLE']->getKey(),
+                'amount' => '62.50',
+                'effective_from' => now()->subMonths(3)->startOfMonth()->toDateString(),
+                'effective_to' => now()->addMonths(9)->endOfMonth()->toDateString(),
+                'reference' => 'Cycle to work, twelve months from April.',
+            ], $hr);
+
+            $run = $this->payrollRun($payroll, $hr, now()->subMonth(), 'GBP',
+                'Monthly payroll. Call-out hours from the approved timesheets.');
+
+            $payroll->calculate($run, $hr);
+            $payroll->submit($run, $hr);
+        });
+    }
+
+    /**
+     * Put a roster on salaries and bank details.
+     *
+     * The account numbers are generated rather than typed because there are dozens of them and none
+     * of them mean anything — but they are the right SHAPE for the country, because a Nigerian
+     * account rendered as a UK sort code is exactly the sort of detail that makes an evaluator
+     * distrust the figures as well (§92). They are encrypted at rest by the service; the register
+     * only ever shows the last four.
+     *
+     * @param  array<string,Employee>  $staff
+     * @param  array<string,string>  $salaries  employee number => monthly basic
+     * @param  array<int,string>  $banks
+     */
+    private function payPeople(
+        array $staff,
+        array $salaries,
+        string $currency,
+        string $hours,
+        User $actor,
+        array $banks,
+        \Closure $accountNumber,
+        ?\Closure $branchCode = null,
+    ): void {
+        $index = 0;
+
+        foreach ($salaries as $employeeNo => $basic) {
+            $employee = $staff[$employeeNo] ?? null;
+
+            if ($employee === null) {
+                continue;
+            }
+
+            app(PayStructureService::class)->setSalary($employee, [
+                'effective_from' => now()->subMonths(6)->startOfMonth()->toDateString(),
+                'basic_amount' => $basic,
+                'currency' => $currency,
+                'frequency' => 'monthly',
+                'hours_per_period' => $hours,
+                'reason' => 'Opening salary on record at system go-live.',
+            ], $actor);
+
+            app(PayStructureService::class)->setBankAccount($employee, [
+                'bank_name' => $banks[$index % count($banks)],
+                'account_name' => $employee->displayName(),
+                'account_number' => $accountNumber($index),
+                'branch_code' => $branchCode === null ? null : $branchCode($index),
+                'account_type' => 'Current',
+                'is_primary' => true,
+            ], $actor);
+
+            $index++;
+        }
+    }
+
+    /** Open one run for the month containing $within. */
+    private function payrollRun(
+        PayrollService $payroll,
+        User $actor,
+        Carbon $within,
+        string $currency,
+        string $notes,
+    ): PayrollRun {
+        $start = $within->copy()->startOfMonth();
+        $end = $within->copy()->endOfMonth();
+        // Paid on the last working day, which is what everybody in both companies is expecting.
+        $payDate = $end->copy();
+
+        while ($payDate->isWeekend()) {
+            $payDate->subDay();
+        }
+
+        return $payroll->create([
+            'name' => $start->format('F Y').' payroll',
+            'period_start' => $start->toDateString(),
+            'period_end' => $end->toDateString(),
+            'pay_date' => $payDate->toDateString(),
+            'frequency' => 'monthly',
+            'currency' => $currency,
+            'notes' => $notes,
+        ], $actor);
     }
 
     /**

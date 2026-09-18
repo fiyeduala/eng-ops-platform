@@ -384,6 +384,11 @@ class NumberGenerator
             // about it, which is the point: correspondence that says "DSC-2026-0003" rather than
             // naming the allegation can be filed, copied and chased without repeating it.
             'disciplinary_case' => ['prefix' => 'DSC', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+            // A payroll run resets MONTHLY rather than yearly, because "PRL-2026-09-0001" reads as
+            // the run for that month and a correction to it is PRL-2026-09-0002 — the two sit
+            // together in any listing sorted by number, which is exactly where somebody looking for
+            // "what did we actually pay in September" needs them to be.
+            'payroll_run' => ['prefix' => 'PRL', 'pattern' => '{PREFIX}-{YYYY}-{MM}-{SEQ}', 'reset_period' => 'monthly', 'padding' => 4],
         ];
     }
 }

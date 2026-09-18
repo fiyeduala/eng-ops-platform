@@ -32,6 +32,7 @@ use App\Http\Controllers\EmployeeChecklistController;
 use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\EmployeeExitController;
 use App\Http\Controllers\EmployeeMovementController;
+use App\Http\Controllers\EmployeePayController;
 use App\Http\Controllers\ExpenseController;
 use App\Http\Controllers\FuelLogController;
 use App\Http\Controllers\GoodsReceiptController;
@@ -51,7 +52,10 @@ use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\OrganizationController;
 use App\Http\Controllers\OrgUnitController;
 use App\Http\Controllers\OvertimeRequestController;
+use App\Http\Controllers\PayComponentController;
 use App\Http\Controllers\PaymentController;
+use App\Http\Controllers\PayrollRunController;
+use App\Http\Controllers\PayslipController;
 use App\Http\Controllers\PerformanceReviewController;
 use App\Http\Controllers\PermitController;
 use App\Http\Controllers\PermitTypeController;
@@ -2491,6 +2495,84 @@ Route::middleware(['auth', 'password.current'])->group(function () {
             ->middleware('permission:disciplinary.decide')->name('disciplinary-cases.close');
         Route::post('disciplinary-cases/{disciplinary_case}/withdraw', [DisciplinaryCaseController::class, 'withdraw'])
             ->middleware('permission:disciplinary.manage')->name('disciplinary-cases.withdraw');
+    });
+
+    // --- payroll -------------------------------------------------------------------------------
+    //
+    // THERE IS NO `payroll-runs.approve` ROUTE BELOW, AND THERE WILL NOT BE ONE. Grep this file for
+    // it: a payroll run is decided at `approvals.decide`, the same URL that decides a drawing, a
+    // leave request, a timesheet and a promotion. That is the exit criterion the whole of Phase 6
+    // exists to satisfy, and money is the case that most needed to pass it — a private approve
+    // endpoint for payroll would be the most tempting shortcut in the platform and the worst one to
+    // have (§84).
+    //
+    // `calculate` IS A POST. It writes a payroll's worth of rows and destroys whatever was there
+    // before; a GET would be prefetchable, bookmarkable and followable from a link in an email.
+    //
+    // THE REGISTER AND THE PAY STRUCTURE ARE SEPARATED because they are different jobs done by
+    // different people. `payroll.run` is the clerk producing figures; `payroll.edit` is whoever set
+    // the company's tax tables up, usually once, and who has no business reading the payroll.
+    // `payroll.view` is what almost everybody holds at scope `own`, and it reaches their own
+    // payslips and nothing else.
+
+    Route::middleware('permission:payroll.view')->group(function () {
+        Route::get('payslips/mine', [PayslipController::class, 'mine'])->name('payslips.mine');
+        Route::get('payslips/{payslip}', [PayslipController::class, 'show'])
+            ->whereNumber('payslip')->name('payslips.show');
+        Route::get('payslips/{payslip}/download', [PayslipController::class, 'download'])
+            ->whereNumber('payslip')->name('payslips.download');
+    });
+
+    Route::middleware('permission:payroll.run')->group(function () {
+        Route::get('payroll-runs', [PayrollRunController::class, 'index'])->name('payroll-runs.index');
+        Route::get('payroll-runs/{payroll_run}', [PayrollRunController::class, 'show'])
+            ->whereNumber('payroll_run')->name('payroll-runs.show');
+    });
+    Route::middleware('permission:payroll.create')->group(function () {
+        Route::get('payroll-runs/create', [PayrollRunController::class, 'create'])->name('payroll-runs.create');
+        Route::post('payroll-runs', [PayrollRunController::class, 'store'])->name('payroll-runs.store');
+    });
+    Route::whereNumber('payroll_run')->group(function () {
+        Route::get('payroll-runs/{payroll_run}/edit', [PayrollRunController::class, 'edit'])
+            ->middleware('permission:payroll.edit')->name('payroll-runs.edit');
+        Route::put('payroll-runs/{payroll_run}', [PayrollRunController::class, 'update'])
+            ->middleware('permission:payroll.edit')->name('payroll-runs.update');
+        Route::delete('payroll-runs/{payroll_run}', [PayrollRunController::class, 'destroy'])
+            ->middleware('permission:payroll.delete')->name('payroll-runs.destroy');
+        Route::post('payroll-runs/{payroll_run}/calculate', [PayrollRunController::class, 'calculate'])
+            ->middleware('permission:payroll.run')->name('payroll-runs.calculate');
+        Route::post('payroll-runs/{payroll_run}/submit', [PayrollRunController::class, 'submit'])
+            ->middleware('permission:payroll.run')->name('payroll-runs.submit');
+        // Opening a fresh run against one that is already locked. The original is never edited.
+        Route::post('payroll-runs/{payroll_run}/correct', [PayrollRunController::class, 'correct'])
+            ->middleware('permission:payroll.create')->name('payroll-runs.correct');
+        Route::post('payroll-runs/{payroll_run}/cancel', [PayrollRunController::class, 'cancel'])
+            ->middleware('permission:payroll.run')->name('payroll-runs.cancel');
+    });
+
+    Route::middleware('permission:payroll.edit')->group(function () {
+        Route::get('pay-components', [PayComponentController::class, 'index'])->name('pay-components.index');
+        Route::get('pay-components/create', [PayComponentController::class, 'create'])->name('pay-components.create');
+        Route::post('pay-components', [PayComponentController::class, 'store'])->name('pay-components.store');
+        Route::get('pay-components/{pay_component}/edit', [PayComponentController::class, 'edit'])
+            ->whereNumber('pay_component')->name('pay-components.edit');
+        Route::put('pay-components/{pay_component}', [PayComponentController::class, 'update'])
+            ->whereNumber('pay_component')->name('pay-components.update');
+        Route::delete('pay-components/{pay_component}', [PayComponentController::class, 'destroy'])
+            ->whereNumber('pay_component')->name('pay-components.destroy');
+    });
+
+    // One person's pay, hung off the personnel record because that is where somebody looks for it.
+    // The controller authorizes the employee AND the salary separately: reaching a person is not the
+    // same as being allowed to see what they earn (§84).
+    Route::middleware('permission:payroll.view_confidential')->whereNumber('employee')->group(function () {
+        Route::get('employees/{employee}/pay', [EmployeePayController::class, 'show'])->name('employee-pay.show');
+        Route::post('employees/{employee}/pay/salary', [EmployeePayController::class, 'storeSalary'])
+            ->name('employee-pay.salary');
+        Route::post('employees/{employee}/pay/bank-account', [EmployeePayController::class, 'storeBankAccount'])
+            ->name('employee-pay.bank-account');
+        Route::post('employees/{employee}/pay/component', [EmployeePayController::class, 'storeComponent'])
+            ->name('employee-pay.component');
     });
 
     // --- assets --------------------------------------------------------------------------------

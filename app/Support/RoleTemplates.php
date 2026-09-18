@@ -1199,6 +1199,14 @@ final class RoleTemplates
                     // relation, which it cannot do.
                     'performance.view' => 'own',
                     'performance.submit' => 'own',
+                    // Their own payslips, and only after the run is approved. Same reasoning as the
+                    // appraisal above: `payslips` carries its own `user_id` copied from the employee
+                    // at calculation time, so `own` resolves on the table rather than trying to
+                    // inherit through the employee, which it cannot do. Note what is NOT here —
+                    // `payroll.view_confidential`, which is what anybody reading somebody ELSE's
+                    // payslip needs. A supervisor holding `employee.view` over their team gets no
+                    // further here than a labourer does (§68).
+                    'payroll.view' => 'own',
                     // THERE IS NO `employee_movement.view` HERE and it is not an oversight. `own`
                     // resolves against `requester_id`/`created_by` on the movement itself, so it
                     // would show somebody the transfers they RAISED, not the transfer that is

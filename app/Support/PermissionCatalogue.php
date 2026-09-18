@@ -234,7 +234,13 @@ final class PermissionCatalogue
             'petty_cash' => ['Finance', 'Petty Cash', [...self::CRUD, 'manage', 'disburse', 'replenish']],
             // Rates are company data (§47). Nothing in the application knows any country's tax.
             'tax_code' => ['Finance', 'Tax Codes', self::CRUD],
-            'payroll' => ['Finance', 'Payroll', ['view', 'create', 'edit', 'export', 'run', 'approve', 'view_confidential']],
+            // `run` is producing the figures and `approve` is deciding them, and they are separate
+            // because one person doing both is how a payroll fraud goes unnoticed. `delete` reaches
+            // only a run that has never been approved — an approved one is locked for everybody,
+            // administrators included, and is corrected by a new run rather than tidied away (§59).
+            // `view_confidential` is what guards salaries and bank details: `view` alone is the
+            // permission almost everybody holds at scope `own`, reaching their own payslips.
+            'payroll' => ['Finance', 'Payroll', ['view', 'create', 'edit', 'delete', 'export', 'run', 'approve', 'view_confidential']],
 
             // ------------------------------------------------------------- intelligence
             'report' => ['Intelligence', 'Reports', ['view', 'create', 'edit', 'delete', 'export', 'schedule']],

@@ -1281,6 +1281,33 @@ final class StatusCatalogue
                 ],
                 'transitions' => [],
             ],
+
+            /*
+             * A payroll run. Six statuses, and the one that earns its place is `calculated`.
+             *
+             * A run that has been worked out but not yet sent is a real and important state: it is
+             * the moment where somebody checks the figures, finds the starter who was paid a full
+             * month, fixes the salary row and calculates again. Folding it into `draft` would mean
+             * the register could not tell an empty run from one carrying a payroll's worth of
+             * figures nobody has looked at yet — and the second is the one that needs chasing before
+             * pay day.
+             *
+             * `approved` is terminal, and it is terminal in a way the others are not: approval also
+             * stamps `locked_at`, after which the run and every payslip in it are read-only for
+             * everybody, including an administrator. A mistake that reaches this point is corrected
+             * by a NEW run pointing back at this one, never by editing what was paid (§59).
+             */
+            'payroll_run' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'calculated' => ['label' => 'Calculated', 'color' => 'brand'],
+                    'submitted' => ['label' => 'Awaiting approval', 'color' => 'warning'],
+                    'approved' => ['label' => 'Approved', 'color' => 'success', 'terminal' => true],
+                    'rejected' => ['label' => 'Not approved', 'color' => 'danger', 'terminal' => true],
+                    'cancelled' => ['label' => 'Cancelled', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [],
+            ],
         ];
     }
 

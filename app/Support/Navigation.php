@@ -160,6 +160,22 @@ class Navigation
                     // only HR and an assigned investigator hold (§68).
                     ['label' => 'Conduct', 'route' => 'disciplinary-cases.index', 'icon' => 'alert-triangle',
                         'permission' => 'disciplinary.view', 'active' => 'disciplinary-cases.*'],
+
+                    // Pay. "My payslips" asks for the same `payroll.view` as the register, exactly
+                    // as "My reviews" does above and for the same reason (§6, §96): almost everybody
+                    // holds it at scope `own`, which reaches their own payslips and stops, and a
+                    // company that has not granted the module simply does not see the item.
+                    //
+                    // The register itself and the pay structure are separated because they are two
+                    // different jobs. `payroll.run` is the payroll clerk producing figures;
+                    // `payroll.edit` is whoever set the company's tax tables up, which is usually a
+                    // one-off done by somebody who has no business reading the payroll.
+                    ['label' => 'My payslips', 'route' => 'payslips.mine', 'icon' => 'file-text',
+                        'permission' => 'payroll.view', 'active' => 'payslips.mine'],
+                    ['label' => 'Payroll', 'route' => 'payroll-runs.index', 'icon' => 'banknote',
+                        'permission' => 'payroll.run', 'active' => ['payroll-runs.*', 'payslips.show']],
+                    ['label' => 'Pay structure', 'route' => 'pay-components.index', 'icon' => 'sliders',
+                        'permission' => 'payroll.edit', 'active' => 'pay-components.*'],
                 ],
             ],
             [

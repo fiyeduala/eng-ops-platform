@@ -11,14 +11,19 @@ use App\Models\Approval;
 use App\Models\AttendanceRecord;
 use App\Models\DisciplinaryCase;
 use App\Models\Employee;
+use App\Models\EmployeeBankAccount;
 use App\Models\EmployeeChecklist;
 use App\Models\EmployeeExit;
 use App\Models\EmployeeMovement;
+use App\Models\EmployeeSalary;
 use App\Models\LeaveRequest;
 use App\Models\Meeting;
 use App\Models\Memo;
 use App\Models\Organization;
 use App\Models\OvertimeRequest;
+use App\Models\PayComponent;
+use App\Models\PayrollRun;
+use App\Models\Payslip;
 use App\Models\PerformanceReview;
 use App\Models\Project;
 use App\Models\ProjectMember;
@@ -842,6 +847,183 @@ final class DemoSeederTest extends TestCase
         $current = $this->account($this->meridian, 'b.adeleke@meridian-eng.example');
         $this->assertContains($live->id, $this->visibleIds(DisciplinaryCase::class, $current, 'disciplinary.view'),
             'The investigator on a live case cannot read it.');
+    }
+
+    #[Test]
+    public function both_companies_are_paid_by_one_calculator_holding_two_countries_rules(): void
+    {
+        // The claim §47 makes, asked of the demo rather than of a fixture. Meridian is on a six-band
+        // Nigerian table with a consolidated relief; Kestrel is on a four-band British one whose
+        // personal allowance is a nil-rate band and whose National Insurance rate FALLS at the top.
+        // Neither company's rows appear in any file under app/. If the calculator had a country in
+        // it, one of these two sets of figures would be wrong.
+        $meridian = $this->within($this->meridian, fn () => PayComponent::query()->with('bands')->get()->keyBy('code'));
+        $kestrel = $this->within($this->kestrel, fn () => PayComponent::query()->with('bands')->get()->keyBy('code'));
+
+        $this->assertCount(6, $meridian['PAYE']->bands, 'Meridian\'s tax table is not the one it was seeded with.');
+        $this->assertCount(4, $kestrel['PAYE']->bands, 'Kestrel\'s tax table is not the one it was seeded with.');
+        $this->assertTrue($meridian->has('CRA'), 'Meridian has no consolidated relief.');
+        $this->assertFalse($kestrel->has('CRA'), 'Kestrel has a Nigerian relief component.');
+        $this->assertTrue($kestrel->has('NI'), 'Kestrel has no National Insurance.');
+        $this->assertFalse($meridian->has('NI'), 'Meridian is paying British National Insurance.');
+
+        // The falling top band is the one a calculator that assumed progression would get wrong.
+        $topTwo = $kestrel['NI']->bands->sortBy('sequence')->slice(1)->values();
+        $this->assertGreaterThan(
+            (float) $topTwo[1]->rate,
+            (float) $topTwo[0]->rate,
+            'Kestrel\'s National Insurance no longer falls at the upper limit, so the interesting case is gone.',
+        );
+
+        foreach ([[$this->meridian, 'NGN'], [$this->kestrel, 'GBP']] as [$organization, $currency]) {
+            $run = $this->within($organization, fn () => PayrollRun::query()
+                ->with('status')->orderBy('period_start')->firstOrFail());
+
+            $this->assertSame($currency, $run->currency, $organization->name.' is not being paid in its own currency.');
+            $this->assertGreaterThan(0, (float) $run->gross_total, $organization->name.' calculated a payroll worth nothing.');
+            $this->assertGreaterThan(0, (float) $run->deduction_total, $organization->name.' deducted nothing from anybody.');
+            $this->assertLessThan((float) $run->gross_total, (float) $run->net_total,
+                $organization->name.' pays out more than it earns.');
+            $this->assertGreaterThan(0, (float) $run->employer_cost_total,
+                $organization->name.' records no employer cost, so the run understates what the month cost.');
+
+            // Every payslip adds up on its own terms, which is the arithmetic the totals cache.
+            $wrong = $this->within($organization, fn () => Payslip::query()
+                ->where('payroll_run_id', $run->getKey())
+                ->whereNull('skipped_reason')
+                ->get()
+                ->filter(fn (Payslip $slip) => bccomp(
+                    (string) $slip->net_amount,
+                    bcsub((string) $slip->gross_amount, (string) $slip->deduction_amount, 2),
+                    2,
+                ) !== 0));
+
+            $this->assertCount(0, $wrong, $organization->name.' has payslips whose net is not gross less deductions.');
+        }
+    }
+
+    #[Test]
+    public function the_payroll_was_approved_in_the_same_inbox_as_everything_else_and_then_locked(): void
+    {
+        // The exit criterion of the whole phase, asked of the data an evaluator will actually open.
+        // There is no approve route on a payroll run: the only way this run can be locked is that
+        // somebody decided it in the inbox, on the engine that decides drawings and leave.
+        $this->assertNull(Route::getRoutes()->getByName('payroll-runs.approve'),
+            'A payroll run has grown an approval path of its own.');
+
+        $run = $this->within($this->meridian, fn () => PayrollRun::query()
+            ->with('status')->orderBy('period_start')->firstOrFail());
+
+        $this->assertSame('approved', $run->statusKey(), 'Meridian\'s payroll was never approved.');
+        $this->assertNotNull($run->locked_at, 'An approved payroll run is still editable.');
+        $this->assertGreaterThan(10, (int) $run->payslip_count, 'Meridian paid almost nobody.');
+
+        // Decided by the Managing Director, through an Approval row on a workflow stage — not by a
+        // service reaching past the engine to set a status.
+        $decisions = $this->within($this->meridian, fn () => Approval::query()
+            ->whereHas('stageInstance.instance', fn ($q) => $q
+                ->where('subject_type', 'payroll_run')
+                ->where('subject_id', $run->getKey()))
+            ->with('user')
+            ->get());
+
+        $this->assertGreaterThan(0, $decisions->count(), 'The payroll was approved outside the workflow engine.');
+        $this->assertSame(Decision::Approve->value, $decisions->first()->decision->value ?? $decisions->first()->decision,
+            'The decision on the payroll was not an approval.');
+
+        // And Kestrel's is still somebody's decision to make, so the demo shows both halves.
+        $waiting = $this->within($this->kestrel, fn () => WorkflowStageInstance::query()->pending()
+            ->whereHas('instance', fn ($q) => $q->where('subject_type', 'payroll_run'))
+            ->count());
+
+        $this->assertGreaterThan(0, $waiting, 'Kestrel\'s payroll is in nobody\'s inbox.');
+
+        $kestrelRun = $this->within($this->kestrel, fn () => PayrollRun::query()->with('status')->firstOrFail());
+        $this->assertNull($kestrelRun->locked_at, 'Kestrel\'s payroll locked itself without a decision.');
+    }
+
+    #[Test]
+    public function the_person_with_no_salary_on_record_got_a_payslip_that_says_so(): void
+    {
+        // The failure this exists to prevent is silent in both directions: pay them zero, or drop
+        // them from the run, and the first person to find out is the employee on pay day.
+        $skipped = $this->within($this->meridian, fn () => Payslip::query()
+            ->whereNotNull('skipped_reason')
+            ->with('employee')
+            ->get());
+
+        $this->assertGreaterThan(0, $skipped->count(),
+            'Nobody in the demo is unpayable, so the skipped payslip is no longer demonstrated.');
+
+        // The seconded colleague, specifically. A run in naira meets a salary in euros and REFUSES
+        // to guess a rate — the alternative is the platform paying a figure nobody agreed.
+        $this->assertTrue(
+            $skipped->contains(fn (Payslip $slip) => str_contains((string) $slip->skipped_reason, 'EUR')),
+            'Nobody is paid in a currency this run cannot settle, so that branch is undemonstrated.',
+        );
+
+        foreach ($skipped as $slip) {
+            $this->assertSame(0.0, (float) $slip->net_amount, 'A skipped payslip is paying somebody.');
+            $this->assertNotSame('', trim((string) $slip->skipped_reason),
+                'A payslip was skipped without saying why, which is the silent failure itself.');
+        }
+
+        // They are still IN the run, which is the point — a headcount that quietly shrinks is how
+        // somebody goes unpaid for a month without anybody noticing.
+        $run = $this->within($this->meridian, fn () => PayrollRun::query()->orderBy('period_start')->firstOrFail());
+        $employees = $this->within($this->meridian, fn () => Employee::query()->where('is_active', true)->count());
+
+        $this->assertGreaterThanOrEqual($employees - 2, (int) $run->payslip_count,
+            'The run is missing people who were employed during the period.');
+    }
+
+    #[Test]
+    public function neither_company_can_reach_the_others_pay(): void
+    {
+        // §75 asked of the most sensitive table in the system. Counted inside each tenant, because
+        // the global scope fails closed and a count from nowhere would pass for the wrong reason.
+        [$meridianSlips, $meridianSalaries] = $this->within($this->meridian, fn () => [
+            Payslip::query()->pluck('id')->all(),
+            EmployeeSalary::query()->count(),
+        ]);
+
+        [$kestrelSlips, $kestrelSalaries] = $this->within($this->kestrel, fn () => [
+            Payslip::query()->pluck('id')->all(),
+            EmployeeSalary::query()->count(),
+        ]);
+
+        $this->assertGreaterThan(0, $meridianSalaries, 'Nobody at Meridian is on a salary.');
+
+        // A salary is a history, not a current figure, and the history has exactly one open row per
+        // person. Two open rows would make "what was she on in March" a question the database
+        // answers by whichever row it happened to return first.
+        $doubleOpen = $this->within($this->meridian, fn () => EmployeeSalary::query()
+            ->whereNull('effective_to')
+            ->select('employee_id')
+            ->groupBy('employee_id')
+            ->havingRaw('count(*) > 1')
+            ->get());
+
+        $this->assertCount(0, $doubleOpen, 'Somebody at Meridian is on two salaries at once.');
+
+        $withHistory = $this->within($this->meridian, fn () => EmployeeSalary::query()
+            ->whereNotNull('effective_to')->count());
+
+        $this->assertGreaterThan(0, $withHistory,
+            'Every salary in the demo is the original one, so the history the register exists to show is empty.');
+
+        $this->assertGreaterThan(0, $kestrelSalaries, 'Nobody at Kestrel is on a salary.');
+        $this->assertSame([], array_intersect($meridianSlips, $kestrelSlips),
+            'A payslip is visible from both companies.');
+
+        // Bank details likewise, and stored the way they are meant to be: the number is encrypted
+        // at rest, so the raw column must not contain anything a reader could use.
+        $accounts = $this->within($this->meridian, fn () => EmployeeBankAccount::query()->get());
+        $this->assertGreaterThan(0, $accounts->count(), 'Nobody at Meridian has bank details.');
+
+        $raw = DB::table('employee_bank_accounts')->where('id', $accounts->first()->id)->value('account_number');
+        $this->assertNotSame($accounts->first()->account_number, $raw,
+            'A bank account number is sitting in the database in the clear.');
     }
 
     // ------------------------------------------------------------------ helpers

@@ -83,6 +83,7 @@ class OrganizationProvisioner
                 $this->seedChecklistTemplates($organization);
                 $this->seedPerformanceReviewWorkflow($organization);
                 $this->seedEmployeeMovementWorkflow($organization);
+                $this->seedPayrollWorkflow($organization);
             });
 
             return $organization->refresh();
@@ -764,6 +765,39 @@ class OrganizationProvisioner
             'Approving agrees the change. It is written onto the personnel record on its effective date, not '
                 .'today, so check the date as carefully as the position.',
             slaHours: 120,
+        );
+    }
+
+    /**
+     * The default payroll route.
+     *
+     * THIS IS THE ONE THAT PROVES THE POINT. Payroll is the register a platform is most tempted to
+     * give its own approve button — it is money, it is monthly, and it feels special. It gets the
+     * same route as everything else: submitted, assigned, decided at `approvals.decide`. There is no
+     * `payroll-runs.approve`, and a company that wants two signatures on the wage bill adds a stage
+     * here rather than waiting for us to build one.
+     *
+     * The assignee is the submitter's own line manager, which in the small company this platform is
+     * built for is the person who signs the payments anyway. A company that wants finance and then
+     * the board adds those stages; the engine does not care how many there are.
+     *
+     * The SLA is short. Unlike an appraisal, a payroll approval has a deadline nobody sets and
+     * everybody knows: pay day. A run sitting unapproved is the one overdue approval that should
+     * shout.
+     */
+    public function seedPayrollWorkflow(Organization $organization): ?Workflow
+    {
+        return $this->seedLineManagerWorkflow(
+            $organization,
+            'payroll_run',
+            'Payroll approval',
+            'The route a calculated payroll run takes before anybody is paid. Add a finance stage, a second '
+                .'signature, or a condition on the net total if larger runs should be agreed higher up.',
+            'Check the totals against the month you expected, and check the skipped payslips — each one is '
+                .'somebody who will not be paid. Approving locks the run: nothing in it can be edited '
+                .'afterwards, and a mistake found later is corrected by a new run rather than by changing '
+                .'this one.',
+            slaHours: 24,
         );
     }
 
