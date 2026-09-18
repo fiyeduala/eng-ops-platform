@@ -234,6 +234,7 @@ use App\Models\Vehicle;
 use App\Models\VehicleDocument;
 use App\Models\Vendor;
 use App\Models\VendorContact;
+use App\Models\Visitor;
 use App\Models\Warehouse;
 use App\Models\Workflow;
 use App\Models\WorkflowInstance;
@@ -358,6 +359,7 @@ use App\Policies\VehicleDocumentPolicy;
 use App\Policies\VehiclePolicy;
 use App\Policies\VendorContactPolicy;
 use App\Policies\VendorPolicy;
+use App\Policies\VisitorPolicy;
 use App\Policies\WarehousePolicy;
 use App\Policies\WorkflowInstancePolicy;
 use App\Policies\WorkflowPolicy;
@@ -655,6 +657,10 @@ class AppServiceProvider extends ServiceProvider
             'payroll_run' => PayrollRun::class,
             'payslip' => Payslip::class,
             'payslip_line' => PayslipLine::class,
+            // The visitor book. It is not workflow-routed, but it is the register most likely to be
+            // read back months later by somebody asking who was on site the day something happened,
+            // so its audit trail matters more than most, not less.
+            'visitor' => Visitor::class,
         ]);
     }
 
@@ -905,6 +911,8 @@ class AppServiceProvider extends ServiceProvider
             PayrollRun::class => PayrollRunPolicy::class,
             Payslip::class => PayslipPolicy::class,
             PayslipLine::class => PayslipPolicy::class,
+
+            Visitor::class => VisitorPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {

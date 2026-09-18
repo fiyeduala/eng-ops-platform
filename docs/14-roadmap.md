@@ -325,13 +325,73 @@ one connected chain (§90). **Met**, and pinned end to end by `ProjectCostTest`.
 See [16-development-handoff.md](16-development-handoff.md) for review findings, validation results
 and deployment notes. The earlier Phase 1–4 test totals above are historical results.
 
-## PHASE 6 — People ⬜
+## PHASE 6 — People ✅
 
-Employee records · recruitment · onboarding · attendance (mobile clock in/out) · timesheets ·
-overtime · leave types and requests · training · performance · promotions · transfers ·
-disciplinary · exit · payroll components and runs · visitor management.
+Employee records ✅ · recruitment ✅ · onboarding ✅ · attendance (mobile clock in/out) ✅ ·
+timesheets ✅ · overtime ✅ · leave types and requests ✅ · training ✅ · performance ✅ ·
+promotions ✅ · transfers ✅ · disciplinary ✅ · exit ✅ · payroll components and runs ✅ · visitor
+management ✅.
 
 **Exit criteria:** leave and timesheet approvals run on the *same* workflow engine as documents.
+**Met, and widened.** Not one of the ten registers added in this phase has an approve route: no
+`approve()` on any service, no approve or reject endpoint on any controller, and every routed
+register decided at `approvals.decide` on the engine that decides a drawing.
+`DemoSeederTest::no_register_in_this_phase_decides_itself()` asserts it for the set rather than for
+one module, so an eleventh register that grew its own approval path would fail there even if its
+author wrote no test at all.
+
+**Delivered (completed 2026-09-18):**
+
+- **Part 1 — leave** (`327c896`): leave types and balances as company data, entitlement accrual,
+  holidays and working patterns per organization (§47), requests routed to the engine.
+- **Part 2 — attendance and timesheets** (`34a18bf`): mobile clock in/out against geofenced
+  locations, timesheet periods, overtime requests.
+- **Part 3 — recruitment, onboarding and exit** (`99a7281`): vacancies, applicants, onboarding
+  checklists, and exits that cannot clear while an asset or a petty cash tin is still on the
+  leaver's name.
+- **Part 4 — training, performance, movements and conduct** (`0d425f5`): courses, requirements and
+  expiry, appraisal rounds, promotions and transfers applied by a dated sweep, disciplinary cases.
+- **Part 5 — payroll** (`27a1687`): pay components, structures and salary history, payroll runs and
+  payslips. Two countries, two currencies, two sets of tax bands and **one calculator** — no
+  country-specific rule is in the code (§47).
+- **Part 6 — visitors and close-out**: the visitor book, the roll call, and the phase-wide exit
+  assertion.
+
+**The visitor book is the phase's one stated exception, and it is stated in code.** It is the only
+register here that is not workflow-routed: `Visitor::requiresWorkflow()` returns false, there is no
+`visitors.submit` route and no transition rows in `StatusCatalogue`. The reason is that a
+receptionist with somebody standing at the desk cannot wait on an inbox, so the control is a
+permission — `visitor.check_in`, held by the desk and deliberately not by the engineers who book
+visitors. The decision is written into the model, the service, the policy, the controller and the
+route file so it cannot later read as an oversight, and `VisitorTest` asserts the absence of both
+the approve route *and* the submit route rather than skipping the question.
+
+**Two design points in the visitor register that are load-bearing:**
+
+- **The roll call counts heads, not rows,** and is behind `visitor.view` rather than
+  `visitor.manage`. A delegation of six arrives on one record; a screen counting rows would be six
+  people short at an assembly point. An administrative permission between somebody and the list of
+  who is still inside would be a security control that gets people hurt.
+- **Visits that were never signed out are closed by an hourly sweep and *labelled*.** `auto_closed`
+  is true, the actor is nobody, and the timeline says nobody witnessed the departure. Without the
+  sweep the roll call still shows last Tuesday's visitors and within a fortnight nobody believes it;
+  without the label the platform would be asserting it saw somebody leave when it did not. The
+  cut-off is per organization, which is why the schedule is hourly rather than daily.
+
+**Two defects caught by reading the engine rather than by testing**, both of which would have been
+silent in production:
+
+- `Visitor::accessOwnerColumns()` first returned `host_employee_id`. `ScopeCompiler::applyOwn()`
+  compares owner columns against `$user->id`, so an employee id there would have matched the wrong
+  people or nobody at all — an authorization bug with no symptom. The table now carries
+  `host_user_id` alongside the employee id, written together by `VisitorService::syncHostUser()` so
+  they cannot drift, and the `accessAssigneeColumns()` override naming `escort_employee_id` was
+  removed for the identical reason.
+- The end-of-day sweep originally compared against *today's* cut-off. With a 23:00 cut-off and an
+  hourly schedule, every run between midnight and 22:59 would have found the cut-off still ahead and
+  done nothing, leaving the previous evening's visitors on the roll call for a further full day —
+  precisely the failure the sweep exists to prevent. `lastCutOffBefore()` steps back a day when
+  today's has not arrived.
 
 ## PHASE 7 — Advanced administration ⬜
 

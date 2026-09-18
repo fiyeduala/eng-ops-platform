@@ -33,6 +33,7 @@ use App\Models\Timesheet;
 use App\Models\TrainingRequirement;
 use App\Models\User;
 use App\Models\Vacancy;
+use App\Models\Visitor;
 use App\Models\WorkflowStageInstance;
 use App\Services\EmployeeExitService;
 use App\Services\TaskService;
@@ -1024,6 +1025,207 @@ final class DemoSeederTest extends TestCase
         $raw = DB::table('employee_bank_accounts')->where('id', $accounts->first()->id)->value('account_number');
         $this->assertNotSame($accounts->first()->account_number, $raw,
             'A bank account number is sitting in the database in the clear.');
+    }
+
+    // ================================================================== the visitor book
+
+    #[Test]
+    public function the_roll_call_counts_heads_and_the_demo_has_a_delegation_in_it(): void
+    {
+        $onSite = $this->within($this->meridian, fn () => Visitor::query()->onSite()->get());
+
+        $this->assertGreaterThan(0, $onSite->count(), 'Nobody is on site, so the roll call demonstrates nothing.');
+
+        $heads = $onSite->sum(fn (Visitor $v) => $v->headcount());
+
+        // The delegation is the whole reason `party_size` and `headcount()` exist. A demo where
+        // every visit is one person would let a roll call that counted ROWS pass for correct, and
+        // the failure would first appear at a real assembly point.
+        $this->assertGreaterThan($onSite->count(), $heads,
+            'Every visit on site is a single person, so a roll call counting rows would still look right.');
+
+        $this->assertTrue($onSite->contains(fn (Visitor $v) => $v->headcount() >= 4),
+            'No delegation arrived on one record, which is the case the headcount exists for.');
+
+        // Nobody on the roll call has left, by the timestamps the scope is actually written against.
+        foreach ($onSite as $visit) {
+            $this->assertNotNull($visit->checked_in_at, 'Somebody is on the roll call without arriving.');
+            $this->assertNull($visit->checked_out_at, 'Somebody who has left is still on the roll call.');
+        }
+    }
+
+    #[Test]
+    public function the_visit_nobody_watched_end_says_so(): void
+    {
+        // The demo deliberately contains a visitor who never handed her badge back, and the real
+        // end-of-day sweep closed her out. It is here rather than tidied away because a register
+        // that quietly pretends it saw everybody leave is worth nothing on the day somebody asks.
+        $auto = $this->within($this->meridian, fn () => Visitor::query()
+            ->where('auto_closed', true)->with('status')->get());
+
+        $this->assertGreaterThan(0, $auto->count(),
+            'No visit was closed by the sweep, so the honest-guess branch is undemonstrated.');
+
+        foreach ($auto as $visit) {
+            $this->assertSame('departed', $visit->statusKey());
+            $this->assertNotNull($visit->checked_out_at);
+
+            // Nobody signed her out, and nobody is named as having done so. Attributing it to
+            // whoever owns the cron account would put a name on a departure that was not witnessed.
+            $this->assertNull($visit->checked_out_by,
+                'An automatic sign-out has been attributed to a person who did not witness it.');
+        }
+
+        // And it is on the timeline in those words, because the record is what somebody reads back.
+        $entries = DB::table('activity_logs')
+            ->where('subject_type', 'visitor')
+            ->where('verb', 'auto_closed')
+            ->get();
+
+        $this->assertGreaterThan(0, $entries->count(), 'The automatic sign-out left no trace on any timeline.');
+
+        foreach ($entries as $entry) {
+            $this->assertNull($entry->causer_id,
+                'The timeline names somebody as having signed out a visitor the platform closed.');
+            $this->assertStringContainsString('Nobody witnessed', $entry->description,
+                'The timeline records the guess without admitting it is one.');
+        }
+    }
+
+    #[Test]
+    public function somebody_was_turned_away_and_the_record_says_why(): void
+    {
+        $refused = $this->within($this->meridian, fn () => Visitor::query()
+            ->whereNotNull('refusal_reason')->with('status')->get());
+
+        $this->assertGreaterThan(0, $refused->count(),
+            'Nobody was refused entry, so the entry a visitor book exists to produce is missing.');
+
+        foreach ($refused as $visit) {
+            $this->assertSame('refused', $visit->statusKey());
+            $this->assertNull($visit->checked_in_at, 'Somebody refused entry is recorded as having come in.');
+            $this->assertNotSame('', trim((string) $visit->refusal_reason),
+                'Entry was refused without a reason, which is the record nobody can defend later.');
+        }
+    }
+
+    #[Test]
+    public function neither_company_can_reach_the_others_visitors(): void
+    {
+        $ours = $this->within($this->meridian, fn () => Visitor::query()->pluck('id')->all());
+        $theirs = $this->within($this->kestrel, fn () => Visitor::query()->pluck('id')->all());
+
+        $this->assertNotEmpty($ours, 'Meridian has no visitors.');
+        $this->assertNotEmpty($theirs, 'Kestrel has no visitors.');
+        $this->assertSame([], array_intersect($ours, $theirs), 'A visit is visible from both companies (§75).');
+
+        // The one field here that would do real harm outside this table (§67).
+        $withDocument = $this->within($this->meridian, fn () => Visitor::query()
+            ->whereNotNull('id_document_number')->first());
+
+        if ($withDocument !== null) {
+            $raw = DB::table('visitors')->where('id', $withDocument->id)->value('id_document_number');
+
+            $this->assertNotSame($withDocument->id_document_number, $raw,
+                'An identity document number is sitting in the database in the clear.');
+            $this->assertArrayNotHasKey('id_document_number', $withDocument->toArray(),
+                'The identity document number is serialised out of the model.');
+        }
+    }
+
+    // ================================================================== the phase exit criterion
+
+    /**
+     * ONE TEST FOR THE WHOLE OF PHASE 6, asked of the routing table and of the seeded data together.
+     *
+     * The phase was built to a single rule: a register may not decide itself. Ten of them were added
+     * — leave, timesheets, overtime, vacancies, exits, reviews, movements, conduct, payroll and
+     * visitors — and each one's own test asserts it for that module. This asserts it for the SET,
+     * which is the assertion that survives somebody adding an eleventh: a new approve route anywhere
+     * in this list fails here even if its author wrote no test at all.
+     *
+     * Visitors is the one stated exception, and it is asserted as an exception rather than skipped.
+     * It has no approve route AND no submit route, and `requiresWorkflow()` returns false — so the
+     * absence is a decision this test can see, not a gap it is stepping around.
+     */
+    #[Test]
+    public function no_register_in_this_phase_decides_itself(): void
+    {
+        $routed = [
+            'leave', 'timesheets', 'overtime', 'vacancies', 'employee-exits',
+            'performance-reviews', 'employee-movements', 'disciplinary-cases', 'payroll-runs',
+        ];
+
+        foreach ([...$routed, 'visitors'] as $prefix) {
+            $this->assertFalse(Route::has($prefix.'.approve'),
+                $prefix.' has grown an approve route, which is the one thing this phase forbids.');
+            $this->assertFalse(Route::has($prefix.'.reject'),
+                $prefix.' has grown a reject route of its own.');
+        }
+
+        // The decision is made in one place, and that place exists.
+        $this->assertTrue(Route::has('approvals.decide'),
+            'The inbox every one of these registers depends on is not routed.');
+
+        // Every routed register can still be SENT somewhere, which is the other half: a register
+        // with no approve route and no submit route would satisfy the letter of the rule by never
+        // being approved at all.
+        //
+        // Only six of the nine reach the engine through a generic `submit`. The other three are sent
+        // by the verb that actually happened on them — an exit is `clear`ed and `complete`d, a review
+        // goes `self` then `manager` then `release`, a case is moved to `investigation`, `hearing`,
+        // `decide`, `appeal` and `close` — because on those registers "submit" would name nothing a
+        // user recognises. What matters is that none of those verbs DECIDES: they all hand over to
+        // approvals.decide, which is what the loop above proves.
+        foreach (['leave', 'timesheets', 'overtime', 'vacancies', 'employee-movements', 'payroll-runs'] as $prefix) {
+            $this->assertTrue(Route::has($prefix.'.submit'),
+                $prefix.' cannot be submitted, so nothing can ever decide it.');
+        }
+
+        foreach (['employee-exits.clear', 'performance-reviews.manager', 'disciplinary-cases.decide'] as $route) {
+            $this->assertTrue(Route::has($route),
+                $route.' is how that register reaches the engine, and it has gone missing.');
+        }
+
+        // The exception, stated.
+        $this->assertFalse(Route::has('visitors.submit'),
+            'The visitor book has been routed, which is the decision this phase deliberately did not take.');
+        $this->assertFalse((new Visitor)->requiresWorkflow(),
+            'The visitor book now claims to require a workflow, contradicting its own route file.');
+    }
+
+    /**
+     * And the seeded data proves it happened, rather than merely being possible.
+     *
+     * A routing table with no approve routes is easy to satisfy by never approving anything. This
+     * asks the demo whether the approvals in it actually came out of the engine — one Approval row
+     * against a workflow stage, for each of the phase's subject types that the demo decides.
+     */
+    #[Test]
+    public function the_approvals_in_the_demo_all_came_out_of_the_one_engine(): void
+    {
+        $decided = $this->within($this->meridian, fn () => Approval::query()
+            ->whereHas('stageInstance.instance')
+            ->with('stageInstance.instance')
+            ->get()
+            ->map(fn (Approval $a) => $a->stageInstance->instance->subject_type)
+            ->unique()
+            ->values()
+            ->all());
+
+        $this->assertNotEmpty($decided, 'Nothing in the demo was decided by the workflow engine at all.');
+
+        // Not an exhaustive list on purpose — the demo's contents shift as chapters are added, and a
+        // test that pinned every subject type would fail for the wrong reason. These three are the
+        // ones the phase's claim rests on: an HR request, a personnel change and the payroll.
+        foreach (['leave_request', 'employee_movement', 'payroll_run'] as $subject) {
+            $this->assertContains($subject, $decided,
+                'Nothing of type '.$subject.' was decided through the engine in the demo.');
+        }
+
+        // And no visitor ever went near it, which is the exception holding in the data too.
+        $this->assertNotContains('visitor', $decided,
+            'A visit was routed through the approval engine, which the visitor book does not do.');
     }
 
     // ------------------------------------------------------------------ helpers

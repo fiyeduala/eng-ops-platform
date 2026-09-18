@@ -440,6 +440,40 @@ final class PayrollTest extends TestCase
             ->assertSee('No salary is on record');
     }
 
+    /**
+     * The pay structure screens render with a structure actually on them.
+     *
+     * THE SMOKE TEST CANNOT CATCH THIS ONE, which is the whole reason it is written here. That test
+     * walks every route with an empty database, so the index renders its empty state and the table
+     * — the part that broke — is never reached. The bug it missed was that the view variable was
+     * called `$component`, a name Blade rebinds to the component instance inside every component
+     * slot, so `$component->code` inside an <x-field> and `$component->kind` inside an <x-badge>
+     * both read an AnonymousComponent and fatalled. A 500 on the page an administrator uses to
+     * describe their own tax rules, visible only once the register had rows in it.
+     */
+    #[Test]
+    public function the_pay_structure_pages_render_with_a_structure_on_them(): void
+    {
+        $this->seedStructure();
+
+        // The index, with a deduction (badge slot) and a banded component (the band count branch).
+        $this->actingFresh($this->hr)->get(route('pay-components.index'))
+            ->assertOk()
+            ->assertSee('PENSION')
+            ->assertSee('PAYE');
+
+        $this->actingFresh($this->hr)->get(route('pay-components.create'))->assertOk();
+
+        // And the edit page for the banded one, which is the form partial at its most loaded: bands
+        // read off an existing record rather than an empty array.
+        $paye = $this->withinOrganization($this->org,
+            fn () => PayComponent::query()->where('code', 'PAYE')->firstOrFail());
+
+        $this->actingFresh($this->hr)->get(route('pay-components.edit', $paye))
+            ->assertOk()
+            ->assertSee('PAYE');
+    }
+
     // ================================================================== helpers
 
     /** Meridian's structure: basic, 8% pension deducted before tax, then progressive PAYE. */

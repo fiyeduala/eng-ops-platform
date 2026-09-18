@@ -31,42 +31,47 @@
                     <tr><th>Seq</th><th>Code</th><th>Name</th><th>Kind</th><th>How</th><th>Flags</th><th></th></tr>
                 </thead>
                 <tbody>
-                    @foreach ($components as $component)
-                        <tr class="{{ $component->is_active ? '' : 'opacity-60' }}">
-                            <td class="tabular-nums">{{ $component->sequence }}</td>
-                            <td class="font-medium text-[var(--text-strong)]">{{ $component->code }}</td>
+                    {{--
+                        NOT `$component`. Blade shadows that name inside every component slot with the
+                        component instance itself, so `{{ $payComponent->kind }}` one line below — which is
+                        inside an <x-badge> slot — would read the AnonymousComponent and fatal.
+                    --}}
+                    @foreach ($components as $payComponent)
+                        <tr class="{{ $payComponent->is_active ? '' : 'opacity-60' }}">
+                            <td class="tabular-nums">{{ $payComponent->sequence }}</td>
+                            <td class="font-medium text-[var(--text-strong)]">{{ $payComponent->code }}</td>
                             <td>
-                                {{ $component->name }}
-                                @unless ($component->is_active)
+                                {{ $payComponent->name }}
+                                @unless ($payComponent->is_active)
                                     <span class="block text-[11px] text-[var(--text-muted)]">retired</span>
                                 @endunless
                             </td>
                             <td>
-                                <x-badge :tone="$component->kind === 'deduction' ? 'warning' : ($component->kind === 'relief' ? 'brand' : 'neutral')">
-                                    {{ $kinds[$component->kind] ?? $component->kind }}
+                                <x-badge :tone="$payComponent->kind === 'deduction' ? 'warning' : ($payComponent->kind === 'relief' ? 'brand' : 'neutral')">
+                                    {{ $kinds[$payComponent->kind] ?? $payComponent->kind }}
                                 </x-badge>
                             </td>
                             <td class="text-xs text-[var(--text-muted)]">
-                                {{ \App\Models\PayComponent::METHODS[$component->method] ?? $component->method }}
-                                @if ($component->method === 'banded')
-                                    · {{ $component->bands_count }} {{ str('band')->plural($component->bands_count) }}
-                                @elseif ($component->method === 'percent')
-                                    · {{ rtrim(rtrim((string) $component->rate, '0'), '.') }}% of {{ \App\Models\PayComponent::BASES[$component->basis] ?? $component->basis }}
-                                @elseif ($component->method === 'hourly')
-                                    · {{ number_format((float) $component->rate, 2) }} per hour
+                                {{ \App\Models\PayComponent::METHODS[$payComponent->method] ?? $payComponent->method }}
+                                @if ($payComponent->method === 'banded')
+                                    · {{ $payComponent->bands_count }} {{ str('band')->plural($payComponent->bands_count) }}
+                                @elseif ($payComponent->method === 'percent')
+                                    · {{ rtrim(rtrim((string) $payComponent->rate, '0'), '.') }}% of {{ \App\Models\PayComponent::BASES[$payComponent->basis] ?? $payComponent->basis }}
+                                @elseif ($payComponent->method === 'hourly')
+                                    · {{ number_format((float) $payComponent->rate, 2) }} per hour
                                 @else
-                                    · {{ number_format((float) $component->amount, 2) }}
+                                    · {{ number_format((float) $payComponent->amount, 2) }}
                                 @endif
                             </td>
                             <td class="text-[11px] text-[var(--text-muted)]">
-                                @if ($component->applies_to_all)<span class="block">everybody</span>@endif
-                                @if ($component->is_taxable)<span class="block">taxable</span>@endif
-                                @if ($component->is_pensionable)<span class="block">pensionable</span>@endif
-                                @if ($component->reduces_taxable)<span class="block">reduces taxable</span>@endif
+                                @if ($payComponent->applies_to_all)<span class="block">everybody</span>@endif
+                                @if ($payComponent->is_taxable)<span class="block">taxable</span>@endif
+                                @if ($payComponent->is_pensionable)<span class="block">pensionable</span>@endif
+                                @if ($payComponent->reduces_taxable)<span class="block">reduces taxable</span>@endif
                             </td>
                             <td class="text-right">
-                                @can('update', $component)
-                                    <a href="{{ route('pay-components.edit', $component) }}" class="btn btn-ghost btn-sm">Edit</a>
+                                @can('update', $payComponent)
+                                    <a href="{{ route('pay-components.edit', $payComponent) }}" class="btn btn-ghost btn-sm">Edit</a>
                                 @endcan
                             </td>
                         </tr>

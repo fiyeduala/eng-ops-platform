@@ -54,8 +54,11 @@ class PayComponentController extends Controller
     {
         $this->authorize('create', PayComponent::class);
 
+        // The view variable is `payComponent`, never `component`: Blade binds `$component` to the
+        // component instance inside every component slot, so a form field reading `$component->code`
+        // inside an <x-field> gets an AnonymousComponent and fatals.
         return view('pay-components.create', [
-            'component' => new PayComponent([
+            'payComponent' => new PayComponent([
                 'kind' => 'earning',
                 'method' => 'fixed',
                 'basis' => 'none',
@@ -82,7 +85,7 @@ class PayComponentController extends Controller
         $payComponent->load('bands');
 
         return view('pay-components.edit', [
-            'component' => $payComponent,
+            'payComponent' => $payComponent,
             ...$this->formOptions(),
         ]);
     }

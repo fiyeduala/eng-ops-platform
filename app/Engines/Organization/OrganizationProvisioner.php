@@ -292,6 +292,26 @@ class OrganizationProvisioner
             'payment.methods' => '',
             'petty_cash.single_disbursement_limit' => '',
 
+            // --- the visitor book --------------------------------------------------------
+            // Every one of these is a company rule, which is why none of them is a constant (§47).
+            // The escort default is ON for contractors and OFF for everybody else, which is the
+            // posture almost every site actually operates: a supplier's fitter walking into a plant
+            // room unaccompanied is the thing site inductions exist to prevent, and a client
+            // arriving for a meeting is not.
+            'visitor.require_host' => true,
+            'visitor.contractor_requires_escort' => true,
+            'visitor.capture_id_document' => false,
+            // Zero means an induction never lapses. 365 is a common site rule rather than a correct
+            // one, and it is here to be changed.
+            'visitor.induction_validity_days' => 365,
+            // The end-of-day sweep. It exists because badges do not get handed back, and a roll call
+            // that still shows forty people on site at three in the morning is a roll call nobody
+            // will trust at nine. What it writes is marked `auto_closed`, so a departure somebody
+            // witnessed is never confused with one the clock assumed.
+            'visitor.auto_close_enabled' => true,
+            'visitor.auto_close_at' => '23:00',
+            'visitor.purpose_types' => '',
+
             // --- notifications -----------------------------------------------------------
             'notify.channels' => ['database', 'mail'],
             'notify.digest_hour' => 7,

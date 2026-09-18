@@ -68,3 +68,22 @@ Schedule::command('movements:apply')
     ->withoutOverlapping(30)
     ->runInBackground()
     ->description('Apply approved employee movements that have reached their effective date');
+
+/*
+ * Hourly, not daily, and that needs explaining.
+ *
+ * Each company sets its own end of day (`visitor.auto_close_at`) because a head office closing at
+ * six and a site running a night shift cannot share one. A daily schedule would mean picking a
+ * single hour here and being wrong for everybody whose cut-off is not it — either sweeping before
+ * their day ends, which signs out people who are still in the building, or hours after, which is the
+ * stale roll call the sweep exists to prevent. Running every hour and letting the command decide
+ * whether each organization's cut-off has passed puts the decision where the setting is.
+ *
+ * It writes, like movements:apply — but what it writes is an admission rather than a fact. See
+ * CloseOutVisitors: everything it closes is marked as an assumed departure, never a witnessed one.
+ */
+Schedule::command('visitors:close-out')
+    ->hourly()
+    ->withoutOverlapping(15)
+    ->runInBackground()
+    ->description('Sign out visitors still shown on site at the end of the day');

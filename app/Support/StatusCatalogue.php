@@ -1308,6 +1308,38 @@ final class StatusCatalogue
                 ],
                 'transitions' => [],
             ],
+
+            // THE ONLY REGISTER IN PHASE 6 WITH REAL TRANSITIONS, because it is the only one whose
+            // status is not a consequence of a workflow closing. A visitor is booked, arrives and
+            // leaves, and each of those is somebody pressing a button at a desk with a person
+            // standing in front of them. The moves below are therefore the actual rules, and the
+            // machine enforces them rather than the controller remembering to.
+            //
+            // `departed` is terminal and `on_site` cannot be reached from it. Somebody who comes
+            // back after lunch is a second visit, not a reopened one — because the question this
+            // register has to answer under a fire alarm is "who is in the building", and a record
+            // that can go back on site hours after it was closed makes that answer a guess.
+            'visitor' => [
+                'statuses' => [
+                    'expected' => ['label' => 'Expected', 'color' => 'neutral', 'initial' => true],
+                    'on_site' => ['label' => 'On site', 'color' => 'success'],
+                    'departed' => ['label' => 'Departed', 'color' => 'brand', 'terminal' => true],
+                    'no_show' => ['label' => 'Did not arrive', 'color' => 'neutral', 'terminal' => true],
+                    'refused' => ['label' => 'Refused entry', 'color' => 'danger', 'terminal' => true],
+                    'cancelled' => ['label' => 'Cancelled', 'color' => 'neutral', 'terminal' => true],
+                ],
+                /*
+                 * NO CONFIGURABLE TRANSITIONS, AND THAT IS THE POINT ON THIS REGISTER.
+                 *
+                 * A row here would put the move on a status dropdown, and `expected → on_site` is
+                 * not a status change somebody picks from a list — it is the gate opening, and it
+                 * carries a timestamp, a badge, an escort check and an induction check with it. The
+                 * only path onto the roll call is VisitorService::checkIn(), guarded by
+                 * `visitor.check_in`; leaving this empty is what stops the whole of that being
+                 * bypassed by a select box (§84).
+                 */
+                'transitions' => [],
+            ],
         ];
     }
 

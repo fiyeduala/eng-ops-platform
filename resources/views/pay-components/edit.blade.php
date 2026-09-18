@@ -1,10 +1,10 @@
-<x-layouts.app :title="'Edit '.$component->code">
-    <x-page-header :title="'Edit '.$component->code"
+<x-layouts.app :title="'Edit '.$payComponent->code">
+    <x-page-header :title="'Edit '.$payComponent->code"
                    description="Changing a rule changes future runs only. Payslips already approved keep the rate they were calculated under, and their own copy of it, so an old payslip still explains itself."/>
 
     @include('finance.errors')
 
-    <form method="POST" action="{{ route('pay-components.update', $component) }}" class="card p-6">
+    <form method="POST" action="{{ route('pay-components.update', $payComponent) }}" class="card p-6">
         @csrf @method('PUT')
         @include('pay-components.partials.form')
 
@@ -14,7 +14,7 @@
         </div>
     </form>
 
-    @can('delete', $component)
+    @can('delete', $payComponent)
         <div class="card mt-6 p-5">
             <h2 class="card-title">Remove this component</h2>
             <p class="mt-1 text-xs text-[var(--text-muted)]">
@@ -22,7 +22,7 @@
                 retire it by unticking “Active” instead — deleting it would take a line off somebody's pay history.
             </p>
             <div class="mt-3">
-                <x-delete-form :action="route('pay-components.destroy', $component)" label="Remove component" confirm="Remove this component from the pay structure?"/>
+                <x-delete-form :action="route('pay-components.destroy', $payComponent)" label="Remove component" confirm="Remove this component from the pay structure?"/>
             </div>
         </div>
     @endcan

@@ -52,6 +52,7 @@ use App\Models\TrainingRequirement;
 use App\Models\Transmittal;
 use App\Models\User;
 use App\Models\Vendor;
+use App\Models\Visitor;
 use App\Models\Warehouse;
 use App\Models\Workflow;
 use App\Models\WorkflowStage;
@@ -119,6 +120,7 @@ use App\Services\TransmittalService;
 use App\Services\VacancyService;
 use App\Services\VehicleDocumentService;
 use App\Services\VendorService;
+use App\Services\VisitorService;
 use App\Services\WarehouseService;
 use App\Services\WorkflowDefinitionService;
 use App\Support\Enums\ChangeDisposition;
@@ -356,6 +358,14 @@ class DemoSeeder extends Seeder
         // decides everything else.
         $this->seedMeridianPayroll($meridian);
         $this->seedKestrelPayroll($kestrel);
+
+        // The visitor book, last, because it is the one register in the people modules that is NOT
+        // routed and reads best against everything that is: by this point the reader has seen nine
+        // registers all decided in the same inbox, and this one decided at a desk by somebody
+        // holding `visitor.check_in`. It also needs the projects and the sites the earlier chapters
+        // built, so that a roll call can be filtered to one gate.
+        $this->seedMeridianVisitors($meridian);
+        $this->seedKestrelVisitors($kestrel);
 
         // The rows above were written straight to the database, so nothing observed them happening.
         // A demo whose record timelines are all blank teaches the wrong lesson about Engine 4 — the
@@ -9831,6 +9841,319 @@ class DemoSeeder extends Seeder
             'currency' => $currency,
             'notes' => $notes,
         ], $actor);
+    }
+
+    // ================================================================= the visitor book
+
+    /**
+     * Who is in Meridian's buildings.
+     *
+     * THE REGISTER THAT IS NOT ROUTED, AND THE CHAPTER THAT SHOWS WHY. Everything else in the people
+     * modules is decided in an inbox; nothing here is. A receptionist with somebody standing at the
+     * desk cannot wait for an approval, so the control is `visitor.check_in` — held by the office
+     * administrator at Head Office and by gate control at the sites, and NOT held by the engineers
+     * who book visitors in. The seeded records below are all produced through VisitorService, by the
+     * people who would actually have produced them, so the timelines say who opened the gate.
+     *
+     * The state of the register is chosen so that the roll call has something true and something
+     * uncomfortable in it:
+     *
+     *   • Ten people are on site right now, across four records — one of which is a delegation of
+     *     six. A roll call counting rows would report four and be six people short at an assembly
+     *     point, which is the single reason `headcount()` exists.
+     *   • ONE VISIT WAS SIGNED OUT BY NOBODY. The auditor three days ago never handed her badge
+     *     back, and the end-of-day sweep closed her out. It is marked `auto_closed`, the timeline
+     *     says nobody witnessed the departure, and the demo shows it rather than hiding it —
+     *     because a register that quietly pretends it saw everybody leave is worth nothing on the
+     *     day somebody asks.
+     *   • One person was refused entry, with the reason on the record, because that is the entry a
+     *     visitor book exists to be able to produce months later.
+     */
+    private function seedMeridianVisitors(Organization $organization): void
+    {
+        $this->context->within($organization, function () {
+            $staff = $this->staff();
+            $place = $this->locationsByCode();
+            $job = Project::query()->get()->keyBy('code');
+
+            // Who is at the desk. The office administrator works Head Office; gate control at the
+            // Delta Terminal site is the QA/QC officer who is stationed there — small companies do
+            // not staff a gatehouse, and the permission is what matters, not the job title.
+            $reception = $this->accountOf($staff, 'MEI-0024');  // Chioma Nwachukwu, Head Office
+            $siteDesk = $this->accountOf($staff, 'MEI-0016');   // Ruth Okafor, Delta Terminal
+
+            $md = $staff['MEI-0001'];            // Adaeze Okonkwo
+            $opsDirector = $staff['MEI-0003'];   // Chinedu Balogun
+            $leadEngineer = $staff['MEI-0005'];  // Marcus Adeyemi
+            $projectManager = $staff['MEI-0011'] ?? null; // Daniel Mbeki
+            $siteManager = $staff['MEI-0012'];   // Kelechi Nwosu
+            $hseOfficer = $staff['MEI-0014'];    // Emeka Duru
+            $hrManager = $staff['MEI-0017'];     // Amina Tijani
+            $storeOfficer = $staff['MEI-0021'];  // Sadiq Bello
+
+            // --- on site now ---------------------------------------------------------------
+            //
+            // The delegation is the whole argument for `party_size`. Six people arrived on one
+            // booking, signed one line, and are six people in the building.
+            $this->visit($reception, [
+                'full_name' => 'Ezinne Okoro',
+                'company_name' => 'Delta Petroleum Nigeria Ltd',
+                'party_size' => 6,
+                'phone' => '+234 802 447 9015',
+                'host_employee_id' => ($projectManager ?? $opsDirector)->id,
+                'location_id' => $place['HQ']->id,
+                'project_id' => $job['DTE']->id ?? null,
+                'purpose_type' => 'meeting',
+                'purpose' => 'Client progress review for the tank farm expansion, with their HSE and commercial teams.',
+                'expected_from' => now()->setTime(9, 0),
+                'expected_to' => now()->setTime(16, 0),
+            ], checkedInAt: now()->setTime(9, 12), gate: $reception, at: [
+                'badge_number' => 'HQ-041',
+                'vehicle_registration' => 'LAG-882-KJA',
+            ]);
+
+            $this->visit($reception, [
+                'full_name' => 'Michael Brennan',
+                'company_name' => 'Setra Calibration Services',
+                'phone' => '+234 809 771 3350',
+                'host_employee_id' => $storeOfficer->id,
+                'location_id' => $place['WH-01']->id,
+                'purpose_type' => 'contractor',
+                'purpose' => 'Annual calibration of the torque wrenches held in the central warehouse.',
+                'expected_from' => now()->setTime(8, 30),
+                'expected_to' => now()->setTime(13, 0),
+                // Not ticked by the person who booked it. The escort rule is the COMPANY'S setting,
+                // and it is applied at the gate — see VisitorService::guardEscort().
+                'requires_escort' => false,
+            ], checkedInAt: now()->setTime(8, 41), gate: $reception, at: [
+                'badge_number' => 'HQ-042',
+                'escort_employee_id' => $storeOfficer->id,
+                'induction_completed' => true,
+                'induction_completed_on' => now()->subMonths(4)->toDateString(),
+            ]);
+
+            $this->visit($siteDesk, [
+                'full_name' => 'Aisha Lawal',
+                'company_name' => 'Federal Ministry of Environment',
+                'party_size' => 2,
+                'host_employee_id' => $hseOfficer->id,
+                'location_id' => $place['SITE-DT']->id,
+                'project_id' => $job['DTE']->id ?? null,
+                'purpose_type' => 'inspection',
+                'purpose' => 'Unannounced environmental inspection of the bund and the effluent pit.',
+                'expected_from' => now()->setTime(10, 0),
+            ], checkedInAt: now()->setTime(10, 4), gate: $siteDesk, at: [
+                'badge_number' => 'DT-113',
+                'induction_completed' => true,
+            ]);
+
+            $this->visit($siteDesk, [
+                'full_name' => 'Peter Adewale',
+                'company_name' => 'Hallmark Scaffolding',
+                'host_employee_id' => $siteManager->id,
+                'location_id' => $place['SITE-DT']->id,
+                'project_id' => $job['DTE']->id ?? null,
+                'purpose_type' => 'contractor',
+                'purpose' => 'Scaffold handover inspection at the tank shell.',
+                'expected_from' => now()->setTime(7, 30),
+                'requires_escort' => true,
+            ], checkedInAt: now()->setTime(7, 38), gate: $siteDesk, at: [
+                'badge_number' => 'DT-114',
+                'escort_employee_id' => $siteManager->id,
+                'induction_completed' => true,
+                'induction_completed_on' => now()->subDays(20)->toDateString(),
+                'vehicle_registration' => 'WAR-410-XA',
+            ]);
+
+            // --- expected later, not yet arrived -------------------------------------------
+            $this->visit($reception, [
+                'full_name' => 'Oluwaseun Ajayi',
+                'company_name' => null,
+                'phone' => '+234 806 220 8871',
+                'host_employee_id' => $hrManager->id,
+                'location_id' => $place['HQ']->id,
+                'purpose_type' => 'interview',
+                'purpose' => 'Second interview for the structural engineer vacancy.',
+                'expected_from' => now()->addDay()->setTime(11, 0),
+                'expected_to' => now()->addDay()->setTime(12, 30),
+            ]);
+
+            $this->visit($reception, [
+                'full_name' => 'Ibrahim Danjuma',
+                'company_name' => 'Zenith Bank',
+                'host_employee_id' => $md->id,
+                'location_id' => $place['HQ']->id,
+                'purpose_type' => 'meeting',
+                'purpose' => 'Facility review with the relationship manager.',
+                'expected_from' => now()->addDays(2)->setTime(14, 0),
+            ]);
+
+            // --- been and gone --------------------------------------------------------------
+            $this->visit($reception, [
+                'full_name' => 'Tolu Fashina',
+                'company_name' => 'Standard Insurance Brokers',
+                'host_employee_id' => $leadEngineer->id,
+                'location_id' => $place['HQ']->id,
+                'purpose_type' => 'meeting',
+                'purpose' => 'Renewal of the contractors all-risks policy.',
+                'expected_from' => now()->subDay()->setTime(10, 0),
+            ], checkedInAt: now()->subDay()->setTime(10, 6), gate: $reception, at: [
+                'badge_number' => 'HQ-039',
+            ], checkedOutAt: now()->subDay()->setTime(11, 48));
+
+            // --- the uncomfortable one ------------------------------------------------------
+            //
+            // Signed in three days ago and never signed out. Nothing is faked: the record is left
+            // on site and the real end-of-day sweep is run below, which closes it, marks it
+            // `auto_closed` and writes a timeline entry saying nobody watched her go.
+            $this->visit($reception, [
+                'full_name' => 'Chidinma Eze',
+                'company_name' => 'Ashford & Co (External Auditors)',
+                'host_employee_id' => $staff['MEI-0018']->id, // Victor Anyanwu, Finance
+                'location_id' => $place['HQ']->id,
+                'purpose_type' => 'audit',
+                'purpose' => 'Interim audit fieldwork — fixed asset register and petty cash.',
+                'expected_from' => now()->subDays(3)->setTime(9, 0),
+                'expected_to' => now()->subDays(3)->setTime(17, 0),
+            ], checkedInAt: now()->subDays(3)->setTime(8, 52), gate: $reception, at: [
+                'badge_number' => 'HQ-036',
+            ]);
+
+            // --- turned away ----------------------------------------------------------------
+            $refused = $this->visit($siteDesk, [
+                'full_name' => 'Sunday Okechukwu',
+                'company_name' => 'Rapid Logistics',
+                'host_employee_id' => $storeOfficer->id,
+                'location_id' => $place['SITE-DT']->id,
+                'purpose_type' => 'delivery',
+                'purpose' => 'Delivery of flanges against purchase order.',
+                'expected_from' => now()->subDays(2)->setTime(13, 0),
+            ]);
+
+            app(VisitorService::class)->refuse(
+                $refused,
+                $siteDesk,
+                'Arrived in open footwear with no hard hat and declined to wear the ones offered. '
+                .'Delivery redirected to the Ikeja yard and the supplier has been told why.'
+            );
+
+            $noShow = $this->visit($reception, [
+                'full_name' => 'Grace Umeh',
+                'company_name' => 'Pinnacle Office Supplies',
+                'host_employee_id' => $staff['MEI-0024']->id,
+                'location_id' => $place['HQ']->id,
+                'purpose_type' => 'meeting',
+                'purpose' => 'Stationery contract review.',
+                'expected_from' => now()->subDays(4)->setTime(15, 0),
+            ]);
+
+            app(VisitorService::class)->markNoShow($noShow, $reception);
+
+            // The sweep, for real. It finds the auditor above and nothing else — everybody who
+            // arrived today is inside a cut-off that has not passed yet.
+            app(VisitorService::class)->closeOutStragglers();
+        });
+    }
+
+    /**
+     * Kestrel's visitor book — the same register, a quarter of the size.
+     *
+     * The small company runs it with no gatehouse and no receptionist: Marianne Ellis does the books,
+     * the payroll and the front door, and the Leeds depot is signed in and out by whoever is there.
+     * That is exactly what a permission-based gate is for — the same `visitor.check_in` verb lands on
+     * one person here and on a shift rota next door, with no second code path.
+     */
+    private function seedKestrelVisitors(Organization $organization): void
+    {
+        $this->context->within($organization, function () {
+            $staff = $this->staff();
+            $place = $this->locationsByCode();
+
+            $desk = $this->accountOf($staff, 'KFM-008');   // Marianne Ellis, who does everything
+            $depot = $this->accountOf($staff, 'KFM-003');  // Duncan Reilly, at Leeds
+
+            $this->visit($depot, [
+                'full_name' => 'Gary Whitlock',
+                'company_name' => 'Northern Lift Services',
+                'phone' => '07700 900414',
+                'host_employee_id' => $staff['KFM-003']->id,
+                'location_id' => $place['LDS']->id,
+                'purpose_type' => 'contractor',
+                'purpose' => 'Six-monthly LOLER examination of the depot goods lift.',
+                'expected_from' => now()->setTime(9, 30),
+                'expected_to' => now()->setTime(12, 0),
+            ], checkedInAt: now()->setTime(9, 27), gate: $depot, at: [
+                'badge_number' => 'LDS-07',
+                'escort_employee_id' => $staff['KFM-005']->id, // Callum Whitfield
+                'induction_completed' => true,
+                'induction_completed_on' => now()->subMonths(2)->toDateString(),
+                'vehicle_registration' => 'YJ19 KPX',
+            ]);
+
+            $this->visit($desk, [
+                'full_name' => 'Helena Marsh',
+                'company_name' => 'BSI Assurance UK',
+                'host_employee_id' => $staff['KFM-004']->id, // Nadia Osei
+                'location_id' => $place['MCR']->id,
+                'purpose_type' => 'audit',
+                'purpose' => 'ISO 9001 surveillance audit, day one of two.',
+                'expected_from' => now()->addDays(3)->setTime(9, 0),
+                'expected_to' => now()->addDays(3)->setTime(17, 0),
+            ]);
+
+            $this->visit($desk, [
+                'full_name' => 'Tom Ferreira',
+                'company_name' => 'Crestwood Property Management',
+                'party_size' => 3,
+                'host_employee_id' => $staff['KFM-002']->id, // Priti Shah
+                'location_id' => $place['MCR']->id,
+                'purpose_type' => 'meeting',
+                'purpose' => 'Quarterly service review for the Crestwood portfolio.',
+                'expected_from' => now()->subDays(2)->setTime(13, 30),
+            ], checkedInAt: now()->subDays(2)->setTime(13, 35), gate: $desk, at: [
+                'badge_number' => 'MCR-12',
+            ], checkedOutAt: now()->subDays(2)->setTime(15, 10));
+        });
+    }
+
+    /**
+     * One visit, through the service the desk uses.
+     *
+     * The arrival and departure times are back-dated AFTER the service has stamped them, because the
+     * service stamps `now()` — which is right in production and useless in a demo that wants a
+     * yesterday in it. Everything that matters is still produced by the real code path: the number,
+     * the status, the escort rule, the induction expiry and the timeline.
+     *
+     * @param  array<string,mixed>  $attributes
+     * @param  array<string,mixed>  $at  what the desk filled in at the moment they walked in
+     */
+    private function visit(
+        User $actor,
+        array $attributes,
+        ?\DateTimeInterface $checkedInAt = null,
+        ?User $gate = null,
+        array $at = [],
+        ?\DateTimeInterface $checkedOutAt = null,
+    ): Visitor {
+        $visitors = app(VisitorService::class);
+
+        $visitor = $visitors->create($attributes, $actor);
+
+        if ($checkedInAt === null) {
+            return $visitor;
+        }
+
+        $visitor = $visitors->checkIn($visitor, $gate ?? $actor, $at);
+        $visitor->checked_in_at = $checkedInAt;
+
+        if ($checkedOutAt !== null) {
+            $visitor = $visitors->checkOut($visitor, $gate ?? $actor);
+            $visitor->checked_out_at = $checkedOutAt;
+        }
+
+        $visitor->save();
+
+        return $visitor;
     }
 
     /**

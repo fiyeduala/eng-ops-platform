@@ -96,6 +96,7 @@ use App\Http\Controllers\VehicleController;
 use App\Http\Controllers\VehicleDocumentController;
 use App\Http\Controllers\VendorContactController;
 use App\Http\Controllers\VendorController;
+use App\Http\Controllers\VisitorController;
 use App\Http\Controllers\WarehouseController;
 use App\Http\Controllers\WorkflowController;
 use App\Http\Controllers\WorkflowStageController;
@@ -2573,6 +2574,61 @@ Route::middleware(['auth', 'password.current'])->group(function () {
             ->name('employee-pay.bank-account');
         Route::post('employees/{employee}/pay/component', [EmployeePayController::class, 'storeComponent'])
             ->name('employee-pay.component');
+    });
+
+    // --- visitors (Phase 6, part 6) -------------------------------------------------------------
+    //
+    // THE ONE REGISTER IN THIS PHASE WITH NO `submit` ROUTE, and the only one that is not routed at
+    // all. Everywhere else the absence of an `approve` route is the point; here the absence of
+    // `submit` is. A receptionist has somebody standing at the desk and cannot wait on an approval
+    // inbox, so the control is which permission the acting user holds rather than which stage the
+    // record has reached. That makes visitors the reasoned exception to Phase 6's exit criterion,
+    // not a gap in it — and the exception is stated here, in the model and in the service, because a
+    // rule that only holds where somebody remembered it is not a rule.
+    //
+    // `check_in` AND `check_out` ARE THEIR OWN PERMISSIONS, separate from `visitor.create`. Booking a
+    // visitor for next Tuesday is an engineer telling reception somebody is coming; opening the gate
+    // is not the same act and should not fall out of the same grant.
+    //
+    // THE ROLL CALL SITS BEHIND `visitor.view`. It is the screen somebody opens at an assembly point
+    // with an alarm going, and putting an administrative permission between them and the list of who
+    // is still inside would be a security control that gets people killed. It is still scoped by the
+    // access engine like every other read (§75).
+
+    Route::middleware('permission:visitor.view')->group(function () {
+        Route::get('visitors', [VisitorController::class, 'index'])->name('visitors.index');
+        // Before the {visitor} route, or "roll-call" is swallowed as an id.
+        Route::get('visitors/roll-call', [VisitorController::class, 'rollCall'])->name('visitors.roll-call');
+        Route::get('visitors/{visitor}', [VisitorController::class, 'show'])
+            ->whereNumber('visitor')->name('visitors.show');
+    });
+
+    Route::middleware('permission:visitor.create')->group(function () {
+        Route::get('visitors/create', [VisitorController::class, 'create'])->name('visitors.create');
+        Route::post('visitors', [VisitorController::class, 'store'])->name('visitors.store');
+    });
+
+    Route::whereNumber('visitor')->group(function () {
+        Route::get('visitors/{visitor}/edit', [VisitorController::class, 'edit'])
+            ->middleware('permission:visitor.edit')->name('visitors.edit');
+        Route::put('visitors/{visitor}', [VisitorController::class, 'update'])
+            ->middleware('permission:visitor.edit')->name('visitors.update');
+        Route::delete('visitors/{visitor}', [VisitorController::class, 'destroy'])
+            ->middleware('permission:visitor.delete')->name('visitors.destroy');
+
+        Route::post('visitors/{visitor}/check-in', [VisitorController::class, 'checkIn'])
+            ->middleware('permission:visitor.check_in')->name('visitors.check-in');
+        Route::post('visitors/{visitor}/check-out', [VisitorController::class, 'checkOut'])
+            ->middleware('permission:visitor.check_out')->name('visitors.check-out');
+        // Refusing entry is the gate's own decision: it would be absurd for a guard to be able to
+        // let somebody in but not to stop them.
+        Route::post('visitors/{visitor}/refuse', [VisitorController::class, 'refuse'])
+            ->middleware('permission:visitor.check_in')->name('visitors.refuse');
+
+        Route::post('visitors/{visitor}/cancel', [VisitorController::class, 'cancel'])
+            ->middleware('permission:visitor.edit')->name('visitors.cancel');
+        Route::post('visitors/{visitor}/no-show', [VisitorController::class, 'noShow'])
+            ->middleware('permission:visitor.edit')->name('visitors.no-show');
     });
 
     // --- assets --------------------------------------------------------------------------------

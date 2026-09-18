@@ -35,6 +35,7 @@ use App\Models\TrainingRecord;
 use App\Models\Vehicle;
 use App\Models\VehicleDocument;
 use App\Models\Vendor;
+use App\Models\Visitor;
 use App\Models\Warehouse;
 
 /**
@@ -345,6 +346,20 @@ final class SettingsCatalogue
                     'petty_cash.single_disbursement_limit' => ['label' => 'Largest single petty-cash payout', 'type' => 'string', 'rules' => ['nullable', 'numeric', 'min:0'], 'help' => 'In your base currency. Anything bigger has to go through an expense claim. Leave blank for no limit.'],
                 ],
             ],
+            'visitors' => [
+                'label' => 'Visitors',
+                'description' => 'How reception and the gate work. These are your rules — nothing in the system assumes a contractor needs an escort or that an induction lasts a year, and what you set here is what the visitor book enforces. Separate each list entry with a comma.',
+                'settings' => [
+                    'visitor.require_host' => ['label' => 'Every visit must name somebody it is here to see', 'type' => 'boolean', 'help' => 'The host is who the visit belongs to, and who is told when the visitor arrives. Turn this off only for a site where deliveries genuinely arrive for nobody in particular.'],
+                    'visitor.contractor_requires_escort' => ['label' => 'Contractors must be escorted', 'type' => 'boolean', 'help' => 'Applies to visits whose purpose is Contractor. An escort has to be named before the check-in will go through.'],
+                    'visitor.capture_id_document' => ['label' => 'Ask for an identity document at check-in', 'type' => 'boolean', 'help' => 'Off by default. A document number is personal data you then have to look after, so only turn this on where your site genuinely requires it. It is stored encrypted and is never searchable.'],
+                    'visitor.induction_validity_days' => ['label' => 'A site induction stays valid for', 'type' => 'integer', 'rules' => ['required', 'integer', 'between:0,3650'], 'help' => 'Days. 0 means an induction never lapses. Changing this does not move any induction already recorded — each visit keeps the expiry it was given.'],
+                    'visitor.auto_close_enabled' => ['label' => 'Close anybody still shown on site at the end of the day', 'type' => 'boolean', 'help' => 'Badges do not get handed back. Without this the roll call still shows last Tuesday’s visitors and stops being believed. Anything closed this way is marked as such, never as a witnessed departure.'],
+                    'visitor.auto_close_at' => ['label' => 'Close them at', 'type' => 'time', 'help' => 'Set this after your latest shift ends, not after office hours.'],
+                    'visitor.purpose_types' => ['label' => 'Reasons for a visit', 'type' => 'string', 'rules' => ['nullable', 'string', 'max:400'], 'help' => 'Leave blank to use: '.implode(', ', Visitor::DEFAULT_PURPOSE_TYPES)],
+                ],
+            ],
+
             'notify' => [
                 'label' => 'Notifications',
                 'description' => 'How and when people are told that something needs them.',

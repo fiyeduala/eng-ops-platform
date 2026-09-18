@@ -176,6 +176,15 @@ class Navigation
                         'permission' => 'payroll.run', 'active' => ['payroll-runs.*', 'payslips.show']],
                     ['label' => 'Pay structure', 'route' => 'pay-components.index', 'icon' => 'sliders',
                         'permission' => 'payroll.edit', 'active' => 'pay-components.*'],
+
+                    // The gate. Two items rather than one, and the roll call is the one that matters:
+                    // it answers "who is in the building" under an alarm, and somebody reaching for it
+                    // is not browsing. Both ask for `visitor.view` — see the policy for why the roll
+                    // call is deliberately not behind an administrative permission.
+                    ['label' => 'Visitors', 'route' => 'visitors.index', 'icon' => 'users',
+                        'permission' => 'visitor.view', 'active' => ['visitors.index', 'visitors.show', 'visitors.create', 'visitors.edit']],
+                    ['label' => 'Who is on site', 'route' => 'visitors.roll-call', 'icon' => 'shield',
+                        'permission' => 'visitor.view', 'active' => 'visitors.roll-call'],
                 ],
             ],
             [

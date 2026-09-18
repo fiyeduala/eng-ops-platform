@@ -389,6 +389,11 @@ class NumberGenerator
             // together in any listing sorted by number, which is exactly where somebody looking for
             // "what did we actually pay in September" needs them to be.
             'payroll_run' => ['prefix' => 'PRL', 'pattern' => '{PREFIX}-{YYYY}-{MM}-{SEQ}', 'reset_period' => 'monthly', 'padding' => 4],
+
+            // Five digits and a monthly reset: a busy reception books more visitors in a year than
+            // the company raises purchase orders in five, and VIS-2026-09-00001 stays readable where
+            // a yearly sequence would be into six figures by November.
+            'visitor' => ['prefix' => 'VIS', 'pattern' => '{PREFIX}-{YYYY}-{MM}-{SEQ}', 'reset_period' => 'monthly', 'padding' => 5],
         ];
     }
 }
