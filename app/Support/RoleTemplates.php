@@ -396,6 +396,12 @@ final class RoleTemplates
                     'purchase_request.review' => 'department',
                     'employee.view_contact' => 'department',
                     'performance.manage' => 'department',
+                    // Puts a promotion up for their own people. Not `apply` and not `manage` —
+                    // proposing a change to the org chart and making it are different acts, and the
+                    // second belongs to HR.
+                    'employee_movement.create' => 'department',
+                    'employee_movement.edit' => 'department',
+                    'employee_movement.submit' => 'department',
                     'report.export' => 'department',
                     'dashboard.view_department' => 'department',
                     'kpi.view' => 'department',
@@ -665,6 +671,17 @@ final class RoleTemplates
                     'checklist.*' => 'organization',
                     'employee_exit.*' => 'organization',
                     'performance.*' => 'organization',
+                    // Promotions and transfers. `apply` is included because HR is who writes the
+                    // change onto the personnel record once the route has approved it — and because
+                    // somebody has to be able to, or an approved movement sits there until the
+                    // nightly sweep, with no way to correct a date by hand.
+                    'employee_movement.*' => 'organization',
+                    // Conduct. `view_confidential` is what makes the register readable at all: a
+                    // case has no department and no parent, so without it even an HR Manager sees an
+                    // empty list. `investigate` and `decide` both land here on the default template
+                    // and a company that wants them apart splits them by making a second role — the
+                    // platform cannot decide on their behalf who hears their own cases (§47).
+                    'disciplinary.*' => 'organization',
                     'payroll.*' => 'organization',
                     'position.*' => 'organization',
                     'org_unit.view' => 'organization',
@@ -702,9 +719,21 @@ final class RoleTemplates
                     'checklist.view' => 'organization',
                     'checklist.create' => 'organization',
                     'checklist.edit' => 'organization',
+                    // Raises and types up movements; does not apply them and does not approve them.
+                    // The paperwork is administration, changing the org chart is not.
+                    'employee_movement.view' => 'organization',
+                    'employee_movement.create' => 'organization',
+                    'employee_movement.edit' => 'organization',
+                    // Keeps the training matrix honest — which is the one thing on this template
+                    // that stops somebody going up a derrick on a lapsed certificate.
+                    'hse_training.view' => 'organization',
                     'position.view' => 'organization',
                     'org_unit.view' => 'organization',
                     'report.view' => 'organization',
+                    // NOTHING DISCIPLINARY AND NO CONFIDENTIAL PERFORMANCE. Both are deliberate and
+                    // both are the reason this template exists separately from HR Manager: an
+                    // officer who books leave and types up contracts has no business reading an open
+                    // allegation or somebody's appraisal (§68).
                 ],
             ],
 
@@ -1164,6 +1193,17 @@ final class RoleTemplates
                     'expense.create' => 'own',
                     'expense.submit' => 'own',
                     'employee.view' => 'own',
+                    // Their own appraisal: read it, write their half of it, sign it off. `own` is
+                    // exactly right here — PerformanceReview carries a `user_id`, so the scope
+                    // resolves on the table itself rather than trying to inherit own-ness through a
+                    // relation, which it cannot do.
+                    'performance.view' => 'own',
+                    'performance.submit' => 'own',
+                    // THERE IS NO `employee_movement.view` HERE and it is not an oversight. `own`
+                    // resolves against `requester_id`/`created_by` on the movement itself, so it
+                    // would show somebody the transfers they RAISED, not the transfer that is
+                    // happening to them — and `own` cannot reach through to the employee, by design.
+                    // Telling somebody they have been promoted is a conversation, not a register row.
                     'hse_observation.create' => 'own',
                     'hse_incident.create' => 'own',
                 ],

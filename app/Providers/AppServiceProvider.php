@@ -121,6 +121,7 @@ use App\Models\Contract;
 use App\Models\CorrectiveAction;
 use App\Models\CostCenter;
 use App\Models\Deliverable;
+use App\Models\DisciplinaryCase;
 use App\Models\Document;
 use App\Models\DocumentCategory;
 use App\Models\DocumentVersion;
@@ -129,6 +130,7 @@ use App\Models\Employee;
 use App\Models\EmployeeChecklist;
 use App\Models\EmployeeChecklistItem;
 use App\Models\EmployeeExit;
+use App\Models\EmployeeMovement;
 use App\Models\Expense;
 use App\Models\Follower;
 use App\Models\FuelLog;
@@ -161,6 +163,8 @@ use App\Models\Organization;
 use App\Models\OrgUnit;
 use App\Models\OvertimeRequest;
 use App\Models\Payment;
+use App\Models\PerformanceReview;
+use App\Models\PerformanceReviewItem;
 use App\Models\Permit;
 use App\Models\PermitPrecaution;
 use App\Models\PermitType;
@@ -184,6 +188,8 @@ use App\Models\Quotation;
 use App\Models\QuotationItem;
 use App\Models\QuotationScore;
 use App\Models\RecordPermission;
+use App\Models\ReviewCycle;
+use App\Models\ReviewCycleCompetency;
 use App\Models\Rfi;
 use App\Models\Rfq;
 use App\Models\RfqItem;
@@ -211,6 +217,7 @@ use App\Models\ToolboxTalk;
 use App\Models\ToolboxTalkAttendee;
 use App\Models\TrainingCourse;
 use App\Models\TrainingRecord;
+use App\Models\TrainingRequirement;
 use App\Models\Transmittal;
 use App\Models\TransmittalItem;
 use App\Models\User;
@@ -242,12 +249,14 @@ use App\Policies\ContractPolicy;
 use App\Policies\CorrectiveActionPolicy;
 use App\Policies\CostCenterPolicy;
 use App\Policies\DeliverablePolicy;
+use App\Policies\DisciplinaryCasePolicy;
 use App\Policies\DocumentCategoryPolicy;
 use App\Policies\DocumentPolicy;
 use App\Policies\DocumentVersionPolicy;
 use App\Policies\DrawingPolicy;
 use App\Policies\EmployeeChecklistPolicy;
 use App\Policies\EmployeeExitPolicy;
+use App\Policies\EmployeeMovementPolicy;
 use App\Policies\EmployeePolicy;
 use App\Policies\ExpensePolicy;
 use App\Policies\FollowerPolicy;
@@ -279,6 +288,7 @@ use App\Policies\OrganizationPolicy;
 use App\Policies\OrgUnitPolicy;
 use App\Policies\OvertimeRequestPolicy;
 use App\Policies\PaymentPolicy;
+use App\Policies\PerformanceReviewPolicy;
 use App\Policies\PermitPolicy;
 use App\Policies\PermitPrecautionPolicy;
 use App\Policies\PermitTypePolicy;
@@ -300,6 +310,7 @@ use App\Policies\QualityInspectionPolicy;
 use App\Policies\QuotationItemPolicy;
 use App\Policies\QuotationPolicy;
 use App\Policies\QuotationScorePolicy;
+use App\Policies\ReviewCyclePolicy;
 use App\Policies\RfiPolicy;
 use App\Policies\RfqItemPolicy;
 use App\Policies\RfqPolicy;
@@ -326,6 +337,7 @@ use App\Policies\ToolboxTalkAttendeePolicy;
 use App\Policies\ToolboxTalkPolicy;
 use App\Policies\TrainingCoursePolicy;
 use App\Policies\TrainingRecordPolicy;
+use App\Policies\TrainingRequirementPolicy;
 use App\Policies\TransmittalItemPolicy;
 use App\Policies\TransmittalPolicy;
 use App\Policies\UserPolicy;
@@ -600,6 +612,18 @@ class AppServiceProvider extends ServiceProvider
             'employee_checklist' => EmployeeChecklist::class,
             'employee_checklist_item' => EmployeeChecklistItem::class,
             'employee_exit' => EmployeeExit::class,
+
+            // --- Phase 6, part 4: development, movement and conduct --------------------
+            'training_requirement' => TrainingRequirement::class,
+            'review_cycle' => ReviewCycle::class,
+            'review_cycle_competency' => ReviewCycleCompetency::class,
+            // Both of these are the subject of a workflow instance as well as an audit entry, so
+            // their absence here would make a review impossible to send for sign-off and a
+            // promotion impossible to submit at all.
+            'performance_review' => PerformanceReview::class,
+            'performance_review_item' => PerformanceReviewItem::class,
+            'employee_movement' => EmployeeMovement::class,
+            'disciplinary_case' => DisciplinaryCase::class,
         ]);
     }
 
@@ -825,6 +849,19 @@ class AppServiceProvider extends ServiceProvider
             EmployeeChecklist::class => EmployeeChecklistPolicy::class,
             EmployeeChecklistItem::class => EmployeeChecklistPolicy::class,
             EmployeeExit::class => EmployeeExitPolicy::class,
+
+            // --- Phase 6, part 4 -------------------------------------------------------
+            TrainingRequirement::class => TrainingRequirementPolicy::class,
+            ReviewCycle::class => ReviewCyclePolicy::class,
+            // A competency line is reached through its cycle, and a scored item through the review
+            // it belongs to — which is what decides whether that person's assessment may be opened
+            // at all. Pointing them at their parent's policy is what stops an item route being a
+            // way to read a restricted review one line at a time (§94).
+            ReviewCycleCompetency::class => ReviewCyclePolicy::class,
+            PerformanceReview::class => PerformanceReviewPolicy::class,
+            PerformanceReviewItem::class => PerformanceReviewPolicy::class,
+            EmployeeMovement::class => EmployeeMovementPolicy::class,
+            DisciplinaryCase::class => DisciplinaryCasePolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {

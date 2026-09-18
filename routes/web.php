@@ -23,6 +23,7 @@ use App\Http\Controllers\CorrectiveActionController;
 use App\Http\Controllers\CostCenterController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DeliverableController;
+use App\Http\Controllers\DisciplinaryCaseController;
 use App\Http\Controllers\DocumentCategoryController;
 use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\DocumentVersionController;
@@ -30,6 +31,7 @@ use App\Http\Controllers\DrawingController;
 use App\Http\Controllers\EmployeeChecklistController;
 use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\EmployeeExitController;
+use App\Http\Controllers\EmployeeMovementController;
 use App\Http\Controllers\ExpenseController;
 use App\Http\Controllers\FuelLogController;
 use App\Http\Controllers\GoodsReceiptController;
@@ -50,6 +52,7 @@ use App\Http\Controllers\OrganizationController;
 use App\Http\Controllers\OrgUnitController;
 use App\Http\Controllers\OvertimeRequestController;
 use App\Http\Controllers\PaymentController;
+use App\Http\Controllers\PerformanceReviewController;
 use App\Http\Controllers\PermitController;
 use App\Http\Controllers\PermitTypeController;
 use App\Http\Controllers\PettyCashAccountController;
@@ -63,6 +66,7 @@ use App\Http\Controllers\PurchaseOrderController;
 use App\Http\Controllers\PurchaseRequestController;
 use App\Http\Controllers\QualityInspectionController;
 use App\Http\Controllers\QuotationController;
+use App\Http\Controllers\ReviewCycleController;
 use App\Http\Controllers\RfiController;
 use App\Http\Controllers\RfqController;
 use App\Http\Controllers\RiskAssessmentController;
@@ -80,6 +84,7 @@ use App\Http\Controllers\TimesheetController;
 use App\Http\Controllers\ToolboxTalkController;
 use App\Http\Controllers\TrainingCourseController;
 use App\Http\Controllers\TrainingRecordController;
+use App\Http\Controllers\TrainingRequirementController;
 use App\Http\Controllers\TransmittalController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\VacancyController;
@@ -2321,6 +2326,171 @@ Route::middleware(['auth', 'password.current'])->group(function () {
             Route::delete('checklist-templates/{checklist_template}', [ChecklistTemplateController::class, 'destroy'])
                 ->name('checklist-templates.destroy');
         });
+    });
+
+    // --- training, performance, movements and conduct (Phase 6, part 4) -------------------------
+    //
+    // LOOK FOR AN `approve` ROUTE BELOW AND YOU WILL NOT FIND ONE, for a performance review or for a
+    // promotion. Both are decided in My Approvals at `approvals.decide`, the same endpoint that
+    // decides a document, a leave request, a timesheet and a vacancy. `submit` hands the record to the
+    // workflow engine and stops. That absence is Phase 6's exit criterion written into the route
+    // table, and it is the first thing to check if somebody ever "adds a quick approve button".
+    //
+    // APPLYING A MOVEMENT IS NOT APPROVING IT. `employee-movements.apply` writes the new position onto
+    // the personnel record AFTER the approval, on or after the effective date, behind its own
+    // permission. Most movements are applied by the nightly sweep and nobody presses anything.
+    //
+    // THE SELF-ASSESSMENT AND THE MANAGER'S HALF ARE SEPARATE ENDPOINTS behind `performance.submit`,
+    // and the policy decides which of the two the caller is. One shared form posting to one route
+    // would mean a manager could overwrite somebody's own words about their year (§84).
+    //
+    // THE CONDUCT ROUTES SPLIT `investigate` FROM `decide` because the person who gathers the facts
+    // should not be the person who hands down the sanction. Nothing stops a company granting both to
+    // one person — but it has to be a decision they took, not one the route table took for them.
+
+    Route::middleware('permission:hse_training.view')->group(function () {
+        Route::get('training-requirements', [TrainingRequirementController::class, 'index'])
+            ->name('training-requirements.index');
+        // The matrix: who is short of what. Filtered by the reader's own reach, not by a checkbox.
+        Route::get('training-requirements/matrix', [TrainingRequirementController::class, 'matrix'])
+            ->name('training-requirements.matrix');
+    });
+    // "My training" is about the signed-in person and needs no module permission — there is nothing
+    // here they could not already read on their own personnel page.
+    Route::get('my-training', [TrainingRequirementController::class, 'mine'])->name('training-requirements.mine');
+    Route::middleware('permission:hse_training.manage')->group(function () {
+        Route::get('training-requirements/create', [TrainingRequirementController::class, 'create'])
+            ->name('training-requirements.create');
+        Route::post('training-requirements', [TrainingRequirementController::class, 'store'])
+            ->name('training-requirements.store');
+        Route::whereNumber('training_requirement')->group(function () {
+            Route::get('training-requirements/{training_requirement}/edit', [TrainingRequirementController::class, 'edit'])
+                ->name('training-requirements.edit');
+            Route::put('training-requirements/{training_requirement}', [TrainingRequirementController::class, 'update'])
+                ->name('training-requirements.update');
+            Route::delete('training-requirements/{training_requirement}', [TrainingRequirementController::class, 'destroy'])
+                ->name('training-requirements.destroy');
+        });
+    });
+
+    Route::middleware('permission:performance.view')->group(function () {
+        Route::get('review-cycles', [ReviewCycleController::class, 'index'])->name('review-cycles.index');
+        Route::get('review-cycles/{review_cycle}', [ReviewCycleController::class, 'show'])
+            ->whereNumber('review_cycle')->name('review-cycles.show');
+    });
+    Route::middleware('permission:performance.create')->group(function () {
+        Route::get('review-cycles/create', [ReviewCycleController::class, 'create'])->name('review-cycles.create');
+        Route::post('review-cycles', [ReviewCycleController::class, 'store'])->name('review-cycles.store');
+    });
+    Route::whereNumber('review_cycle')->group(function () {
+        Route::get('review-cycles/{review_cycle}/edit', [ReviewCycleController::class, 'edit'])
+            ->middleware('permission:performance.edit')->name('review-cycles.edit');
+        Route::put('review-cycles/{review_cycle}', [ReviewCycleController::class, 'update'])
+            ->middleware('permission:performance.edit')->name('review-cycles.update');
+        Route::delete('review-cycles/{review_cycle}', [ReviewCycleController::class, 'destroy'])
+            ->middleware('permission:performance.delete')->name('review-cycles.destroy');
+        // Opening a round raises a review for everybody it covers. `manage`, not `edit`.
+        Route::post('review-cycles/{review_cycle}/open', [ReviewCycleController::class, 'open'])
+            ->middleware('permission:performance.manage')->name('review-cycles.open');
+        Route::post('review-cycles/{review_cycle}/close', [ReviewCycleController::class, 'close'])
+            ->middleware('permission:performance.manage')->name('review-cycles.close');
+        Route::post('review-cycles/{review_cycle}/cancel', [ReviewCycleController::class, 'cancel'])
+            ->middleware('permission:performance.manage')->name('review-cycles.cancel');
+    });
+
+    Route::middleware('permission:performance.view')->group(function () {
+        Route::get('performance-reviews', [PerformanceReviewController::class, 'index'])
+            ->name('performance-reviews.index');
+        // The two screens people actually open: yours, and the ones you have to write.
+        Route::get('my-reviews', [PerformanceReviewController::class, 'mine'])->name('performance-reviews.mine');
+        Route::get('performance-reviews/{performance_review}', [PerformanceReviewController::class, 'show'])
+            ->whereNumber('performance_review')->name('performance-reviews.show');
+    });
+    Route::whereNumber('performance_review')->group(function () {
+        Route::get('performance-reviews/{performance_review}/edit', [PerformanceReviewController::class, 'edit'])
+            ->middleware('permission:performance.edit')->name('performance-reviews.edit');
+        Route::put('performance-reviews/{performance_review}', [PerformanceReviewController::class, 'update'])
+            ->middleware('permission:performance.edit')->name('performance-reviews.update');
+        Route::delete('performance-reviews/{performance_review}', [PerformanceReviewController::class, 'destroy'])
+            ->middleware('permission:performance.delete')->name('performance-reviews.destroy');
+        Route::post('performance-reviews/{performance_review}/release', [PerformanceReviewController::class, 'release'])
+            ->middleware('permission:performance.manage')->name('performance-reviews.release');
+        // Two halves of one conversation, two endpoints, one permission — the policy decides which
+        // half the caller is allowed to write, and it is never both.
+        Route::post('performance-reviews/{performance_review}/self', [PerformanceReviewController::class, 'saveSelf'])
+            ->middleware('permission:performance.submit,performance.manage')->name('performance-reviews.self');
+        // `manage` is admitted here as well as `submit` because a department head holds the former
+        // and not the latter, and writing the manager's half of a review is exactly their job. The
+        // gate that decides WHICH half the caller may write is the policy, not this line.
+        Route::post('performance-reviews/{performance_review}/manager', [PerformanceReviewController::class, 'saveManager'])
+            ->middleware('permission:performance.submit,performance.manage')->name('performance-reviews.manager');
+        // Signing off on what your manager wrote. Deliberately available to anyone who can view:
+        // the subject of a review is not required to hold `performance.submit` to say they read it.
+        Route::post('performance-reviews/{performance_review}/acknowledge', [PerformanceReviewController::class, 'acknowledge'])
+            ->middleware('permission:performance.view')->name('performance-reviews.acknowledge');
+        Route::post('performance-reviews/{performance_review}/cancel', [PerformanceReviewController::class, 'cancel'])
+            ->middleware('permission:performance.manage')->name('performance-reviews.cancel');
+    });
+
+    Route::middleware('permission:employee_movement.view')->group(function () {
+        Route::get('employee-movements', [EmployeeMovementController::class, 'index'])->name('employee-movements.index');
+        Route::get('employee-movements/{employee_movement}', [EmployeeMovementController::class, 'show'])
+            ->whereNumber('employee_movement')->name('employee-movements.show');
+    });
+    Route::middleware('permission:employee_movement.create')->group(function () {
+        Route::get('employee-movements/create', [EmployeeMovementController::class, 'create'])->name('employee-movements.create');
+        Route::post('employee-movements', [EmployeeMovementController::class, 'store'])->name('employee-movements.store');
+    });
+    Route::whereNumber('employee_movement')->group(function () {
+        Route::get('employee-movements/{employee_movement}/edit', [EmployeeMovementController::class, 'edit'])
+            ->middleware('permission:employee_movement.edit')->name('employee-movements.edit');
+        Route::put('employee-movements/{employee_movement}', [EmployeeMovementController::class, 'update'])
+            ->middleware('permission:employee_movement.edit')->name('employee-movements.update');
+        Route::delete('employee-movements/{employee_movement}', [EmployeeMovementController::class, 'destroy'])
+            ->middleware('permission:employee_movement.delete')->name('employee-movements.destroy');
+        Route::post('employee-movements/{employee_movement}/submit', [EmployeeMovementController::class, 'submit'])
+            ->middleware('permission:employee_movement.submit')->name('employee-movements.submit');
+        // Writes the change onto the personnel record. Not the approval — see the block comment.
+        Route::post('employee-movements/{employee_movement}/apply', [EmployeeMovementController::class, 'apply'])
+            ->middleware('permission:employee_movement.apply')->name('employee-movements.apply');
+        Route::post('employee-movements/{employee_movement}/cancel', [EmployeeMovementController::class, 'cancel'])
+            ->middleware('permission:employee_movement.manage')->name('employee-movements.cancel');
+    });
+
+    Route::middleware('permission:disciplinary.view')->group(function () {
+        Route::get('disciplinary-cases', [DisciplinaryCaseController::class, 'index'])->name('disciplinary-cases.index');
+        Route::get('disciplinary-cases/{disciplinary_case}', [DisciplinaryCaseController::class, 'show'])
+            ->whereNumber('disciplinary_case')->name('disciplinary-cases.show');
+    });
+    Route::middleware('permission:disciplinary.create')->group(function () {
+        Route::get('disciplinary-cases/create', [DisciplinaryCaseController::class, 'create'])->name('disciplinary-cases.create');
+        Route::post('disciplinary-cases', [DisciplinaryCaseController::class, 'store'])->name('disciplinary-cases.store');
+    });
+    Route::whereNumber('disciplinary_case')->group(function () {
+        Route::get('disciplinary-cases/{disciplinary_case}/edit', [DisciplinaryCaseController::class, 'edit'])
+            ->middleware('permission:disciplinary.edit')->name('disciplinary-cases.edit');
+        Route::put('disciplinary-cases/{disciplinary_case}', [DisciplinaryCaseController::class, 'update'])
+            ->middleware('permission:disciplinary.edit')->name('disciplinary-cases.update');
+        Route::delete('disciplinary-cases/{disciplinary_case}', [DisciplinaryCaseController::class, 'destroy'])
+            ->middleware('permission:disciplinary.delete')->name('disciplinary-cases.destroy');
+        Route::post('disciplinary-cases/{disciplinary_case}/investigator', [DisciplinaryCaseController::class, 'assignInvestigator'])
+            ->middleware('permission:disciplinary.manage')->name('disciplinary-cases.investigator');
+        Route::post('disciplinary-cases/{disciplinary_case}/investigation', [DisciplinaryCaseController::class, 'recordInvestigation'])
+            ->middleware('permission:disciplinary.investigate')->name('disciplinary-cases.investigation');
+        Route::post('disciplinary-cases/{disciplinary_case}/hearing', [DisciplinaryCaseController::class, 'scheduleHearing'])
+            ->middleware('permission:disciplinary.investigate')->name('disciplinary-cases.hearing');
+        Route::post('disciplinary-cases/{disciplinary_case}/hearing-notes', [DisciplinaryCaseController::class, 'recordHearing'])
+            ->middleware('permission:disciplinary.investigate')->name('disciplinary-cases.hearing-notes');
+        Route::post('disciplinary-cases/{disciplinary_case}/decide', [DisciplinaryCaseController::class, 'decide'])
+            ->middleware('permission:disciplinary.decide')->name('disciplinary-cases.decide');
+        Route::post('disciplinary-cases/{disciplinary_case}/appeal', [DisciplinaryCaseController::class, 'recordAppeal'])
+            ->middleware('permission:disciplinary.decide')->name('disciplinary-cases.appeal');
+        Route::post('disciplinary-cases/{disciplinary_case}/appeal-decision', [DisciplinaryCaseController::class, 'decideAppeal'])
+            ->middleware('permission:disciplinary.decide')->name('disciplinary-cases.appeal-decision');
+        Route::post('disciplinary-cases/{disciplinary_case}/close', [DisciplinaryCaseController::class, 'close'])
+            ->middleware('permission:disciplinary.decide')->name('disciplinary-cases.close');
+        Route::post('disciplinary-cases/{disciplinary_case}/withdraw', [DisciplinaryCaseController::class, 'withdraw'])
+            ->middleware('permission:disciplinary.manage')->name('disciplinary-cases.withdraw');
     });
 
     // --- assets --------------------------------------------------------------------------------

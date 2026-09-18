@@ -140,6 +140,26 @@ class Navigation
                         'permission' => 'checklist.manage', 'active' => 'checklist-templates.*'],
                     ['label' => 'Exits', 'route' => 'employee-exits.index', 'icon' => 'log-out',
                         'permission' => 'employee_exit.view', 'active' => 'employee-exits.*'],
+
+                    // Growing and moving. "My reviews" asks for the same `performance.view` as the
+                    // register rather than being waved through, matching the controller: a company
+                    // that has not granted the module does not run appraisals here, and the item
+                    // showing up anyway would be the one row in the sidebar answering another rule
+                    // (§6). Nearly everybody holds it at `own`, so nearly everybody sees it.
+                    ['label' => 'My reviews', 'route' => 'performance-reviews.mine', 'icon' => 'star',
+                        'permission' => 'performance.view', 'active' => 'performance-reviews.mine'],
+                    ['label' => 'Appraisals', 'route' => 'performance-reviews.index', 'icon' => 'star',
+                        'permission' => 'performance.view', 'active' => ['performance-reviews.index', 'performance-reviews.show', 'performance-reviews.edit']],
+                    ['label' => 'Review cycles', 'route' => 'review-cycles.index', 'icon' => 'sliders',
+                        'permission' => 'performance.manage', 'active' => 'review-cycles.*'],
+                    ['label' => 'Movements', 'route' => 'employee-movements.index', 'icon' => 'shuffle',
+                        'permission' => 'employee_movement.view', 'active' => 'employee-movements.*'],
+
+                    // Conduct sits last and, for most of the company, is not there at all: the
+                    // register is restricted with no parent, so the permission this asks for is one
+                    // only HR and an assigned investigator hold (§68).
+                    ['label' => 'Conduct', 'route' => 'disciplinary-cases.index', 'icon' => 'alert-triangle',
+                        'permission' => 'disciplinary.view', 'active' => 'disciplinary-cases.*'],
                 ],
             ],
             [
@@ -230,6 +250,16 @@ class Navigation
                         'permission' => 'toolbox_talk.view', 'active' => 'toolbox-talks.*'],
                     ['label' => 'Training records', 'route' => 'training-records.index', 'icon' => 'badge',
                         'permission' => 'hse_training.view', 'active' => 'training-records.*'],
+                    // The matrix is above the requirements list on purpose: "who is short of what"
+                    // is the question people come here to answer, and the rules behind it are what
+                    // you open once a year.
+                    ['label' => 'Training matrix', 'route' => 'training-requirements.matrix', 'icon' => 'grid',
+                        'permission' => 'hse_training.view', 'active' => 'training-requirements.matrix'],
+                    ['label' => 'Training requirements', 'route' => 'training-requirements.index', 'icon' => 'sliders',
+                        'permission' => 'hse_training.manage', 'active' => ['training-requirements.index', 'training-requirements.create', 'training-requirements.edit']],
+                    // No permission: it is about the signed-in person and nobody else.
+                    ['label' => 'My training', 'route' => 'training-requirements.mine', 'icon' => 'user',
+                        'active' => 'training-requirements.mine'],
                 ],
             ],
             [

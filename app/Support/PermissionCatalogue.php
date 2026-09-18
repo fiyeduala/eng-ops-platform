@@ -200,7 +200,23 @@ final class PermissionCatalogue
             // what ends the employment AND switches the sign-in off — one act, one permission,
             // because the two coming apart is how a leaver keeps their access for three weeks.
             'employee_exit' => ['People', 'Exits', [...self::CRUD, 'manage', 'clear', 'complete', 'view_confidential']],
-            'performance' => ['People', 'Performance', [...self::CRUD, 'manage', 'approve', 'view_confidential']],
+            // A review is signed off on its workflow stage, exactly as leave, timesheets and
+            // vacancies are, so there is no `approve` here for an administrator to grant by mistake
+            // — it would be a permission that appears to decide reviews and decides nothing.
+            // `view_confidential` is what a central HR team reads the register through: a review is
+            // stored restricted, so without it somebody sitting in no department sees an empty list.
+            'performance' => ['People', 'Performance', [...self::CRUD, 'manage', 'submit', 'view_confidential']],
+            // Promotions and transfers. `apply` IS SEPARATE FROM `manage` because applying a
+            // movement rewrites a personnel record — somebody's job, department and reporting line —
+            // and the clerk who raises the paperwork is not automatically the person who may do
+            // that. There is no `approve`: a movement is decided on its workflow stage.
+            'employee_movement' => ['People', 'Promotions & transfers', [...self::CRUD, 'manage', 'submit', 'apply', 'view_confidential']],
+            // Conduct. EVERY action here is marked sensitive below, because every one of them
+            // touches an allegation against a named person that may turn out to be untrue.
+            // `investigate` and `decide` are separate from each other on principle: the person who
+            // looks into what happened must not be the person who decides the sanction, and a
+            // company that wants them to be the same person grants both deliberately.
+            'disciplinary' => ['People', 'Disciplinary', [...self::CRUD, 'manage', 'investigate', 'decide', 'view_confidential']],
             'visitor' => ['People', 'Visitors', [...self::CRUD, 'manage', 'check_in', 'check_out']],
 
             // ------------------------------------------------------------- finance
@@ -291,7 +307,15 @@ final class PermissionCatalogue
             // resets rather than being treated as ordinary HR admin.
             $module === 'recruitment' && $action === 'hire',
             $module === 'employee_exit' && $action === 'complete',
-            $module === 'performance' && $action === 'view_confidential' => true,
+            $module === 'performance' && $action === 'view_confidential',
+            // Applying a movement rewrites somebody's job, department and reporting line — and the
+            // reporting line is what the approval engine routes on, so it is a permission that can
+            // quietly redirect whose inbox approvals land in.
+            $module === 'employee_movement' && $action === 'apply',
+            // The whole module. A disciplinary case is an allegation against a named person which
+            // the company may itself conclude is untrue, and there is no action on it — not even
+            // `view` — that an administrator should grant without being warned.
+            $module === 'disciplinary' => true,
             default => false,
         };
     }

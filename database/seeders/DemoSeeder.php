@@ -30,6 +30,7 @@ use App\Models\Meeting;
 use App\Models\Memo;
 use App\Models\Organization;
 use App\Models\OrgUnit;
+use App\Models\PerformanceReview;
 use App\Models\PermitType;
 use App\Models\Position;
 use App\Models\Project;
@@ -46,6 +47,7 @@ use App\Models\StockItem;
 use App\Models\Submittal;
 use App\Models\Task;
 use App\Models\TrainingCourse;
+use App\Models\TrainingRequirement;
 use App\Models\Transmittal;
 use App\Models\User;
 use App\Models\Vendor;
@@ -64,10 +66,12 @@ use App\Services\ClientService;
 use App\Services\ContractService;
 use App\Services\CorrectiveActionService;
 use App\Services\DeliverableService;
+use App\Services\DisciplinaryService;
 use App\Services\DocumentService;
 use App\Services\DocumentVersionService;
 use App\Services\DrawingService;
 use App\Services\EmployeeExitService;
+use App\Services\EmployeeMovementService;
 use App\Services\ExpenseService;
 use App\Services\FleetService;
 use App\Services\GoodsReceiptService;
@@ -83,6 +87,7 @@ use App\Services\MemoService;
 use App\Services\NcrService;
 use App\Services\OvertimeService;
 use App\Services\PaymentService;
+use App\Services\PerformanceReviewService;
 use App\Services\PermitService;
 use App\Services\PettyCashService;
 use App\Services\ProjectService;
@@ -91,6 +96,7 @@ use App\Services\PurchaseOrderService;
 use App\Services\PurchaseRequestService;
 use App\Services\QualityInspectionService;
 use App\Services\QuotationService;
+use App\Services\ReviewCycleService;
 use App\Services\RfiService;
 use App\Services\RfqService;
 use App\Services\RiskAssessmentService;
@@ -105,6 +111,7 @@ use App\Services\TemplateService;
 use App\Services\TimesheetService;
 use App\Services\ToolboxTalkService;
 use App\Services\TrainingRecordService;
+use App\Services\TrainingRequirementService;
 use App\Services\TransmittalService;
 use App\Services\VacancyService;
 use App\Services\VehicleDocumentService;
@@ -113,6 +120,7 @@ use App\Services\WarehouseService;
 use App\Services\WorkflowDefinitionService;
 use App\Support\Enums\ChangeDisposition;
 use App\Support\Enums\Decision;
+use App\Support\RoleTemplates;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Seeder;
@@ -327,6 +335,15 @@ class DemoSeeder extends Seeder
         // is still on her name in the asset register (§84).
         $this->seedMeridianHiring($meridian);
         $this->seedKestrelHiring($kestrel);
+
+        // Developing, moving and correcting people. After hiring because it reaches into what
+        // hiring produced — the new structural engineer is in the appraisal round, and the HSE
+        // Officer whose transfer is sitting in the Operations Director's inbox is only going
+        // anywhere once the night shift vacancy two chapters up is filled. Every approval below is
+        // the same engine again: a promotion and a signed-off appraisal are decided in the same
+        // inbox as a drawing, and neither register has an approve button of its own.
+        $this->seedMeridianDevelopment($meridian);
+        $this->seedKestrelDevelopment($kestrel);
 
         // The rows above were written straight to the database, so nothing observed them happening.
         // A demo whose record timelines are all blank teaches the wrong lesson about Engine 4 — the
@@ -686,6 +703,16 @@ class DemoSeeder extends Seeder
             // runs the office is also the document controller, which is the whole argument for
             // roles being additive rather than a single "user type" column (§9).
             $generalist->user?->assignRole($roles['document-controller']);
+
+            // And a fifth, which is the one that makes appraisals and conduct reachable here at all.
+            // Kestrel has no HR Manager post, and neither of the other two templates can stand in:
+            // `managing-director` grants `*.view` but not `disciplinary.view_confidential`, so the
+            // MD would open the conduct register and correctly see nothing; `hr-officer` deliberately
+            // carries nothing disciplinary and no confidential performance. Weakening either template
+            // to suit a company of eight would weaken it for the company of two hundred as well. The
+            // honest answer is that in a firm this size the person who runs HR IS the Finance & HR
+            // Officer, and the role model lets her be told so without a special case in the code.
+            $generalist->user?->assignRole($roles['hr-manager']);
 
             $this->setHeads([
                 $ops->id => $opsManager->id,
@@ -8608,6 +8635,757 @@ class DemoSeeder extends Seeder
         } finally {
             @unlink($path);
         }
+    }
+
+    // ================================================================= growing, moving, correcting
+
+    /**
+     * Meridian's development register: what the job requires, how people are appraised, how they
+     * move, and what happens when conduct goes wrong.
+     *
+     * FOUR THINGS ARE HERE TO BE DEMONSTRATED rather than merely populated.
+     *
+     *   - THE TRAINING MATRIX ANSWERS A QUESTION THE HSE REGISTER CANNOT. The certificates seeded
+     *     in the HSE chapter say what people HAVE; the requirements below say what the job DEMANDS,
+     *     and only the two together can answer "who has never done their confined-space training".
+     *     All three scopes are used — the whole company, a named team, a named position — because a
+     *     company that could only say "everybody needs this" would still be keeping the matrix in a
+     *     spreadsheet.
+     *
+     *   - AN APPRAISAL IS SIGNED OFF ON THE SAME ENGINE AS A DRAWING. Ngozi Eze's review goes the
+     *     whole way: released, self-assessed, marked by her lead, sent for sign-off, decided by the
+     *     lead's OWN manager in the same approvals inbox that decides documents and leave, and then
+     *     acknowledged by her. There is no `performance.approve` permission and no approve button on
+     *     the review — the decision happens at `approvals.decide` or it does not happen.
+     *
+     *   - APPROVED AND APPLIED ARE DIFFERENT DAYS. Three movements sit here in three different
+     *     states on purpose: one already written onto the personnel record, one agreed and waiting
+     *     for the first of next month, and one still in the Operations Director's inbox. The middle
+     *     one is the row worth opening — the org chart has NOT moved, and the nightly sweep is what
+     *     will move it.
+     *
+     *   - A CONDUCT CASE IS NOT READABLE BY THE PEOPLE AROUND IT. Every case below is restricted and
+     *     carries no department, so the subject's own line manager does not see it in their register
+     *     — the investigator reaches exactly one case, through the record-level grant that assigning
+     *     them wrote, and loses it again when the case closes (§68).
+     */
+    private function seedMeridianDevelopment(Organization $organization): void
+    {
+        $this->context->within($organization, function () use ($organization) {
+            $requirements = app(TrainingRequirementService::class);
+            $cycles = app(ReviewCycleService::class);
+            $reviews = app(PerformanceReviewService::class);
+            $movements = app(EmployeeMovementService::class);
+            $conduct = app(DisciplinaryService::class);
+
+            $staff = $this->staff();
+            $unit = $this->unitsByCode();
+            $place = $this->locationsByCode();
+            $post = Position::query()->get()->keyBy('code');
+            $course = TrainingCourse::query()->get()->keyBy('code');
+
+            $md = $this->accountOf($staff, 'MEI-0001');           // Adaeze Okonkwo
+            $opsDirector = $this->accountOf($staff, 'MEI-0003');  // Chinedu Balogun
+            $engManager = $this->accountOf($staff, 'MEI-0004');   // Farida Yusuf
+            $leadEngineer = $this->accountOf($staff, 'MEI-0005'); // Marcus Adeyemi
+            $ngozi = $this->accountOf($staff, 'MEI-0006');        // Ngozi Eze
+            $segun = $this->accountOf($staff, 'MEI-0007');        // Segun Afolabi
+            $ibrahim = $this->accountOf($staff, 'MEI-0009');      // Ibrahim Sule
+            $hseManager = $this->accountOf($staff, 'MEI-0013');   // Grace Ibrahim
+            $hr = $this->accountOf($staff, 'MEI-0017');           // Amina Tijani
+            $prcManager = $this->accountOf($staff, 'MEI-0019');   // Bisi Adeleke
+            $storesManager = $this->accountOf($staff, 'MEI-0026'); // Halima Yakubu
+
+            // ------------------------------------------------------------ what the job demands
+            // Written by the HSE Manager, who holds `hse_training.*` — not by HR. The company that
+            // decides a course is needed is the company that owns the risk, and the matrix is an
+            // HSE screen with an HR audience.
+            $requirements->create([
+                'training_course_id' => $course['IND']->id,
+                'scope' => TrainingRequirement::SCOPE_ORGANIZATION,
+                'is_mandatory' => true,
+                'grace_days' => 0,
+                'notes' => 'Nobody sets foot on a Meridian site, in any capacity, on a lapsed induction. '
+                    .'No grace period: this is the one that gets checked at the gate.',
+            ], $hseManager);
+
+            $requirements->create([
+                'training_course_id' => $course['H2S']->id,
+                'scope' => TrainingRequirement::SCOPE_ORG_UNIT,
+                'org_unit_id' => $unit['CON-DT']->id,
+                'is_mandatory' => true,
+                'grace_days' => 0,
+                'notes' => 'The terminal process area is a live hydrocarbon facility. Client requirement '
+                    .'as well as ours, and audited on their gate pass.',
+            ], $hseManager);
+
+            $requirements->create([
+                'training_course_id' => $course['WAH']->id,
+                'scope' => TrainingRequirement::SCOPE_POSITION,
+                'position_id' => $post['QAI']->id,
+                'is_mandatory' => true,
+                'grace_days' => 30,
+                'notes' => 'Inspectors witness welds at height on the pipe rack. Thirty days\' grace so a '
+                    .'refresher can be booked without pulling somebody off the job the day it lapses.',
+            ], $hseManager);
+
+            $requirements->create([
+                'training_course_id' => $course['CSE']->id,
+                'scope' => TrainingRequirement::SCOPE_POSITION,
+                'position_id' => $post['HSEO']->id,
+                'is_mandatory' => true,
+                'grace_days' => 0,
+                'notes' => 'An HSE Officer signs confined space permits. Signing one on a lapsed '
+                    .'certificate is the finding that closes a site.',
+            ], $hseManager);
+
+            $requirements->create([
+                'training_course_id' => $course['FAW']->id,
+                'scope' => TrainingRequirement::SCOPE_ORG_UNIT,
+                'org_unit_id' => $unit['HSE']->id,
+                'is_mandatory' => false,
+                'grace_days' => 60,
+                'notes' => 'Not statutory for the department, but the company keeps two qualified '
+                    .'first aiders in HSE at all times.',
+            ], $hseManager);
+
+            // ------------------------------------------------------------ the appraisal round
+            // The period is the six months that ENDED last month, so the round reads as a company
+            // appraising work that is finished rather than work still in progress.
+            $cycle = $cycles->create([
+                'name' => 'Mid-year review '.now()->year,
+                'description' => 'Engineering only. Construction, HSE and Quality run in September, after '
+                    .'the terminal campaign — which is precisely why a cycle takes a department list.',
+                'period_start' => now()->subMonths(6)->startOfMonth()->toDateString(),
+                'period_end' => now()->subMonth()->endOfMonth()->toDateString(),
+                'opens_on' => now()->subWeeks(3)->toDateString(),
+                'closes_on' => now()->addWeeks(3)->toDateString(),
+                'rating_min' => 1,
+                'rating_max' => 5,
+                'instructions' => 'Score against what the job actually asked for in the period, not against '
+                    .'the best six months anybody has ever had. A 3 is a person doing their job well. '
+                    .'Write the evidence in the comment — a bare number is not a review.',
+                'competencies' => [
+                    [
+                        'label' => 'Technical quality and self-checking',
+                        'description' => 'Calculations, drawings and models that survive checking. Errors '
+                            .'found by the checker rather than by the site.',
+                        'kind' => 'competency',
+                        'weight' => 25,
+                    ],
+                    [
+                        'label' => 'Safety in design',
+                        'description' => 'Designs out the hazard where it can be designed out, and says so '
+                            .'in the design risk assessment where it cannot.',
+                        'kind' => 'competency',
+                        'weight' => 20,
+                    ],
+                    [
+                        'label' => 'Delivery and ownership',
+                        'description' => 'Dates held, or trouble flagged early enough to do something about.',
+                        'kind' => 'competency',
+                        'weight' => 20,
+                    ],
+                    [
+                        'label' => 'Working with the site and with other disciplines',
+                        'kind' => 'competency',
+                        'weight' => 15,
+                    ],
+                    [
+                        'label' => 'Close out the Delta Terminal design review comments',
+                        'description' => 'All outstanding client comments on the civil and structural '
+                            .'package answered and reissued.',
+                        'kind' => 'objective',
+                        'weight' => 20,
+                    ],
+                    [
+                        // A question that lands on ONE person, because only one person holds the post.
+                        // Everybody else's review is opened without it — which is the difference
+                        // between a cycle and five loose forms.
+                        'label' => 'Checking and developing the design team',
+                        'description' => 'The standard of work leaving the section, and the engineers in it '
+                            .'getting better at it.',
+                        'kind' => 'competency',
+                        'position_id' => $post['LSE']->id,
+                    ],
+                ],
+            ], $hr);
+
+            // Engineering and everything under it, named unit by unit. A cycle covers the units it
+            // was given and not their children — HR ticked eight boxes on the open dialogue, which
+            // is what makes "engineering in June, everybody else in September" possible at all.
+            $cycles->open($cycle, $hr, collect(['ENG', 'ENG-CS', 'ENG-MP', 'ENG-EI', 'ENG-DC', 'ENG-CS-SD', 'ENG-CS-GT', 'ENG-MP-PD'])
+                ->map(fn (string $code) => $unit[$code]->id)->all());
+
+            $opened = PerformanceReview::query()
+                ->where('review_cycle_id', $cycle->getKey())
+                ->with(['status', 'items', 'employee', 'reviewer'])
+                ->get()
+                ->keyBy('employee_id');
+
+            $reviewFor = function (string $employeeNo) use ($opened, $staff): PerformanceReview {
+                $review = $opened[$staff[$employeeNo]->getKey()] ?? null;
+
+                if ($review === null) {
+                    throw new \RuntimeException('The demo expected a review to have opened for '.$employeeNo.'.');
+                }
+
+                return $review;
+            };
+
+            // --- all the way through, and signed off by the reviewer's own manager
+            $ngoziReview = $reviewFor('MEI-0006');
+            $reviews->release($ngoziReview, $hr);
+
+            $reviews->saveSelfAssessment($ngoziReview, $this->reviewScores($ngoziReview, 'self', [
+                [4, 'Two of my drawings came back from the checker with comments this period; both were '
+                    .'annotation, not calculation.'],
+                [4, 'Raised the temporary works loading on the pipe rack at the design review rather than '
+                    .'leaving it to the method statement.'],
+                [3, 'The foundation package slipped a week. I flagged it late and I should have flagged it '
+                    .'when the geotechnical data changed.'],
+                [4, 'Sat with the site team at Warri twice to walk the rebar detail.'],
+                [3, 'Eleven of fourteen client comments answered and reissued. Three are with the client.'],
+            ]), 'A solid six months. The foundation slip is the thing I want to do differently — I know '
+                .'now what the early warning looks like.', $ngozi);
+
+            $reviews->submitSelfAssessment($ngoziReview->refresh(), $ngozi);
+
+            $reviews->saveManagerReview($ngoziReview->refresh(), $this->reviewScores($ngoziReview, 'manager', [
+                [4, 'Agreed. The checking standard is high and it has been consistent all period.'],
+                [5, 'Better than she gives herself credit for. The temporary works catch saved a scaffold '
+                    .'design that would have been wrong on site.'],
+                [3, 'Agreed, and agreed about the cause. We have talked about what the early warning is.'],
+                [4, 'The site asks for her by name, which is the only measure of this that means anything.'],
+                [4, 'Three with the client is not three outstanding. Marked on what was in her control.'],
+            ]), [
+                'manager_comments' => 'A strong period. Ngozi is the engineer in the section I would put in '
+                    .'front of a client without preparing her first.',
+                'overall_rating' => 4,
+                'development_plan' => 'Lead the structural package on the next project outright, with me '
+                    .'checking rather than directing. COREN professional interview in the next window — '
+                    .'the company pays the fee and gives study leave.',
+            ], $leadEngineer);
+
+            $reviews->submitForSignOff($ngoziReview->refresh(), $leadEngineer);
+
+            // The lead engineer's OWN manager. Nobody signs off the rating they wrote.
+            $this->decide(
+                $ngoziReview->refresh(),
+                $engManager,
+                Decision::Approve,
+                'Agreed and consistent with the rest of the section. Put the COREN fee in next quarter\'s '
+                    .'training budget.',
+            );
+
+            $reviews->acknowledge(
+                $ngoziReview->refresh(),
+                'Seen and agreed. Happy with the development plan, and I will take the professional '
+                    .'interview in the next window.',
+                $ngozi,
+            );
+
+            // --- with the manager, half marked. The commonest state in appraisal season.
+            $ibrahimReview = $reviewFor('MEI-0009');
+            $reviews->release($ibrahimReview, $hr);
+            $reviews->saveSelfAssessment($ibrahimReview, $this->reviewScores($ibrahimReview, 'self', [
+                [4, 'No calculation errors returned this period.'],
+                [4, 'Wrote the design risk assessment for the pile test rig myself rather than copying the '
+                    .'last one.'],
+                [4, 'Pile test programme delivered inside the window the rig was on site.'],
+                [3, 'I could talk to the piping team earlier than I do.'],
+                [2, 'Not mine — the geotechnical comments are closed, the civil ones are not.'],
+            ]), 'The last objective was written for the section rather than for me. Worth splitting next '
+                .'time.', $ibrahim);
+            $reviews->submitSelfAssessment($ibrahimReview->refresh(), $ibrahim);
+            $reviews->saveManagerReview($ibrahimReview->refresh(), $this->reviewScores($ibrahimReview, 'manager', [
+                [4, 'Agreed.'],
+                [5, 'The pile test risk assessment is now the one the section copies.'],
+                null,
+                null,
+                null,
+            ]), [
+                'manager_comments' => 'Part written — finishing this after the pile test results are in.',
+            ], $leadEngineer);
+
+            // --- with the employee, part written
+            $segunReview = $reviewFor('MEI-0007');
+            $reviews->release($segunReview, $hr);
+            $reviews->saveSelfAssessment($segunReview, $this->reviewScores($segunReview, 'self', [
+                [4, 'Stress analysis on the transfer lines reissued after the routing change, no comments '
+                    .'returned.'],
+                [3, 'Still to write up the hot-surface guarding decision properly.'],
+                null,
+                null,
+                null,
+            ]), null, $segun);
+
+            // --- released and not started; and the rest of Engineering still at "Not started",
+            // because HR releases in waves rather than in one press.
+            $reviews->release($reviewFor('MEI-0010'), $hr);
+
+            // ------------------------------------------------------------ movements
+            // --- applied: the personnel record has actually moved
+            $transfer = $movements->create([
+                'employee_id' => $staff['MEI-0024']->getKey(),      // Chioma Nwachukwu
+                'kind' => 'transfer',
+                'to_org_unit_id' => $unit['HR']->id,
+                'to_supervisor_id' => $staff['MEI-0017']->getKey(), // Amina Tijani
+                'effective_on' => now()->subWeeks(2)->toDateString(),
+                'reason' => 'HR carries the recruitment campaign and two exits at once with one person in '
+                    .'the department. Administration can cover the front desk between them.',
+                'notes' => 'Permanent. Chioma keeps the Office Administrator title and grade; this is a '
+                    .'department and reporting-line change only.',
+            ], $hr);
+
+            $movements->submit($transfer, $hr);
+
+            // Raised by HR, so the route resolves HR's own line manager — the Managing Director.
+            $this->decide(
+                $transfer->refresh(),
+                $md,
+                Decision::Approve,
+                'Agreed. Revisit it when the campaign is finished and the HR Officer head is filled.',
+            );
+
+            // --- approved and WAITING. The org chart has not moved and will not until the first.
+            $secondment = $movements->create([
+                'employee_id' => $staff['MEI-0007']->getKey(),      // Segun Afolabi
+                'kind' => 'secondment',
+                'to_org_unit_id' => $unit['CON-DT']->id,
+                'to_location_id' => $place['SITE-DT']->id,
+                'to_supervisor_id' => $staff['MEI-0012']->getKey(), // Kelechi Nwosu
+                'effective_on' => now()->addMonth()->startOfMonth()->toDateString(),
+                'ends_on' => now()->addMonths(7)->endOfMonth()->toDateString(),
+                'reason' => 'Pipe rack erection needs a piping engineer resident at Warri for the duration. '
+                    .'Segun wrote the stress analysis and knows the routing.',
+                'notes' => 'Six months. He returns to Piping Design at the end of it unless a further '
+                    .'movement says otherwise — a secondment ending is not a transfer back.',
+            ], $engManager);
+
+            $movements->submit($secondment, $engManager);
+
+            $this->decide(
+                $secondment->refresh(),
+                $opsDirector,
+                Decision::Approve,
+                'Approved for the erection period only. Site allowance applies from the effective date, '
+                    .'not from today.',
+            );
+
+            // --- still in somebody's inbox. Ties back to the night-shift HSE head being advertised.
+            $recall = $movements->create([
+                'employee_id' => $staff['MEI-0014']->getKey(),      // Emeka Duru
+                'kind' => 'transfer',
+                'to_location_id' => $place['HQ']->id,
+                'effective_on' => now()->addWeeks(6)->toDateString(),
+                'reason' => 'Once the night shift officer is appointed, Emeka comes back to Head Office to '
+                    .'run the training matrix and the permit audit programme.',
+                'notes' => 'Department and reporting line unchanged — he stays in HSE under Grace. This is '
+                    .'a base change and nothing else.',
+            ], $hseManager);
+
+            $movements->submit($recall, $hseManager);
+
+            // Deliberately left undecided: it is in Chinedu Balogun's My Approvals, next to the
+            // vacancy the hiring chapter left there.
+
+            // --- a draft nobody has submitted. A register with no drafts in it is a register
+            //     somebody tidied for the demo.
+            $movements->create([
+                'employee_id' => $staff['MEI-0010']->getKey(),      // Helen Obi
+                'kind' => 'secondment',
+                'to_org_unit_id' => $unit['CON-DT']->id,
+                'to_location_id' => $place['SITE-DT']->id,
+                'effective_on' => now()->addMonths(2)->startOfMonth()->toDateString(),
+                'ends_on' => now()->addMonths(5)->endOfMonth()->toDateString(),
+                'reason' => 'Site document control during the erection campaign. Still being discussed with '
+                    .'Helen — do not submit until she has answered.',
+            ], $engManager);
+
+            // ------------------------------------------------------------ conduct
+            //
+            // First, a role the templates do not ship, because this is the point at which a company
+            // has to make a decision the platform cannot make for it. `hr-manager` is the only
+            // template carrying `disciplinary.*`, and it carries `investigate` and `decide`
+            // together. Meridian does not want them together: the person who gathers the facts
+            // about a tipper leaving the yard unpinned should be the HSE Manager, who knows what a
+            // load restraint failure looks like, and the person who hands down the sanction should
+            // not be that same person.
+            //
+            // So Meridian makes a role. `view` and `investigate`, no `decide`, and deliberately NO
+            // `view_confidential` — which is what keeps the register empty for the people holding
+            // it. A conduct case has no department and no parent to inherit through, so the only
+            // thing that ever makes one readable to an investigator is the Gate 4 row
+            // `assignInvestigator()` writes for that one record, and the only thing that keeps it
+            // readable is that the case is still theirs. Give these people `view_confidential` and
+            // the demonstration collapses: they would read every case in the company.
+            //
+            // Worth saying plainly, because the first version of this chapter got it wrong: the
+            // grant alone is not enough. Gate 4 opens a record to somebody who already holds the
+            // permission — it does not hand out the permission. An investigator with an ACL row and
+            // no `disciplinary.view` is stopped at gate 2 and cannot open the case they were
+            // formally put on, which is a plausible thing to ship and an awful thing to discover
+            // during a hearing.
+            $investigatorRole = Role::query()->firstOrNew([
+                'organization_id' => $organization->id,
+                'slug' => 'conduct-investigator',
+            ]);
+            $investigatorRole->fill([
+                'name' => 'Conduct Investigator',
+                'description' => 'Gathers the facts on a conduct case they have been assigned, and decides nothing. '
+                    .'Reaches only the cases they hold, never the register.',
+                'level' => 55,
+                'is_system' => false,
+                'is_active' => true,
+            ])->save();
+            $investigatorRole->syncGrants(RoleTemplates::expand([
+                'disciplinary.view' => 'organization',
+                'disciplinary.investigate' => 'organization',
+            ]));
+
+            // Organization scope on both, and it still reaches nothing by itself. That is the point
+            // worth looking at in the demo: breadth of scope is gate 3, and gate 5 is a separate
+            // question that a wide scope does not answer.
+            $hseManager->assignRole($investigatorRole);
+            $prcManager->assignRole($investigatorRole);
+
+            // --- heard, decided, appealed, reduced, closed. The whole arc on one record.
+            $tailgate = $conduct->create([
+                'employee_id' => $staff['MEI-0023']->getKey(),      // Musa Garba
+                'category' => 'safety',
+                'severity' => 'serious',
+                'incident_on' => now()->subWeeks(5)->toDateString(),
+                'reported_on' => now()->subWeeks(5)->addDay()->toDateString(),
+                'summary' => 'The tipper left the Ikeja yard with the tailgate unpinned and shed two lengths '
+                    .'of scaffold tube onto Acme Road. Nobody was hurt. Reported by the Fleet Manager the '
+                    .'following morning after a member of the public telephoned the yard.',
+            ], $hr);
+
+            $conduct->assignInvestigator($tailgate, $hseManager, $hr);
+            $conduct->recordInvestigation(
+                $tailgate->refresh(),
+                'Gate CCTV shows the vehicle leaving at 06:42 with the tailgate down. The pre-use check '
+                    .'sheet for that morning is signed and records the tailgate as secure, which it was not. '
+                    .'The driver says he was asked to leave ahead of the yard supervisor arriving and did '
+                    .'the check on the move. The load restraint toolbox talk was delivered to him in March '
+                    .'and he signed for it.',
+                $hseManager,
+            );
+
+            $conduct->scheduleHearing($tailgate->refresh(), now()->subWeeks(3)->toDateString(), $hr);
+            $conduct->recordHearing(
+                $tailgate->refresh(),
+                'Heard by the HR Manager with the Fleet Manager present. Musa accepted that he signed the '
+                    .'check sheet before doing the check. He raised, and it was accepted, that the yard is '
+                    .'routinely under pressure to release vehicles before the supervisor arrives.',
+                $hr,
+            );
+
+            $conduct->decide($tailgate->refresh(), [
+                'outcome' => 'written_warning',
+                'outcome_notes' => 'Signing a check sheet for a check that was not done is the part that '
+                    .'carries the warning, not the tailgate. Live for twelve months. Fleet to change the '
+                    .'release procedure so no vehicle leaves before the supervisor has countersigned.',
+                'sanction_expires_on' => now()->addMonths(12)->toDateString(),
+            ], $hr);
+
+            $conduct->recordAppeal($tailgate->refresh(), now()->subWeeks(2)->toDateString(), $hr);
+            $conduct->decideAppeal($tailgate->refresh(), [
+                'appeal_outcome' => 'Upheld in part',
+                'appeal_notes' => 'Heard by the Operations Director. The finding stands — the check sheet was '
+                    .'signed untruthfully. The sanction does not: the yard release pressure was a company '
+                    .'failing before it was a driver\'s, and the procedure has since been changed. Reduced '
+                    .'to a verbal warning, live for six months from the original decision.',
+                'outcome' => 'verbal_warning',
+                'sanction_expires_on' => now()->addMonths(3)->toDateString(),
+            ], $opsDirector);
+
+            $conduct->close($tailgate->refresh(), $hr);
+
+            // --- live, and in an investigator's hands right now
+            $lateness = $conduct->create([
+                'employee_id' => $staff['MEI-0020']->getKey(),      // Uche Nnamdi
+                'category' => 'attendance',
+                'severity' => 'minor',
+                'incident_on' => now()->subWeeks(2)->toDateString(),
+                'reported_on' => now()->subWeeks(2)->addDays(2)->toDateString(),
+                'summary' => 'Nine late starts in six weeks, between forty minutes and two hours, against a '
+                    .'clocking record that shows no corresponding early finishes. Two informal conversations '
+                    .'have already been held by the Procurement Manager and recorded in his one-to-one notes.',
+            ], $hr);
+
+            $conduct->assignInvestigator($lateness, $prcManager, $hr);
+            $conduct->recordInvestigation(
+                $lateness->refresh(),
+                'Attendance register pulled for the period and agrees with the allegation. Uche has told me '
+                    .'his mother is in hospital in Ibadan and he has been travelling at weekends. He has not '
+                    .'asked for anything — no leave request, no flexible hours. To be put to him at the '
+                    .'hearing that the company would rather have had the conversation than the lateness.',
+                $prcManager,
+            );
+            $conduct->scheduleHearing($lateness->refresh(), now()->addWeek()->toDateString(), $hr);
+
+            // --- withdrawn, and the record kept. An allegation that turns out to be wrong is not
+            //     deleted — it is answered, on the file, where the answer can be found again.
+            $missingDrill = $conduct->create([
+                'employee_id' => $staff['MEI-0021']->getKey(),      // Sadiq Bello
+                'category' => 'property',
+                'severity' => 'serious',
+                'incident_on' => now()->subWeeks(4)->toDateString(),
+                'reported_on' => now()->subWeeks(4)->addDay()->toDateString(),
+                'summary' => 'A cordless core drill issued to the warehouse was recorded as not returned and '
+                    .'the issue note carries Sadiq\'s signature.',
+            ], $hr);
+
+            $conduct->withdraw(
+                $missingDrill,
+                'The drill was found in the Warri container on the next stock count, returned by the site '
+                    .'team without a return note. Sadiq had nothing to answer and should not have been asked '
+                    .'to. The stock count reference is on the inventory record.',
+                $storesManager,
+            );
+        });
+    }
+
+    /**
+     * The same four registers in a company of eight — Kestrel.
+     *
+     * DELIBERATELY THINNER, and the thinness is the point. Two training requirements rather than
+     * five, one appraisal round covering the whole company rather than one department at a time, one
+     * movement, one conduct case. A platform that needed an EPC contractor's volume of data before
+     * its screens made sense would be unusable for most of the companies it is meant for (§73).
+     *
+     * ONE ROW HERE IS WORTH OPENING: Marianne Ellis. She already wears four hats, and the fifth —
+     * added in the structure chapter — is what makes this chapter possible at all. Kestrel has no HR
+     * Manager post, so the conduct register and the appraisal round would otherwise be unreachable
+     * by anybody in the company: the MD's `*.view` does not carry `disciplinary.view_confidential`,
+     * and the HR Officer template deliberately carries nothing disciplinary at all. The answer is not
+     * to weaken either template. It is that in a company of eight the person who runs HR IS the
+     * Finance & HR Officer, and roles are additive so she can be told so (§9).
+     */
+    private function seedKestrelDevelopment(Organization $organization): void
+    {
+        $this->context->within($organization, function () use ($organization) {
+            $requirements = app(TrainingRequirementService::class);
+            $cycles = app(ReviewCycleService::class);
+            $reviews = app(PerformanceReviewService::class);
+            $movements = app(EmployeeMovementService::class);
+            $conduct = app(DisciplinaryService::class);
+
+            $staff = $this->staff();
+            $unit = $this->unitsByCode();
+            $place = $this->locationsByCode();
+            $course = TrainingCourse::query()->get()->keyBy('code');
+
+            $md = $this->accountOf($staff, 'KFM-001');                // Rowan Calder
+            $maintManager = $this->accountOf($staff, 'KFM-003');      // Duncan Reilly
+            $complianceManager = $this->accountOf($staff, 'KFM-004'); // Nadia Osei
+            $callum = $this->accountOf($staff, 'KFM-005');            // Callum Whitfield
+            $hr = $this->accountOf($staff, 'KFM-008');                // Marianne Ellis
+
+            // ------------------------------------------------------------ what the job demands
+            $requirements->create([
+                'training_course_id' => $course['ASB']->id,
+                'scope' => TrainingRequirement::SCOPE_ORGANIZATION,
+                'is_mandatory' => true,
+                'grace_days' => 0,
+                'notes' => 'Every building on the portfolio predates 2000. Everybody, including the office, '
+                    .'because the office attends site.',
+            ], $complianceManager);
+
+            $requirements->create([
+                'training_course_id' => $course['IPAF']->id,
+                'scope' => TrainingRequirement::SCOPE_ORG_UNIT,
+                'org_unit_id' => $unit['MNT-ELE']->id,
+                'is_mandatory' => true,
+                'grace_days' => 14,
+                'notes' => 'Atrium and plant room luminaire access. Fourteen days\' grace only because the '
+                    .'nearest course runs monthly.',
+            ], $complianceManager);
+
+            // ------------------------------------------------------------ one round, everybody
+            $cycle = $cycles->create([
+                'name' => 'Annual review '.now()->year,
+                'description' => 'Everybody, once a year, in the quiet fortnight after the summer shutdowns. '
+                    .'Four questions, because a company of eight does not need twenty.',
+                'period_start' => now()->subMonths(12)->startOfMonth()->toDateString(),
+                'period_end' => now()->subMonth()->endOfMonth()->toDateString(),
+                'opens_on' => now()->subWeeks(2)->toDateString(),
+                'closes_on' => now()->addMonth()->toDateString(),
+                'rating_min' => 1,
+                'rating_max' => 4,
+                'instructions' => 'Four points, not five, so there is no middle to hide in. Say what you '
+                    .'would like to be doing next year — it is the question this company is actually '
+                    .'able to act on.',
+                'competencies' => [
+                    ['label' => 'Technical work and first-time fixes', 'kind' => 'competency', 'weight' => 30],
+                    ['label' => 'Safe working and permit discipline', 'kind' => 'competency', 'weight' => 30],
+                    ['label' => 'Tenants and the client', 'kind' => 'competency', 'weight' => 20],
+                    ['label' => 'Reliability and cover for each other', 'kind' => 'competency', 'weight' => 20],
+                ],
+            ], $hr);
+
+            // No department list at all: the whole company in one press. The Managing Director has
+            // nobody above him to answer the manager half, so no review opens for him — reported on
+            // screen rather than opened blind.
+            $cycles->open($cycle, $hr);
+
+            $opened = PerformanceReview::query()
+                ->where('review_cycle_id', $cycle->getKey())
+                ->with(['status', 'items', 'employee', 'reviewer'])
+                ->get()
+                ->keyBy('employee_id');
+
+            $callumReview = $opened[$staff['KFM-005']->getKey()];
+            $erinReview = $opened[$staff['KFM-006']->getKey()];
+
+            $reviews->release($callumReview, $hr);
+            $reviews->saveSelfAssessment($callumReview, $this->reviewScores($callumReview, 'self', [
+                [3, 'First-time fix rate is up on the chiller calls since the changeover.'],
+                [4, 'I have not started a job on somebody else\'s permit this year and I have said so twice '
+                    .'when asked to.'],
+                [3, 'The Trafford Point tenants ask for me, which I take as the measure.'],
+                [4, 'Covered Erin\'s call-outs in July and August.'],
+            ]), 'I would like to do the electrical qualification next year and be able to cover both sides.', $callum);
+            $reviews->submitSelfAssessment($callumReview->refresh(), $callum);
+
+            $reviews->saveManagerReview($callumReview->refresh(), $this->reviewScores($callumReview, 'manager', [
+                [3, 'Agreed. The chiller work is noticeably better since he did the changeover himself.'],
+                [4, 'He is the one who says no, and he is right to.'],
+                [3, 'Agreed.'],
+                [4, 'Carried the summer on his own for six weeks.'],
+            ]), [
+                'manager_comments' => 'Callum is the technician I would keep if I could only keep one. The '
+                    .'electrical qualification is worth the company paying for and I have said so to Rowan.',
+                'overall_rating' => 3.5,
+                'development_plan' => 'City & Guilds 2365 starting in the autumn intake, company paid, one '
+                    .'day a week release. Reviewed at the six-month point rather than waiting a year.',
+            ], $maintManager);
+
+            $reviews->submitForSignOff($callumReview->refresh(), $maintManager);
+
+            // The Maintenance Manager reports to the Managing Director, so sign-off is the MD's —
+            // the same route resolution as Meridian, in a company with two levels instead of four.
+            $this->decide(
+                $callumReview->refresh(),
+                $md,
+                Decision::Approve,
+                'Agreed, including the course. Put it through as a training cost against the contract '
+                    .'overhead rather than as a one-off.',
+            );
+
+            $reviews->acknowledge($callumReview->refresh(), 'Seen. Thanks for backing the course.', $callum);
+
+            $reviews->release($erinReview, $hr);
+
+            // ------------------------------------------------------------ one movement, applied
+            $rebase = $movements->create([
+                'employee_id' => $staff['KFM-006']->getKey(),   // Erin Doyle
+                'kind' => 'transfer',
+                'to_location_id' => $place['MCR']->id,
+                'effective_on' => now()->subWeek()->toDateString(),
+                'reason' => 'The Manchester portfolio has grown by two buildings and the Leeds depot run was '
+                    .'costing an hour a day each way. Erin asked to be based at Trafford Point.',
+                'notes' => 'Base change only — still Electrical Team, still reporting to Duncan. The Leeds '
+                    .'spares cage remains Duncan\'s.',
+            ], $maintManager);
+
+            $movements->submit($rebase, $maintManager);
+            $this->decide(
+                $rebase->refresh(),
+                $md,
+                Decision::Approve,
+                'Agreed. Mileage claims from Manchester from the effective date.',
+            );
+
+            // ------------------------------------------------------------ one conduct case
+            //
+            // The same bespoke role as Meridian, for a reason that is sharper here. Kestrel has one
+            // person holding `hr-manager` and she is also the Finance Officer; if she investigated
+            // her own cases as well as deciding them, a conduct file at this company would be one
+            // person's account of one person's judgement. Splitting investigating from deciding
+            // costs a role and no code — which is the answer to "we are too small for that", and
+            // the reason `hr-manager` ships them together rather than apart (§47).
+            $investigatorRole = Role::query()->firstOrNew([
+                'organization_id' => $organization->id,
+                'slug' => 'conduct-investigator',
+            ]);
+            $investigatorRole->fill([
+                'name' => 'Conduct Investigator',
+                'description' => 'Gathers the facts on a conduct case they have been assigned, and decides nothing. '
+                    .'Reaches only the cases they hold, never the register.',
+                'level' => 55,
+                'is_system' => false,
+                'is_active' => true,
+            ])->save();
+            $investigatorRole->syncGrants(RoleTemplates::expand([
+                'disciplinary.view' => 'organization',
+                'disciplinary.investigate' => 'organization',
+            ]));
+
+            $complianceManager->assignRole($investigatorRole);
+
+            $permit = $conduct->create([
+                'employee_id' => $staff['KFM-005']->getKey(),   // Callum Whitfield
+                'category' => 'safety',
+                'severity' => 'minor',
+                'incident_on' => now()->subMonths(4)->toDateString(),
+                'reported_on' => now()->subMonths(4)->addDays(2)->toDateString(),
+                'summary' => 'Isolated and drained a heating circuit at Trafford Point on a permit that had '
+                    .'expired at midnight. The isolation itself was correct and was proved; the paperwork '
+                    .'was a day out of date.',
+            ], $hr);
+
+            $conduct->assignInvestigator($permit, $complianceManager, $hr);
+            $conduct->recordInvestigation(
+                $permit->refresh(),
+                'The permit was raised for a two-day window and the job ran to three. Callum proved the '
+                    .'isolation, locked off and tagged correctly — the physical control was never absent. '
+                    .'The permit system at the time had no reminder before expiry, which it now does.',
+                $complianceManager,
+            );
+
+            $conduct->decide($permit->refresh(), [
+                'outcome' => 'informal_advice',
+                'outcome_notes' => 'No sanction. Advice given about extending a permit rather than working '
+                    .'past it, and the permit register now warns the day before expiry. Recorded because a '
+                    .'permit breach that leaves no record is one nobody learns from.',
+            ], $hr);
+
+            $conduct->close($permit->refresh(), $hr);
+        });
+    }
+
+    /**
+     * Score sheet rows for one side of a review, keyed by review item id.
+     *
+     * The answers are given in item ORDER rather than by id, because the ids are whatever the cycle
+     * happened to mint and a seeder that hard-coded them would break the first time a competency was
+     * added. A `null` answer is a question nobody has reached yet — which is what a part-finished
+     * review looks like, and the state `submitForSignOff()` exists to refuse.
+     *
+     * @param  array<int,array{0:float|int|null,1:string|null}|null>  $answers
+     * @return array<int,array<string,mixed>>
+     */
+    private function reviewScores(PerformanceReview $review, string $side, array $answers): array
+    {
+        $rows = [];
+
+        foreach ($review->items()->orderBy('sequence')->orderBy('id')->get()->values() as $index => $item) {
+            $answer = $answers[$index] ?? null;
+
+            if ($answer === null) {
+                continue;
+            }
+
+            $rows[$item->getKey()] = [
+                $side.'_score' => $answer[0],
+                $side.'_comment' => $answer[1] ?? null,
+            ];
+        }
+
+        return $rows;
     }
 
     /**

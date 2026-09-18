@@ -50,3 +50,21 @@ Schedule::command('assets:sweep')
     ->withoutOverlapping(30)
     ->runInBackground()
     ->description('Warn about maintenance due and vehicle documents expiring');
+
+/*
+ * The one scheduled job on this list that CHANGES data, which is why it is called out here.
+ *
+ * An approved promotion or transfer waits for its effective date; this is what writes it onto the
+ * personnel record when the date arrives. Losing the cron for a week therefore costs a week of people
+ * sitting in the wrong position and reporting to the wrong manager — not a week of missed reminders.
+ * The command catches up on the next run rather than skipping what it missed, and running it by hand
+ * is the intended recovery.
+ *
+ * 00:30 because a movement effective on the first of the month should be true when the first of the
+ * month starts, and because that is the quietest half hour on a shared host.
+ */
+Schedule::command('movements:apply')
+    ->dailyAt('00:30')
+    ->withoutOverlapping(30)
+    ->runInBackground()
+    ->description('Apply approved employee movements that have reached their effective date');

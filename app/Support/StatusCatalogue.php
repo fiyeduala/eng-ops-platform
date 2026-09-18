@@ -1198,6 +1198,89 @@ final class StatusCatalogue
                 ],
                 'transitions' => [],
             ],
+
+            // --- Phase 6, part 4: development, movement and conduct ------------------
+
+            /*
+             * A review round. `open` is the only state in which reviews can be raised against it,
+             * and closing it is deliberate rather than a date passing: a cycle that closed itself on
+             * `closes_on` would strand every review still in somebody's inbox, and the last week of
+             * a review round is exactly when the stragglers are chased.
+             */
+            'review_cycle' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'open' => ['label' => 'Open', 'color' => 'brand'],
+                    'closed' => ['label' => 'Closed', 'color' => 'success', 'terminal' => true],
+                    'cancelled' => ['label' => 'Cancelled', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [],
+            ],
+
+            /*
+             * One person's review, and the states are the HANDOVERS: who is holding it right now.
+             * `self_assessment` is with the employee, `manager_review` is with their reviewer, and
+             * `submitted` is with whoever the company routes sign-off to. A single "in progress"
+             * status would make the only question anybody asks of this register — whose desk is it
+             * on — unanswerable.
+             *
+             * `completed` is the approved state. Acknowledgement is a timestamp rather than a status
+             * because it happens AFTER sign-off and is the employee's act, not the process's: a
+             * review nobody acknowledged is still a completed review, and pretending otherwise
+             * leaves every review of somebody who left in March permanently unfinished.
+             */
+            'performance_review' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Not started', 'color' => 'neutral', 'initial' => true],
+                    'self_assessment' => ['label' => 'With the employee', 'color' => 'brand'],
+                    'manager_review' => ['label' => 'With the manager', 'color' => 'brand'],
+                    'submitted' => ['label' => 'Awaiting sign-off', 'color' => 'warning'],
+                    'completed' => ['label' => 'Completed', 'color' => 'success', 'terminal' => true],
+                    'rejected' => ['label' => 'Not accepted', 'color' => 'danger', 'terminal' => true],
+                    'cancelled' => ['label' => 'Cancelled', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [],
+            ],
+
+            /*
+             * A promotion or transfer. `approved` AND `applied` ARE BOTH NEEDED AND ARE NOT THE SAME
+             * THING: the first says the company agreed, the second says the personnel record has
+             * actually been rewritten, and between them sits every movement agreed in September to
+             * take effect in January. A register that collapsed them could not answer "what is
+             * agreed and still to happen", which is the whole reason HR opens it.
+             */
+            'employee_movement' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'submitted' => ['label' => 'Awaiting approval', 'color' => 'brand'],
+                    'approved' => ['label' => 'Approved', 'color' => 'warning'],
+                    'applied' => ['label' => 'Applied', 'color' => 'success', 'terminal' => true],
+                    'rejected' => ['label' => 'Not approved', 'color' => 'danger', 'terminal' => true],
+                    'cancelled' => ['label' => 'Cancelled', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [],
+            ],
+
+            /*
+             * A disciplinary case. The statuses are the stages of a fair process, in order, and they
+             * are separate because skipping one is the thing that makes a dismissal unfair: an
+             * allegation is investigated before it is heard, and heard before it is decided.
+             *
+             * `decided` is not terminal and `closed` is. A case stays open after the outcome because
+             * an appeal may arrive, and a register that closed itself on the decision would have
+             * nowhere to put one.
+             */
+            'disciplinary_case' => [
+                'statuses' => [
+                    'open' => ['label' => 'Open', 'color' => 'brand', 'initial' => true],
+                    'investigating' => ['label' => 'Under investigation', 'color' => 'warning'],
+                    'hearing' => ['label' => 'Hearing arranged', 'color' => 'warning'],
+                    'decided' => ['label' => 'Decided', 'color' => 'neutral'],
+                    'closed' => ['label' => 'Closed', 'color' => 'success', 'terminal' => true],
+                    'withdrawn' => ['label' => 'Withdrawn', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [],
+            ],
         ];
     }
 

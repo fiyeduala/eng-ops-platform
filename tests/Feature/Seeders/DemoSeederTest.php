@@ -7,29 +7,38 @@ namespace Tests\Feature\Seeders;
 use App\Engines\Access\OrganizationContext;
 use App\Models\Announcement;
 use App\Models\Applicant;
+use App\Models\Approval;
 use App\Models\AttendanceRecord;
+use App\Models\DisciplinaryCase;
+use App\Models\Employee;
 use App\Models\EmployeeChecklist;
 use App\Models\EmployeeExit;
+use App\Models\EmployeeMovement;
 use App\Models\LeaveRequest;
 use App\Models\Meeting;
 use App\Models\Memo;
 use App\Models\Organization;
 use App\Models\OvertimeRequest;
+use App\Models\PerformanceReview;
 use App\Models\Project;
 use App\Models\ProjectMember;
 use App\Models\Status;
 use App\Models\Task;
 use App\Models\Timesheet;
+use App\Models\TrainingRequirement;
 use App\Models\User;
 use App\Models\Vacancy;
 use App\Models\WorkflowStageInstance;
 use App\Services\EmployeeExitService;
 use App\Services\TaskService;
+use App\Services\TrainingRequirementService;
+use App\Support\Enums\Decision;
 use Database\Seeders\DemoSeeder;
 use Database\Seeders\PermissionSeeder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
@@ -653,6 +662,186 @@ final class DemoSeederTest extends TestCase
         // And nothing was erased: the personnel record and the leaving list are both still there.
         $this->assertNotNull($exit->checklist);
         $this->assertGreaterThan(0, $exit->checklist->items->count());
+    }
+
+    #[Test]
+    public function the_training_matrix_says_what_the_job_demands_and_not_only_what_people_hold(): void
+    {
+        foreach ([$this->meridian, $this->kestrel] as $organization) {
+            $scopes = $this->within($organization, fn () => TrainingRequirement::query()->get()->countBy('scope')->all());
+
+            $this->assertArrayHasKey(TrainingRequirement::SCOPE_ORGANIZATION, $scopes,
+                $organization->name.' requires no course of everybody.');
+            $this->assertArrayHasKey(TrainingRequirement::SCOPE_ORG_UNIT, $scopes,
+                $organization->name.' requires no course of a particular department.');
+        }
+
+        // Meridian uses the third scope as well. A demo that only ever said "everybody needs this"
+        // would show a matrix a spreadsheet could have produced.
+        $meridianScopes = $this->within($this->meridian, fn () => TrainingRequirement::query()->get()->countBy('scope')->all());
+        $this->assertArrayHasKey(TrainingRequirement::SCOPE_POSITION, $meridianScopes,
+            'No Meridian course is required of a particular job.');
+
+        // And the matrix answers what the certificate register cannot. `gaps` counts mandatory
+        // courses somebody has never held or has let lapse — a question that can only be asked from
+        // the requirement side, because a missing certificate leaves no row behind to find.
+        $rows = $this->within($this->meridian, function () {
+            $service = app(TrainingRequirementService::class);
+
+            return $service->matrix(
+                Employee::query()->active()->with(['position', 'orgUnit'])->get(),
+                $service->activeRequirements(),
+            );
+        });
+
+        $this->assertNotSame([], $rows, 'The Meridian training matrix is empty.');
+        $this->assertGreaterThan(0, collect($rows)->sum('gaps'),
+            'Every person at Meridian holds every ticket their job demands, which is not what a training matrix is for.');
+    }
+
+    #[Test]
+    public function an_appraisal_was_signed_off_by_the_reviewers_own_manager_on_the_same_route_as_everything_else(): void
+    {
+        // There is no approve button on a review, in either company, at any point. The sign-off is a
+        // stage in the approvals inbox or it does not happen (§84).
+        $this->assertFalse(Route::has('performance-reviews.approve'));
+
+        foreach ([$this->meridian, $this->kestrel] as $organization) {
+            $states = $this->within($organization, fn () => PerformanceReview::query()->with('status')->get()
+                ->map(fn (PerformanceReview $r) => $r->statusKey())->countBy()->all());
+
+            $this->assertArrayHasKey('completed', $states, $organization->name.' finished no appraisal.');
+            $this->assertArrayHasKey('draft', $states, $organization->name.' released every review at once.');
+
+            $unrouted = $this->within($organization, fn () => PerformanceReview::query()
+                ->whereHas('status', fn ($q) => $q->whereIn('key', ['completed', 'rejected']))
+                ->whereDoesntHave('workflowInstances')
+                ->count());
+            $this->assertSame(0, $unrouted, $organization->name.' signed off a review outside a workflow.');
+
+            // Acknowledged, which is the half people forget: a review nobody was shown is a rating
+            // written about somebody behind their back.
+            $acknowledged = $this->within($organization, fn () => PerformanceReview::query()
+                ->whereNotNull('acknowledged_at')->count());
+            $this->assertGreaterThan(0, $acknowledged, $organization->name.' has no review its subject has seen.');
+        }
+
+        // And the decision was not the reviewer's own. Marcus Adeyemi wrote Ngozi Eze's rating; his
+        // manager signed it off, which is the entire argument for routing an appraisal at all.
+        [$review, $decider] = $this->within($this->meridian, function () {
+            $review = PerformanceReview::query()
+                ->whereHas('employee', fn ($q) => $q->where('employee_no', 'MEI-0006'))
+                ->with(['status', 'workflowInstances.stageInstances.approvals'])
+                ->firstOrFail();
+
+            $decision = $review->workflowInstances
+                ->flatMap->stageInstances
+                ->flatMap->approvals
+                ->first(fn (Approval $a) => $a->decision === Decision::Approve);
+
+            return [$review, $decision?->user_id];
+        });
+
+        $this->assertSame('completed', $review->statusKey());
+        $this->assertNotNull($decider, 'Ngozi Eze\'s review was completed with nobody having decided it.');
+        $this->assertNotSame($review->reviewer_id, $decider,
+            'The manager who wrote the rating is the one who signed it off.');
+    }
+
+    #[Test]
+    public function an_approved_movement_has_not_moved_anybody_until_its_date(): void
+    {
+        $states = $this->within($this->meridian, fn () => EmployeeMovement::query()->with('status')->get()
+            ->map(fn (EmployeeMovement $m) => $m->statusKey())->countBy()->all());
+
+        $this->assertArrayHasKey('applied', $states, 'Meridian applied no movement.');
+        $this->assertArrayHasKey('approved', $states, 'Meridian has no movement agreed and still to happen.');
+        $this->assertArrayHasKey('submitted', $states, 'Meridian has no movement awaiting a decision.');
+        $this->assertArrayHasKey('draft', $states, 'Meridian has no movement still being drafted.');
+
+        $this->assertFalse(Route::has('employee-movements.approve'));
+
+        $unrouted = $this->within($this->meridian, fn () => EmployeeMovement::query()
+            ->whereHas('status', fn ($q) => $q->whereIn('key', ['approved', 'applied', 'rejected']))
+            ->whereDoesntHave('workflowInstances')
+            ->count());
+        $this->assertSame(0, $unrouted, 'Meridian has movements decided outside a workflow.');
+
+        // The applied one rewrote the personnel record...
+        $applied = $this->within($this->meridian, fn () => EmployeeMovement::query()
+            ->whereHas('status', fn ($q) => $q->where('key', 'applied'))
+            ->with(['employee', 'status'])
+            ->firstOrFail());
+
+        $this->assertNotNull($applied->applied_at);
+        $this->assertSame($applied->to_org_unit_id, $applied->employee->org_unit_id,
+            'A movement is marked applied and the personnel record does not agree with it.');
+        $this->assertNotSame([], $applied->changeSummary(), 'An applied movement that changed nothing.');
+
+        // ...and the approved one deliberately has not. This is the row the whole register exists
+        // for: the company has agreed, the org chart has not moved, and the nightly sweep is what
+        // will move it on the effective date.
+        $waiting = $this->within($this->meridian, fn () => EmployeeMovement::query()
+            ->whereHas('status', fn ($q) => $q->where('key', 'approved'))
+            ->with(['employee', 'status'])
+            ->firstOrFail());
+
+        $this->assertNull($waiting->applied_at);
+        $this->assertTrue($waiting->effective_on->isFuture(), 'An approved movement is already due and was not applied.');
+        $this->assertSame($waiting->from_org_unit_id, $waiting->employee->org_unit_id,
+            'An approved movement moved somebody before its effective date.');
+        $this->assertSame($waiting->from_supervisor_id, $waiting->employee->supervisor_id,
+            'An approved movement changed a reporting line before its effective date.');
+
+        // The before side is a snapshot taken at submission, not a join at read time.
+        $this->assertNotNull($waiting->from_org_unit_id, 'A submitted movement carries no "from" snapshot.');
+    }
+
+    #[Test]
+    public function a_conduct_case_is_not_readable_by_the_people_standing_next_to_it(): void
+    {
+        $outcomes = $this->within($this->meridian, fn () => DisciplinaryCase::query()->with('status')->get()
+            ->map(fn (DisciplinaryCase $c) => $c->statusKey())->countBy()->all());
+
+        $this->assertArrayHasKey('closed', $outcomes, 'Meridian has no case that reached an end.');
+        $this->assertArrayHasKey('withdrawn', $outcomes, 'Meridian withdrew nothing — an allegation is sometimes wrong.');
+        $this->assertArrayHasKey('hearing', $outcomes, 'Meridian has no case in progress.');
+
+        // The driver's case: heard, decided, appealed, and the sanction REPLACED by the appeal
+        // rather than annotated. "Does this person have a live warning" has to read one column.
+        $appealed = $this->within($this->meridian, fn () => DisciplinaryCase::query()
+            ->whereNotNull('appeal_received_on')
+            ->with(['status', 'employee'])
+            ->firstOrFail());
+
+        $this->assertSame('verbal_warning', $appealed->outcome, 'The appeal did not change the sanction on the record.');
+        $this->assertNotNull($appealed->appeal_outcome);
+        $this->assertTrue($appealed->sanctionIsLive(), 'The reduced sanction is not counting.');
+
+        // And nobody around it can read it. Tunde Ogunleye is the driver's own line manager and runs
+        // the yard he works out of; the `fleet-manager` template carries no conduct permission at
+        // all, so the case about his own driver stops at gate 2 and never reaches his register.
+        $fleetManager = $this->account($this->meridian, 't.ogunleye@meridian-eng.example');
+        $visible = $this->visibleIds(DisciplinaryCase::class, $fleetManager, 'disciplinary.view');
+
+        $this->assertNotContains($appealed->id, $visible,
+            'A driver\'s conduct case is sitting in his own manager\'s register (§68).');
+
+        // The investigator reached exactly the case they were given — and closing it took the key
+        // back, which is why they reach nothing now.
+        $investigator = $this->account($this->meridian, 'g.ibrahim@meridian-eng.example');
+        $this->assertNotContains($appealed->id, $this->visibleIds(DisciplinaryCase::class, $investigator, 'disciplinary.view'),
+            'A closed case is still open to the person who investigated it.');
+
+        // The live one is a different story: it is in its investigator's hands right now.
+        $live = $this->within($this->meridian, fn () => DisciplinaryCase::query()
+            ->whereHas('status', fn ($q) => $q->where('key', 'hearing'))
+            ->with('status')
+            ->firstOrFail());
+
+        $current = $this->account($this->meridian, 'b.adeleke@meridian-eng.example');
+        $this->assertContains($live->id, $this->visibleIds(DisciplinaryCase::class, $current, 'disciplinary.view'),
+            'The investigator on a live case cannot read it.');
     }
 
     // ------------------------------------------------------------------ helpers

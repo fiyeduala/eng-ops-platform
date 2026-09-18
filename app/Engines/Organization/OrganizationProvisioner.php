@@ -81,6 +81,8 @@ class OrganizationProvisioner
                 $this->seedOvertimeWorkflow($organization);
                 $this->seedVacancyWorkflow($organization);
                 $this->seedChecklistTemplates($organization);
+                $this->seedPerformanceReviewWorkflow($organization);
+                $this->seedEmployeeMovementWorkflow($organization);
             });
 
             return $organization->refresh();
@@ -710,6 +712,57 @@ class OrganizationProvisioner
                 .'wants larger requests decided higher up.',
             'Approving this opens the vacancy for applications and commits the company to the salary. '
                 .'Returning it sends it back to be changed; rejecting it closes the request.',
+            slaHours: 120,
+        );
+    }
+
+    /**
+     * The default performance review route.
+     *
+     * SIGN-OFF IS AN APPROVAL LIKE ANY OTHER, which is the whole point of putting it here. A finished
+     * appraisal goes to the reviewer's own line manager — the grandparent of the person being
+     * reviewed — because a rating nobody above the reviewer ever looks at is how inconsistent
+     * marking survives a whole company. The stage is `supervisor` and the record's requester is the
+     * reviewer, so the engine resolves exactly that person with no special case.
+     *
+     * The SLA is long because sign-off queues behind a busy manager's own reviews, and a 48-hour
+     * clock during appraisal season would put the entire round on the overdue report.
+     */
+    public function seedPerformanceReviewWorkflow(Organization $organization): ?Workflow
+    {
+        return $this->seedLineManagerWorkflow(
+            $organization,
+            'performance_review',
+            'Performance review sign-off',
+            'The route a completed appraisal takes: the reviewer\'s own manager signs off the rating before '
+                .'it goes back to the employee. Add an HR stage, or a condition on `overall_rating` so only '
+                .'the highest and lowest marks are checked, if the company wants that.',
+            'Check the rating is supported by what is written and is consistent with the rest of your area. '
+                .'Returning it sends it back to the reviewer with the self-assessment intact; rejecting it '
+                .'closes the review unsigned.',
+            slaHours: 120,
+        );
+    }
+
+    /**
+     * The default movement route.
+     *
+     * A promotion or transfer changes the org chart, so it is decided before it is applied and never
+     * the other way round. Approval does NOT write the new position on the day it is approved — the
+     * record waits for its effective date and the nightly sweep applies it then. That separation is
+     * why the SLA can be generous: a June transfer approved in April is not late.
+     */
+    public function seedEmployeeMovementWorkflow(Organization $organization): ?Workflow
+    {
+        return $this->seedLineManagerWorkflow(
+            $organization,
+            'employee_movement',
+            'Movement approval',
+            'The route a promotion, transfer or secondment takes when it is submitted: the requester\'s line '
+                .'manager agrees to the change. Add an HR or executive stage, or a condition on `kind`, if '
+                .'promotions should be decided higher up than transfers.',
+            'Approving agrees the change. It is written onto the personnel record on its effective date, not '
+                .'today, so check the date as carefully as the position.',
             slaHours: 120,
         );
     }

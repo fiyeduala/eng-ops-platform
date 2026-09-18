@@ -378,6 +378,12 @@ class NumberGenerator
             'vacancy' => ['prefix' => 'VAC', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
             'applicant' => ['prefix' => 'APP', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 5],
             'employee_exit' => ['prefix' => 'EXT', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+            'performance_review' => ['prefix' => 'PRV', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 5],
+            'employee_movement' => ['prefix' => 'MOV', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+            // A disciplinary case is referred to BY ITS NUMBER in every letter the company sends
+            // about it, which is the point: correspondence that says "DSC-2026-0003" rather than
+            // naming the allegation can be filed, copied and chased without repeating it.
+            'disciplinary_case' => ['prefix' => 'DSC', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
         ];
     }
 }
