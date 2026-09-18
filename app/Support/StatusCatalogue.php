@@ -1138,6 +1138,66 @@ final class StatusCatalogue
                 ],
                 'transitions' => [],
             ],
+
+            // --- Phase 6, part 3: recruitment and leaving ----------------------------
+
+            /*
+             * A requisition. `open` IS the approved state — a head that got through its route is a
+             * head applications may be taken against, and there is no separate "approved" status for
+             * somebody to sit a vacancy in while quietly collecting a shortlist.
+             *
+             * `filled` and `closed` are both terminal and both deliberate: one says the company got
+             * who it wanted, the other says it stopped looking, and reporting cannot tell them apart
+             * if they share a status.
+             */
+            'vacancy' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'submitted' => ['label' => 'Awaiting approval', 'color' => 'brand'],
+                    'open' => ['label' => 'Open', 'color' => 'success'],
+                    'rejected' => ['label' => 'Not approved', 'color' => 'danger', 'terminal' => true],
+                    'filled' => ['label' => 'Filled', 'color' => 'success', 'terminal' => true],
+                    'closed' => ['label' => 'Closed', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [],
+            ],
+
+            /*
+             * An application, moving through the company's own process. The moves are left to the
+             * service rather than offered as buttons: shortlisting somebody is a consequence of
+             * recording a stage outcome, and an offer is a consequence of the decision to make one.
+             *
+             * `withdrawn` exists because candidates leave processes of their own accord, and a
+             * company that can only record "rejected" ends up reporting that it turned down people
+             * who turned it down.
+             */
+            'applicant' => [
+                'statuses' => [
+                    'applied' => ['label' => 'Applied', 'color' => 'neutral', 'initial' => true],
+                    'screening' => ['label' => 'Screening', 'color' => 'brand'],
+                    'interview' => ['label' => 'Interviewing', 'color' => 'brand'],
+                    'offered' => ['label' => 'Offer made', 'color' => 'warning'],
+                    'hired' => ['label' => 'Hired', 'color' => 'success', 'terminal' => true],
+                    'rejected' => ['label' => 'Not taken forward', 'color' => 'danger', 'terminal' => true],
+                    'withdrawn' => ['label' => 'Withdrew', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [],
+            ],
+
+            /*
+             * Leaving. `clearing` is the state that matters: notice has been given, the person is
+             * still employed and still has their access, and the company is working through what
+             * they hold. `completed` is the only status that means the account is off.
+             */
+            'employee_exit' => [
+                'statuses' => [
+                    'notified' => ['label' => 'Notice given', 'color' => 'neutral', 'initial' => true],
+                    'clearing' => ['label' => 'Clearing', 'color' => 'brand'],
+                    'completed' => ['label' => 'Completed', 'color' => 'success', 'terminal' => true],
+                    'cancelled' => ['label' => 'Withdrawn', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [],
+            ],
         ];
     }
 

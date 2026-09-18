@@ -127,6 +127,19 @@ class Navigation
                         'permission' => 'timesheet.view', 'active' => 'timesheets.*'],
                     ['label' => 'Overtime', 'route' => 'overtime.index', 'icon' => 'activity',
                         'permission' => 'overtime.view', 'active' => 'overtime.*'],
+
+                    // Joining and leaving. Vacancies sit above applicants because an application
+                    // only exists against one, and the lists sit above exits for the same reason.
+                    ['label' => 'Vacancies', 'route' => 'vacancies.index', 'icon' => 'briefcase',
+                        'permission' => 'recruitment.view', 'active' => 'vacancies.*'],
+                    ['label' => 'Applicants', 'route' => 'applicants.index', 'icon' => 'user',
+                        'permission' => 'recruitment.view', 'active' => ['applicants.*', 'applicant-stages.*']],
+                    ['label' => 'Joining & leaving', 'route' => 'employee-checklists.index', 'icon' => 'check-square',
+                        'permission' => 'checklist.view', 'active' => ['employee-checklists.*', 'checklist-items.*']],
+                    ['label' => 'Checklists setup', 'route' => 'checklist-templates.index', 'icon' => 'sliders',
+                        'permission' => 'checklist.manage', 'active' => 'checklist-templates.*'],
+                    ['label' => 'Exits', 'route' => 'employee-exits.index', 'icon' => 'log-out',
+                        'permission' => 'employee_exit.view', 'active' => 'employee-exits.*'],
                 ],
             ],
             [

@@ -102,6 +102,8 @@ use App\Listeners\NotifyWorkflowStalled;
 use App\Listeners\RecordDocumentSignature;
 use App\Models\ActivityLog;
 use App\Models\Announcement;
+use App\Models\Applicant;
+use App\Models\ApplicantStage;
 use App\Models\Approval;
 use App\Models\Asset;
 use App\Models\AssetCustodyTransfer;
@@ -111,6 +113,8 @@ use App\Models\AuditLog;
 use App\Models\Budget;
 use App\Models\BudgetLine;
 use App\Models\ChangeRequest;
+use App\Models\ChecklistTemplate;
+use App\Models\ChecklistTemplateItem;
 use App\Models\Client;
 use App\Models\ClientContact;
 use App\Models\Contract;
@@ -122,6 +126,9 @@ use App\Models\DocumentCategory;
 use App\Models\DocumentVersion;
 use App\Models\Drawing;
 use App\Models\Employee;
+use App\Models\EmployeeChecklist;
+use App\Models\EmployeeChecklistItem;
+use App\Models\EmployeeExit;
 use App\Models\Expense;
 use App\Models\Follower;
 use App\Models\FuelLog;
@@ -207,6 +214,7 @@ use App\Models\TrainingRecord;
 use App\Models\Transmittal;
 use App\Models\TransmittalItem;
 use App\Models\User;
+use App\Models\Vacancy;
 use App\Models\Vehicle;
 use App\Models\VehicleDocument;
 use App\Models\Vendor;
@@ -218,6 +226,7 @@ use App\Models\WorkflowStage;
 use App\Models\WorkflowStageCondition;
 use App\Models\WorkflowStageInstance;
 use App\Policies\AnnouncementPolicy;
+use App\Policies\ApplicantPolicy;
 use App\Policies\ApprovalPolicy;
 use App\Policies\AssetCustodyTransferPolicy;
 use App\Policies\AssetMaintenancePolicy;
@@ -226,6 +235,7 @@ use App\Policies\AttendanceRecordPolicy;
 use App\Policies\AuditLogPolicy;
 use App\Policies\BudgetPolicy;
 use App\Policies\ChangeRequestPolicy;
+use App\Policies\ChecklistTemplatePolicy;
 use App\Policies\ClientContactPolicy;
 use App\Policies\ClientPolicy;
 use App\Policies\ContractPolicy;
@@ -236,6 +246,8 @@ use App\Policies\DocumentCategoryPolicy;
 use App\Policies\DocumentPolicy;
 use App\Policies\DocumentVersionPolicy;
 use App\Policies\DrawingPolicy;
+use App\Policies\EmployeeChecklistPolicy;
+use App\Policies\EmployeeExitPolicy;
 use App\Policies\EmployeePolicy;
 use App\Policies\ExpensePolicy;
 use App\Policies\FollowerPolicy;
@@ -317,6 +329,7 @@ use App\Policies\TrainingRecordPolicy;
 use App\Policies\TransmittalItemPolicy;
 use App\Policies\TransmittalPolicy;
 use App\Policies\UserPolicy;
+use App\Policies\VacancyPolicy;
 use App\Policies\VehicleDocumentPolicy;
 use App\Policies\VehiclePolicy;
 use App\Policies\VendorContactPolicy;
@@ -573,6 +586,20 @@ class AppServiceProvider extends ServiceProvider
             'timesheet' => Timesheet::class,
             'timesheet_entry' => TimesheetEntry::class,
             'overtime_request' => OvertimeRequest::class,
+
+            // --- Phase 6: recruitment, onboarding and exit -----------------------------
+            // `vacancy` earns its place twice over: it is the subject a workflow instance points
+            // at, so it is what `entity_type` holds on the requisition route every tenant is
+            // provisioned with, and it is what an activity entry stores when the route is decided.
+            // A requisition whose key were missing here could not be submitted at all.
+            'vacancy' => Vacancy::class,
+            'applicant' => Applicant::class,
+            'applicant_stage' => ApplicantStage::class,
+            'checklist_template' => ChecklistTemplate::class,
+            'checklist_template_item' => ChecklistTemplateItem::class,
+            'employee_checklist' => EmployeeChecklist::class,
+            'employee_checklist_item' => EmployeeChecklistItem::class,
+            'employee_exit' => EmployeeExit::class,
         ]);
     }
 
@@ -788,6 +815,16 @@ class AppServiceProvider extends ServiceProvider
             AttendanceRecord::class => AttendanceRecordPolicy::class,
             Timesheet::class => TimesheetPolicy::class,
             OvertimeRequest::class => OvertimeRequestPolicy::class,
+            Vacancy::class => VacancyPolicy::class,
+            Applicant::class => ApplicantPolicy::class,
+            // An interview step is reached through the applicant it belongs to, and the applicant
+            // policy is what decides whether that person's file may be opened at all.
+            ApplicantStage::class => ApplicantPolicy::class,
+            ChecklistTemplate::class => ChecklistTemplatePolicy::class,
+            ChecklistTemplateItem::class => ChecklistTemplatePolicy::class,
+            EmployeeChecklist::class => EmployeeChecklistPolicy::class,
+            EmployeeChecklistItem::class => EmployeeChecklistPolicy::class,
+            EmployeeExit::class => EmployeeExitPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {

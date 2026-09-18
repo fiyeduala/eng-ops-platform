@@ -64,6 +64,7 @@
         'package' => '<path d="M21 8.5v7l-9 4.5-9-4.5v-7L12 4Z"/><path d="m3 8.5 9 4.5 9-4.5"/><path d="M12 13v7"/><path d="m7.5 6.2 9 4.6"/>',
         'truck' => '<path d="M3 6h11v10H3Z"/><path d="M14 9h4l3 3v4h-7Z"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
         'clipboard' => '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1"/><path d="M9 10h6M9 14h6M9 18h3"/>',
+        'log-out' => '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
     ];
 @endphp
 

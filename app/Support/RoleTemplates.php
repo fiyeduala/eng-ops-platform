@@ -659,6 +659,11 @@ final class RoleTemplates
                     'timesheet.*' => 'organization',
                     'leave.*' => 'organization',
                     'recruitment.*' => 'organization',
+                    // Joining and leaving. `employee_exit.*` carries `complete`, which is the act
+                    // that ends an employment and switches the sign-in off — the HR Manager is who
+                    // that is for, and it stays off every template below this one.
+                    'checklist.*' => 'organization',
+                    'employee_exit.*' => 'organization',
                     'performance.*' => 'organization',
                     'payroll.*' => 'organization',
                     'position.*' => 'organization',
@@ -689,6 +694,14 @@ final class RoleTemplates
                     'recruitment.view' => 'organization',
                     'recruitment.edit' => 'organization',
                     'recruitment.create' => 'organization',
+                    // An application is stored restricted, so without this the three grants above
+                    // would show an HR Officer sitting in no department an empty shortlist.
+                    'recruitment.view_confidential' => 'organization',
+                    // New starters' lists, which is the half of the lifecycle an officer runs.
+                    // Exits are not here: reading one means reading the exit interview.
+                    'checklist.view' => 'organization',
+                    'checklist.create' => 'organization',
+                    'checklist.edit' => 'organization',
                     'position.view' => 'organization',
                     'org_unit.view' => 'organization',
                     'report.view' => 'organization',

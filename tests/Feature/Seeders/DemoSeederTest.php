@@ -6,7 +6,10 @@ namespace Tests\Feature\Seeders;
 
 use App\Engines\Access\OrganizationContext;
 use App\Models\Announcement;
+use App\Models\Applicant;
 use App\Models\AttendanceRecord;
+use App\Models\EmployeeChecklist;
+use App\Models\EmployeeExit;
 use App\Models\LeaveRequest;
 use App\Models\Meeting;
 use App\Models\Memo;
@@ -18,13 +21,16 @@ use App\Models\Status;
 use App\Models\Task;
 use App\Models\Timesheet;
 use App\Models\User;
+use App\Models\Vacancy;
 use App\Models\WorkflowStageInstance;
+use App\Services\EmployeeExitService;
 use App\Services\TaskService;
 use Database\Seeders\DemoSeeder;
 use Database\Seeders\PermissionSeeder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -514,6 +520,139 @@ final class DemoSeederTest extends TestCase
                 ->whereColumn('worked_hours', '>', 'hours')->count());
             $this->assertSame(0, $overclaimed, $organization->name.' pays for overtime nobody approved.');
         }
+    }
+
+    #[Test]
+    public function heads_were_asked_for_and_agreed_on_the_same_route_as_everything_else(): void
+    {
+        foreach ([$this->meridian, $this->kestrel] as $organization) {
+            [$heads, $people, $unrouted, $waiting, $hired] = $this->within($organization, fn () => [
+                Vacancy::query()->with('status')->get()->map(fn (Vacancy $v) => $v->statusKey())->countBy()->all(),
+                Applicant::query()->with('status')->get()->map(fn (Applicant $a) => $a->statusKey())->countBy()->all(),
+                Vacancy::query()
+                    ->whereHas('status', fn ($q) => $q->whereIn('key', ['open', 'filled']))
+                    ->whereDoesntHave('workflowInstances')
+                    ->count(),
+                WorkflowStageInstance::query()->pending()
+                    ->whereHas('instance', fn ($q) => $q->where('subject_type', 'vacancy'))
+                    ->count(),
+                Applicant::query()->whereNotNull('hired_employee_id')->with('hiredEmployee')->get(),
+            ]);
+
+            $this->assertArrayHasKey('filled', $heads, $organization->name.' filled no vacancy.');
+            $this->assertArrayHasKey('open', $heads, $organization->name.' has no vacancy taking applications.');
+            $this->assertArrayHasKey('submitted', $heads, $organization->name.' has no requisition awaiting a decision.');
+
+            // The whole claim of this chapter: an approved head went through the engine, exactly as
+            // a drawing and a timesheet do. Nothing opened itself.
+            $this->assertSame(0, $unrouted, $organization->name.' has vacancies approved outside a workflow.');
+            $this->assertGreaterThan(0, $waiting, $organization->name.' has no requisition in anybody\'s inbox.');
+
+            $this->assertArrayHasKey('hired', $people, $organization->name.' hired nobody.');
+            $this->assertGreaterThan(0, count(array_intersect_key($people, array_flip(['rejected', 'withdrawn']))),
+                $organization->name.' turned nobody down, which is not what recruitment looks like.');
+
+            // A hire is a personnel record, and the link back is what answers "where did this
+            // person come from" a year later.
+            foreach ($hired as $applicant) {
+                $this->assertNotNull($applicant->hiredEmployee, $organization->name.' has a hire pointing at no employee.');
+                $this->assertSame($organization->id, $applicant->hiredEmployee->organization_id);
+                $this->assertNull($applicant->hiredEmployee->user_id,
+                    'Hiring wrote a sign-in, which is not its job — the onboarding list asks for one (§6).');
+            }
+
+            // The CV is on the private disk, not a made-up path: §67 is about this file in particular.
+            $cv = $this->within($organization, fn () => Applicant::query()->whereNotNull('cv_path')->first());
+            $this->assertNotNull($cv, $organization->name.' has no applicant with a CV attached.');
+            $this->assertTrue(Storage::disk('local')->exists((string) $cv->cv_path), 'The seeded CV is not on the disk.');
+        }
+    }
+
+    #[Test]
+    public function a_started_checklist_is_a_copy_and_is_only_part_done(): void
+    {
+        foreach ([$this->meridian, $this->kestrel] as $organization) {
+            $lists = $this->within($organization, fn () => EmployeeChecklist::query()->with('items')->get());
+
+            $this->assertGreaterThan(0, $lists->count(), $organization->name.' started no joining or leaving list.');
+
+            $joining = $lists->firstWhere('kind', 'onboarding');
+            $this->assertNotNull($joining, $organization->name.' has no new starter with a list.');
+
+            // Part done: the open items are what a demo is for, and the closed ones prove ticking works.
+            $this->assertGreaterThan(0, $joining->items->whereNotNull('done_at')->count(), 'Nothing on the joining list was done.');
+            $this->assertGreaterThan(0, $joining->items->whereNull('done_at')->count(), 'The joining list has nothing left to do.');
+            $this->assertNull($joining->completed_at, 'A list with open items has closed itself.');
+
+            // The items belong to the LIST, not to the template: editing the template afterwards
+            // must not rewrite what somebody was asked to do (the lifecycle tests prove the rule;
+            // this asserts the demo actually carries copies).
+            $this->assertSame(
+                0,
+                $this->within($organization, fn () => DB::table('employee_checklist_items')
+                    ->whereNull('employee_checklist_id')->count()),
+                'A started list has items pointing at nothing.',
+            );
+        }
+    }
+
+    #[Test]
+    public function the_exit_that_could_not_clear_is_the_one_the_asset_register_objects_to(): void
+    {
+        // `status` is loaded INSIDE the tenant, like everything else here: the global scope fails
+        // closed, so a relation touched after the context has gone resolves to nothing at all.
+        $blocked = $this->within($this->meridian, fn () => EmployeeExit::query()
+            ->whereHas('employee', fn ($q) => $q->where('employee_no', 'MEI-0016'))
+            ->with(['employee', 'status'])
+            ->firstOrFail());
+
+        $this->assertSame('notified', $blocked->statusKey());
+        $this->assertNull($blocked->cleared_at, 'An exit cleared while the leaver still holds company property.');
+
+        // Read out of the registers, not off a ticked box (§84).
+        $blockers = $this->within($this->meridian, fn () => app(EmployeeExitService::class)->blockers($blocked->employee));
+        $this->assertNotEmpty($blockers, 'Ruth Okafor holds nothing, so the blocked exit demonstrates nothing.');
+
+        $cleared = $this->within($this->meridian, fn () => EmployeeExit::query()
+            ->whereHas('employee', fn ($q) => $q->where('employee_no', 'MEI-0008'))
+            ->with(['employee', 'status'])
+            ->firstOrFail());
+
+        $this->assertSame('clearing', $cleared->statusKey());
+        $this->assertNotNull($cleared->cleared_at);
+
+        // Cleared is not finished: her last day has not arrived, and employment has not ended.
+        $this->assertNull($cleared->access_revoked_at);
+        $this->assertSame('active', $this->within($this->meridian, fn () => $cleared->employee->employment_status));
+    }
+
+    #[Test]
+    public function the_finished_exit_ended_the_employment_and_switched_the_sign_in_off(): void
+    {
+        [$exit, $employee] = $this->within($this->kestrel, function () {
+            $exit = EmployeeExit::query()
+                ->whereHas('employee', fn ($q) => $q->where('employee_no', 'KFM-007'))
+                ->with(['employee.user', 'checklist.items', 'status'])
+                ->firstOrFail();
+
+            return [$exit, $exit->employee];
+        });
+
+        $this->assertSame('completed', $exit->statusKey());
+        $this->assertNotNull($exit->access_revoked_at);
+
+        $this->assertSame('exited', $employee->employment_status);
+        $this->assertNotNull($employee->exited_on);
+        $this->assertFalse((bool) $employee->is_active);
+
+        // The one that matters: the sign-in, off. An exit where the first two are written and this
+        // is not is a company that believes somebody has left while their password still works.
+        $this->assertNotNull($employee->user, 'The account was deleted — a leaver keeps their account (nothing is erased).');
+        $this->assertFalse((bool) $employee->user->is_active, 'Josh Aiken can still sign in after leaving.');
+
+        // And nothing was erased: the personnel record and the leaving list are both still there.
+        $this->assertNotNull($exit->checklist);
+        $this->assertGreaterThan(0, $exit->checklist->items->count());
     }
 
     // ------------------------------------------------------------------ helpers

@@ -6,6 +6,8 @@ namespace App\Engines\Organization;
 
 use App\Engines\Access\OrganizationContext;
 use App\Engines\Configuration\NumberGenerator;
+use App\Models\ChecklistTemplate;
+use App\Models\ChecklistTemplateItem;
 use App\Models\DocumentCategory;
 use App\Models\LeaveType;
 use App\Models\NumberingScheme;
@@ -77,6 +79,8 @@ class OrganizationProvisioner
                 $this->seedLeaveTypes($organization);
                 $this->seedTimesheetWorkflow($organization);
                 $this->seedOvertimeWorkflow($organization);
+                $this->seedVacancyWorkflow($organization);
+                $this->seedChecklistTemplates($organization);
             });
 
             return $organization->refresh();
@@ -688,6 +692,89 @@ class OrganizationProvisioner
     /**
      * Starter leave types. Opinions, not entitlements (§47): every number here is a row HR edits.
      */
+    /**
+     * The default vacancy route.
+     *
+     * A requisition is a spending decision taken before anybody is interviewed, so it is routed like
+     * everything else. The SLA is long on purpose: a head being agreed is rarely urgent, and a
+     * 24-hour clock on it would fill the overdue report with approvals nobody is late on.
+     */
+    public function seedVacancyWorkflow(Organization $organization): ?Workflow
+    {
+        return $this->seedLineManagerWorkflow(
+            $organization,
+            'vacancy',
+            'Vacancy approval',
+            'The route a vacancy takes when it is submitted: the requester\'s line manager agrees to the '
+                .'head. Add a finance or executive stage, or a condition on `openings`, if the company '
+                .'wants larger requests decided higher up.',
+            'Approving this opens the vacancy for applications and commits the company to the salary. '
+                .'Returning it sends it back to be changed; rejecting it closes the request.',
+            slaHours: 120,
+        );
+    }
+
+    /**
+     * Starting joining and leaving lists — OPINIONS, owned by the company from the first edit (§47).
+     *
+     * Deliberately short and deliberately generic. A construction company will add boots, a site
+     * induction and a medical; a consultancy will add a mailbox and a client confidentiality form,
+     * and neither list belongs in the application. What the platform provides is a list that is not
+     * empty on day one, because an empty Settings screen teaches people the feature does not work.
+     *
+     * The exit list is the one that matters: "return the laptop" is a step somebody ticks, while
+     * whether the laptop actually came back is asked of the asset register by
+     * EmployeeExitService::blockers(). The list is the conversation; the register is the answer.
+     */
+    public function seedChecklistTemplates(Organization $organization): void
+    {
+        $templates = [
+            ['onboarding', 'Standard onboarding', 'What a new starter needs in their first week.', [
+                ['Sign and return the employment contract', true],
+                ['Collect identity documents and qualifications', true],
+                ['Create the sign-in and assign a role', false],
+                ['Issue equipment and record it in the asset register', true],
+                ['Health, safety and site induction', true],
+                ['Introduce the line manager and the team', false],
+                ['Agree the first objectives', false],
+            ]],
+            ['exit', 'Standard exit', 'What has to happen before somebody\'s last day.', [
+                ['Acknowledge the resignation or notice in writing', false],
+                ['Hand over live work and files', true],
+                ['Return all company equipment', true],
+                ['Return keys, passes and fuel cards', true],
+                ['Settle outstanding expenses and advances', true],
+                ['Exit interview', false],
+                ['Confirm the final address and bank details for the last payment', false],
+            ]],
+        ];
+
+        foreach ($templates as [$kind, $name, $description, $items]) {
+            if (ChecklistTemplate::withTrashed()->where('organization_id', $organization->id)->where('name', $name)->exists()) {
+                continue;
+            }
+
+            $template = ChecklistTemplate::create([
+                'organization_id' => $organization->id,
+                'kind' => $kind,
+                'name' => $name,
+                'description' => $description,
+                'is_default' => true,
+                'is_active' => true,
+            ]);
+
+            foreach ($items as $sequence => [$label, $requiresNote]) {
+                ChecklistTemplateItem::create([
+                    'organization_id' => $organization->id,
+                    'checklist_template_id' => $template->id,
+                    'label' => $label,
+                    'sequence' => $sequence,
+                    'requires_note' => $requiresNote,
+                ]);
+            }
+        }
+    }
+
     public function seedLeaveTypes(Organization $organization): void
     {
         $types = [

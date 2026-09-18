@@ -372,6 +372,12 @@ class NumberGenerator
             'leave_request' => ['prefix' => 'LV', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 5],
             'timesheet' => ['prefix' => 'TS', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 5],
             'overtime_request' => ['prefix' => 'OT', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 5],
+            // A vacancy is quoted in job adverts and in the approval that created it; an applicant
+            // reference is what recruitment correspondence uses INSTEAD of the person's name, which
+            // is the point of numbering them at all.
+            'vacancy' => ['prefix' => 'VAC', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
+            'applicant' => ['prefix' => 'APP', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 5],
+            'employee_exit' => ['prefix' => 'EXT', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 4],
         ];
     }
 }

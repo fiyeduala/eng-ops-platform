@@ -182,7 +182,24 @@ final class PermissionCatalogue
             // leave and timesheets, so there is no `approve` here to grant by mistake.
             'overtime' => ['People', 'Overtime', [...self::CRUD, 'manage', 'submit']],
             'leave' => ['People', 'Leave', [...self::CRUD, 'manage', 'submit', 'approve', 'reject']],
-            'recruitment' => ['People', 'Recruitment', [...self::CRUD, 'manage']],
+            // Vacancies, applicants and interview stages are one module. `hire` is separate from
+            // `manage` on purpose: taking somebody on CREATES a personnel record and a sign-in, and
+            // the person who schedules interviews is not automatically the person who may do that.
+            // A vacancy is decided on its workflow stage, as leave and timesheets are, so there is
+            // no `approve` here to grant by mistake.
+            // `view_confidential` is what an applicant's file is actually read through: an
+            // application carries somebody's name, contact details and what an interviewer thought
+            // of them, so it is stored restricted and is reachable from inside the hiring
+            // department or by a recruiter holding this. Without it a central recruiter with no
+            // department of their own would see an empty list (§68).
+            'recruitment' => ['People', 'Recruitment', [...self::CRUD, 'manage', 'submit', 'hire', 'view_confidential']],
+            // Joining and leaving lists. The templates are configuration; a person's own copy is a
+            // record, and both live under this one module.
+            'checklist' => ['People', 'Onboarding & exit checklists', [...self::CRUD, 'manage']],
+            // Leaving. `clear` is what says a leaver holds nothing outstanding, and `complete` is
+            // what ends the employment AND switches the sign-in off — one act, one permission,
+            // because the two coming apart is how a leaver keeps their access for three weeks.
+            'employee_exit' => ['People', 'Exits', [...self::CRUD, 'manage', 'clear', 'complete', 'view_confidential']],
             'performance' => ['People', 'Performance', [...self::CRUD, 'manage', 'approve', 'view_confidential']],
             'visitor' => ['People', 'Visitors', [...self::CRUD, 'manage', 'check_in', 'check_out']],
 
@@ -268,6 +285,12 @@ final class PermissionCatalogue
             // Where a supplier's money goes. The single most valuable permission in the platform to
             // an attacker, and the one an administrator is most likely to grant without thinking.
             $module === 'vendor' && $action === 'bank',
+            // Hiring writes a personnel record — a person the platform will let be supervised,
+            // paid and rostered; completing an exit switches a sign-in off. Both change who the
+            // company consists of, which is why they sit here beside impersonation and password
+            // resets rather than being treated as ordinary HR admin.
+            $module === 'recruitment' && $action === 'hire',
+            $module === 'employee_exit' && $action === 'complete',
             $module === 'performance' && $action === 'view_confidential' => true,
             default => false,
         };

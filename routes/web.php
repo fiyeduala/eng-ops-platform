@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\AnnouncementController;
+use App\Http\Controllers\ApplicantController;
 use App\Http\Controllers\ApprovalController;
 use App\Http\Controllers\AssetController;
 use App\Http\Controllers\AssetMaintenanceController;
@@ -14,6 +15,7 @@ use App\Http\Controllers\Auth\PasswordResetController;
 use App\Http\Controllers\BudgetController;
 use App\Http\Controllers\CalendarController;
 use App\Http\Controllers\ChangeRequestController;
+use App\Http\Controllers\ChecklistTemplateController;
 use App\Http\Controllers\ClientContactController;
 use App\Http\Controllers\ClientController;
 use App\Http\Controllers\ContractController;
@@ -25,7 +27,9 @@ use App\Http\Controllers\DocumentCategoryController;
 use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\DocumentVersionController;
 use App\Http\Controllers\DrawingController;
+use App\Http\Controllers\EmployeeChecklistController;
 use App\Http\Controllers\EmployeeController;
+use App\Http\Controllers\EmployeeExitController;
 use App\Http\Controllers\ExpenseController;
 use App\Http\Controllers\FuelLogController;
 use App\Http\Controllers\GoodsReceiptController;
@@ -78,6 +82,7 @@ use App\Http\Controllers\TrainingCourseController;
 use App\Http\Controllers\TrainingRecordController;
 use App\Http\Controllers\TransmittalController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\VacancyController;
 use App\Http\Controllers\VehicleController;
 use App\Http\Controllers\VehicleDocumentController;
 use App\Http\Controllers\VendorContactController;
@@ -2176,6 +2181,146 @@ Route::middleware(['auth', 'password.current'])->group(function () {
             ->middleware('permission:overtime.submit,overtime.manage')->name('overtime.cancel');
         Route::post('overtime/{overtime}/worked', [OvertimeRequestController::class, 'recordWorked'])
             ->middleware('permission:overtime.submit,overtime.manage')->name('overtime.worked');
+    });
+
+    // --- recruitment, onboarding and exit (Phase 6, part 3) -------------------------------------
+    //
+    // THERE IS NO `vacancies.approve` ROUTE AND THERE IS NOT MEANT TO BE ONE. A requisition is a
+    // spending decision, and it is decided in My Approvals at `approvals.decide` — the same endpoint
+    // that decides a document, a leave request and a timesheet. `vacancies.submit` hands the record
+    // to the workflow engine and stops; opening the vacancy for applications is the engine's callback
+    // into VacancyService. A second door here would let a recruiter open a head nobody agreed to,
+    // and would quietly break Phase 6's exit criterion while the screen still looked right (§84).
+    //
+    // HIRING IS BEHIND ITS OWN PERMISSION, not `recruitment.edit`, because it is the one action in
+    // this module that writes outside it: a new row in the personnel register.
+    //
+    // THE CV HAS A DOWNLOAD ROUTE AND NO PUBLIC URL. The file lives outside the web root; the route
+    // authorizes the applicant it belongs to before a byte is sent (§67).
+
+    Route::middleware('permission:recruitment.view')->group(function () {
+        Route::get('vacancies', [VacancyController::class, 'index'])->name('vacancies.index');
+        Route::get('vacancies/{vacancy}', [VacancyController::class, 'show'])
+            ->whereNumber('vacancy')->name('vacancies.show');
+    });
+    Route::middleware('permission:recruitment.create')->group(function () {
+        Route::get('vacancies/create', [VacancyController::class, 'create'])->name('vacancies.create');
+        Route::post('vacancies', [VacancyController::class, 'store'])->name('vacancies.store');
+    });
+    Route::whereNumber('vacancy')->group(function () {
+        Route::get('vacancies/{vacancy}/edit', [VacancyController::class, 'edit'])
+            ->middleware('permission:recruitment.edit')->name('vacancies.edit');
+        Route::put('vacancies/{vacancy}', [VacancyController::class, 'update'])
+            ->middleware('permission:recruitment.edit')->name('vacancies.update');
+        Route::delete('vacancies/{vacancy}', [VacancyController::class, 'destroy'])
+            ->middleware('permission:recruitment.delete')->name('vacancies.destroy');
+        Route::post('vacancies/{vacancy}/submit', [VacancyController::class, 'submit'])
+            ->middleware('permission:recruitment.submit')->name('vacancies.submit');
+        Route::post('vacancies/{vacancy}/close', [VacancyController::class, 'close'])
+            ->middleware('permission:recruitment.manage')->name('vacancies.close');
+
+        // An application is always filed against a vacancy, so it is created under one.
+        Route::get('vacancies/{vacancy}/applicants/create', [ApplicantController::class, 'create'])
+            ->middleware('permission:recruitment.create')->name('vacancies.applicants.create');
+        Route::post('vacancies/{vacancy}/applicants', [ApplicantController::class, 'store'])
+            ->middleware('permission:recruitment.create')->name('vacancies.applicants.store');
+    });
+
+    Route::middleware('permission:recruitment.view')->group(function () {
+        Route::get('applicants', [ApplicantController::class, 'index'])->name('applicants.index');
+        Route::get('applicants/{applicant}', [ApplicantController::class, 'show'])
+            ->whereNumber('applicant')->name('applicants.show');
+        Route::get('applicants/{applicant}/cv', [ApplicantController::class, 'download'])
+            ->whereNumber('applicant')->name('applicants.cv');
+    });
+    Route::whereNumber('applicant')->group(function () {
+        Route::get('applicants/{applicant}/edit', [ApplicantController::class, 'edit'])
+            ->middleware('permission:recruitment.edit')->name('applicants.edit');
+        Route::put('applicants/{applicant}', [ApplicantController::class, 'update'])
+            ->middleware('permission:recruitment.edit')->name('applicants.update');
+        Route::delete('applicants/{applicant}', [ApplicantController::class, 'destroy'])
+            ->middleware('permission:recruitment.delete')->name('applicants.destroy');
+        Route::post('applicants/{applicant}/cv', [ApplicantController::class, 'attachCv'])
+            ->middleware('permission:recruitment.edit')->name('applicants.cv.attach');
+        Route::delete('applicants/{applicant}/cv', [ApplicantController::class, 'removeCv'])
+            ->middleware('permission:recruitment.edit')->name('applicants.cv.remove');
+        Route::post('applicants/{applicant}/stages', [ApplicantController::class, 'addStage'])
+            ->middleware('permission:recruitment.edit')->name('applicants.stages.store');
+        Route::post('applicants/{applicant}/offer', [ApplicantController::class, 'offer'])
+            ->middleware('permission:recruitment.manage')->name('applicants.offer');
+        Route::post('applicants/{applicant}/reject', [ApplicantController::class, 'reject'])
+            ->middleware('permission:recruitment.manage')->name('applicants.reject');
+        Route::post('applicants/{applicant}/withdraw', [ApplicantController::class, 'withdraw'])
+            ->middleware('permission:recruitment.manage')->name('applicants.withdraw');
+        Route::post('applicants/{applicant}/hire', [ApplicantController::class, 'hire'])
+            ->middleware('permission:recruitment.hire')->name('applicants.hire');
+    });
+
+    Route::post('applicant-stages/{stage}/outcome', [ApplicantController::class, 'recordStage'])
+        ->whereNumber('stage')->middleware('permission:recruitment.edit')->name('applicant-stages.record');
+
+    // Joining and leaving lists. The templates are configuration; the copies below are the record.
+    Route::middleware('permission:checklist.view')->group(function () {
+        Route::get('employee-checklists', [EmployeeChecklistController::class, 'index'])->name('employee-checklists.index');
+        Route::get('employee-checklists/{employee_checklist}', [EmployeeChecklistController::class, 'show'])
+            ->whereNumber('employee_checklist')->name('employee-checklists.show');
+    });
+    Route::post('employees/{employee}/checklists', [EmployeeChecklistController::class, 'store'])
+        ->whereNumber('employee')->middleware('permission:checklist.create')->name('employees.checklists.store');
+    Route::whereNumber('employee_checklist')->group(function () {
+        Route::delete('employee-checklists/{employee_checklist}', [EmployeeChecklistController::class, 'destroy'])
+            ->middleware('permission:checklist.delete')->name('employee-checklists.destroy');
+        Route::post('employee-checklists/{employee_checklist}/items', [EmployeeChecklistController::class, 'addItem'])
+            ->middleware('permission:checklist.edit')->name('employee-checklists.items.store');
+    });
+    // Ticking is doing the job; unticking is saying a done thing was not done, and it needs the
+    // heavier permission and a reason. See EmployeeChecklistController.
+    Route::whereNumber('item')->group(function () {
+        Route::post('checklist-items/{item}/tick', [EmployeeChecklistController::class, 'tick'])
+            ->middleware('permission:checklist.edit')->name('checklist-items.tick');
+        Route::post('checklist-items/{item}/untick', [EmployeeChecklistController::class, 'untick'])
+            ->middleware('permission:checklist.manage')->name('checklist-items.untick');
+    });
+
+    Route::middleware('permission:employee_exit.view')->group(function () {
+        Route::get('employee-exits', [EmployeeExitController::class, 'index'])->name('employee-exits.index');
+        Route::get('employee-exits/{employee_exit}', [EmployeeExitController::class, 'show'])
+            ->whereNumber('employee_exit')->name('employee-exits.show');
+    });
+    Route::middleware('permission:employee_exit.create')->group(function () {
+        Route::get('employee-exits/create', [EmployeeExitController::class, 'create'])->name('employee-exits.create');
+        Route::post('employee-exits', [EmployeeExitController::class, 'store'])->name('employee-exits.store');
+    });
+    Route::whereNumber('employee_exit')->group(function () {
+        Route::get('employee-exits/{employee_exit}/edit', [EmployeeExitController::class, 'edit'])
+            ->middleware('permission:employee_exit.edit')->name('employee-exits.edit');
+        Route::put('employee-exits/{employee_exit}', [EmployeeExitController::class, 'update'])
+            ->middleware('permission:employee_exit.edit')->name('employee-exits.update');
+        Route::delete('employee-exits/{employee_exit}', [EmployeeExitController::class, 'destroy'])
+            ->middleware('permission:employee_exit.delete')->name('employee-exits.destroy');
+        Route::post('employee-exits/{employee_exit}/clear', [EmployeeExitController::class, 'clear'])
+            ->middleware('permission:employee_exit.clear')->name('employee-exits.clear');
+        // Ends the employment AND switches the sign-in off, in one transaction.
+        Route::post('employee-exits/{employee_exit}/complete', [EmployeeExitController::class, 'complete'])
+            ->middleware('permission:employee_exit.complete')->name('employee-exits.complete');
+        Route::post('employee-exits/{employee_exit}/cancel', [EmployeeExitController::class, 'cancel'])
+            ->middleware('permission:employee_exit.manage')->name('employee-exits.cancel');
+    });
+
+    // The joining and leaving lists themselves — configuration, so `checklist.manage`, not `edit`.
+    // Nothing about what a new starter is given or what a leaver hands back is in code (§47).
+    Route::middleware('permission:checklist.manage')->group(function () {
+        Route::get('checklist-templates', [ChecklistTemplateController::class, 'index'])->name('checklist-templates.index');
+        Route::get('checklist-templates/create', [ChecklistTemplateController::class, 'create'])->name('checklist-templates.create');
+        Route::post('checklist-templates', [ChecklistTemplateController::class, 'store'])->name('checklist-templates.store');
+        Route::whereNumber('checklist_template')->group(function () {
+            Route::get('checklist-templates/{checklist_template}/edit', [ChecklistTemplateController::class, 'edit'])
+                ->name('checklist-templates.edit');
+            Route::put('checklist-templates/{checklist_template}', [ChecklistTemplateController::class, 'update'])
+                ->name('checklist-templates.update');
+            Route::delete('checklist-templates/{checklist_template}', [ChecklistTemplateController::class, 'destroy'])
+                ->name('checklist-templates.destroy');
+        });
     });
 
     // --- assets --------------------------------------------------------------------------------

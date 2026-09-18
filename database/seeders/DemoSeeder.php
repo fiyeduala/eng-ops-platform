@@ -13,8 +13,10 @@ use App\Engines\Organization\OrganizationProvisioner;
 use App\Engines\Organization\OrgUnitService;
 use App\Engines\Workflow\WorkflowEngine;
 use App\Models\Announcement;
+use App\Models\Applicant;
 use App\Models\Asset;
 use App\Models\AttendanceRecord;
+use App\Models\ChecklistTemplateItem;
 use App\Models\Client;
 use App\Models\Contract;
 use App\Models\Document;
@@ -52,10 +54,12 @@ use App\Models\Workflow;
 use App\Models\WorkflowStage;
 use App\Models\WorkflowStageInstance;
 use App\Services\AnnouncementService;
+use App\Services\ApplicantService;
 use App\Services\AssetMaintenanceService;
 use App\Services\AssetService;
 use App\Services\AttendanceService;
 use App\Services\ChangeRequestService;
+use App\Services\ChecklistService;
 use App\Services\ClientService;
 use App\Services\ContractService;
 use App\Services\CorrectiveActionService;
@@ -63,6 +67,7 @@ use App\Services\DeliverableService;
 use App\Services\DocumentService;
 use App\Services\DocumentVersionService;
 use App\Services\DrawingService;
+use App\Services\EmployeeExitService;
 use App\Services\ExpenseService;
 use App\Services\FleetService;
 use App\Services\GoodsReceiptService;
@@ -101,6 +106,7 @@ use App\Services\TimesheetService;
 use App\Services\ToolboxTalkService;
 use App\Services\TrainingRecordService;
 use App\Services\TransmittalService;
+use App\Services\VacancyService;
 use App\Services\VehicleDocumentService;
 use App\Services\VendorService;
 use App\Services\WarehouseService;
@@ -313,6 +319,14 @@ class DemoSeeder extends Seeder
             ['KFM-006', 6, '2', 'approved', 'Chiller changeover has to run out of hours.', 'KFM-003', '2'],
             ['KFM-005', 3, '3', 'pending', 'Call-out for the tenant fit-out snag list.', null, null],
         ]);
+
+        // Hiring, joining and leaving. After the time chapter because it reaches into what the
+        // earlier passes built: a requisition is decided by the requester's line manager through the
+        // same engine as a drawing, and an exit is blocked by the asset and petty cash registers
+        // seeded above — Ruth Okafor's exit cannot clear precisely because her calibrated instrument
+        // is still on her name in the asset register (§84).
+        $this->seedMeridianHiring($meridian);
+        $this->seedKestrelHiring($kestrel);
 
         // The rows above were written straight to the database, so nothing observed them happening.
         // A demo whose record timelines are all blank teaches the wrong lesson about Engine 4 — the
@@ -6828,8 +6842,18 @@ class DemoSeeder extends Seeder
             return;
         }
 
+        // Anchored at both ends rather than at the start alone. Counting a fixed number of minutes
+        // forward from 08:30 on the first morning lands the last entry at 05:30 TODAY whatever the
+        // clock says — which is the future, and therefore a lie, for anybody seeding before
+        // breakfast. The end is read off the clock instead, a few hours short of now.
         $start = now()->subDays($overDays)->setTime(8, 30);
-        $span = max(60, $overDays * 24 * 60 - 180);   // finish a few hours short of now
+        $end = now()->subHours(3);
+
+        if ($end->lessThanOrEqualTo($start)) {
+            $end = $start->copy()->addHour();
+        }
+
+        $span = max(60, (int) round($start->diffInMinutes($end)));
         $last = max(1, $rows->count() - 1);
 
         /** @var array<string,array<int,\DateTimeInterface>> $opened */
@@ -8030,6 +8054,560 @@ class DemoSeeder extends Seeder
                 $hr,
             );
         });
+    }
+
+    /**
+     * Asking for a head, filling it, and somebody leaving — Meridian.
+     *
+     * THE REQUISITION IS DECIDED BY THE SAME ENGINE AS EVERYTHING ELSE. All three vacancies below
+     * are submitted and then land in Chinedu Balogun's My Approvals, next to a drawing and a
+     * timesheet, and the seeder decides them with the identical `decide()` helper it uses for a
+     * document. There is no `approve()` on VacancyService to call instead, which is the point.
+     *
+     * TWO OF THE THREE ARE DECIDED AND ONE IS NOT, because an empty approvals inbox teaches an
+     * evaluator that the inbox does not work. The open one is the night-shift HSE officer.
+     *
+     * THE EXITS ARE THE HALF WORTH READING. Priya's is cleared because she holds nothing; Ruth's
+     * sits at `notified` and shows the blockers screen with a real answer on it — her calibrated
+     * instrument, read out of the asset register rather than off a ticked box.
+     */
+    private function seedMeridianHiring(Organization $organization): void
+    {
+        $this->context->within($organization, function () use ($organization) {
+            $vacancies = app(VacancyService::class);
+            $applications = app(ApplicantService::class);
+            $lists = app(ChecklistService::class);
+            $exits = app(EmployeeExitService::class);
+
+            $staff = $this->staff();
+            $unit = $this->unitsByCode();
+            $place = $this->locationsByCode();
+            $post = Position::query()->get()->keyBy('code');
+
+            $hr = $this->accountOf($staff, 'MEI-0017');           // Amina Tijani
+            $opsDirector = $this->accountOf($staff, 'MEI-0003');  // Chinedu Balogun — decides all three
+            $engManager = $this->accountOf($staff, 'MEI-0004');   // Farida Yusuf
+            $leadEngineer = $this->accountOf($staff, 'MEI-0005'); // Marcus Adeyemi
+            $qaManager = $this->accountOf($staff, 'MEI-0015');    // Yemi Bakare
+            $hseManager = $this->accountOf($staff, 'MEI-0013');   // Grace Ibrahim
+
+            // A construction company's joining list is not a consultancy's. Two items added to the
+            // template the platform provided, by the company, on the company's own screen (§47) —
+            // and note what happens to them below: they are copied into the new starter's list at
+            // the moment it is started, so editing the template later leaves that list alone.
+            $joining = $lists->defaultTemplate($organization->id, 'onboarding');
+
+            if ($joining !== null) {
+                $sequence = (int) $joining->items()->max('sequence');
+
+                foreach ([
+                    ['Issue PPE and the Delta Terminal site pass', true],
+                    ['Book the pre-employment medical', false],
+                ] as [$label, $requiresNote]) {
+                    ChecklistTemplateItem::create([
+                        'organization_id' => $organization->id,
+                        'checklist_template_id' => $joining->getKey(),
+                        'label' => $label,
+                        'sequence' => ++$sequence,
+                        'requires_note' => $requiresNote,
+                    ]);
+                }
+            }
+
+            // ------------------------------------------------------------ the head that got filled
+            $structuralPost = $vacancies->create([
+                'title' => 'Structural Engineer',
+                'position_id' => $post['SE']->id,
+                'org_unit_id' => $unit['ENG-CS-SD']->id,
+                'location_id' => $place['HQ']->id,
+                'hiring_manager_id' => $leadEngineer->getKey(),
+                'employment_type' => 'permanent',
+                'openings' => 1,
+                'summary' => 'Design and check steel and concrete structures for the terminal and '
+                    .'yard work, reporting to the Lead Structural Engineer.',
+                'requirements' => 'B.Eng Civil or Structural, COREN registrable, three years of '
+                    .'design office experience, competent in staad and the Eurocodes.',
+                'target_start_date' => now()->subWeeks(3)->toDateString(),
+                'closes_on' => now()->addWeeks(2)->toDateString(),
+            ], $engManager);
+
+            $vacancies->submit($structuralPost, $engManager);
+            $this->decide(
+                $structuralPost->refresh(),
+                $opsDirector,
+                Decision::Approve,
+                'Agreed — the Delta Terminal workload justifies the head. Advertise it.',
+            );
+
+            $hired = $applications->createFor($structuralPost->refresh(), [
+                'first_name' => 'Yetunde',
+                'last_name' => 'Balogun',
+                'email' => 'yetunde.balogun@example.com',
+                'phone' => '+234 802 555 0147',
+                'source' => 'website',
+                'notes' => 'Four years at a design consultancy in Lagos; brought a portfolio of '
+                    .'jetty and pipe-rack work to the panel.',
+            ], $hr);
+
+            $this->attachDemoCv(
+                $hired,
+                'Four years of structural design; steel jetties, pipe racks and foundations.',
+                $hr,
+            );
+
+            $screen = $applications->addStage($hired, [
+                'name' => 'Telephone screen',
+                'scheduled_at' => now()->subWeeks(7),
+                'interviewer_id' => $hr->getKey(),
+            ], $hr);
+            $applications->recordStage($screen, 'passed', 4, 'Clear on the fundamentals and available at a month\'s notice.', $hr);
+
+            $panel = $applications->addStage($hired, [
+                'name' => 'Technical panel',
+                'scheduled_at' => now()->subWeeks(6),
+                'interviewer_id' => $leadEngineer->getKey(),
+            ], $hr);
+            $applications->recordStage($panel, 'passed', 5, 'Best of the three we saw. Talked through a pile cap calculation without notes.', $leadEngineer);
+
+            $turnedDown = $applications->createFor($structuralPost->refresh(), [
+                'first_name' => 'Femi',
+                'last_name' => 'Adebayo',
+                'email' => 'femi.adebayo@example.com',
+                'phone' => '+234 809 555 0192',
+                'source' => 'agency',
+                'notes' => 'Strong on site supervision, thin on design office work.',
+            ], $hr);
+
+            $femiScreen = $applications->addStage($turnedDown, [
+                'name' => 'Telephone screen',
+                'scheduled_at' => now()->subWeeks(7),
+                'interviewer_id' => $hr->getKey(),
+            ], $hr);
+            $applications->recordStage($femiScreen, 'failed', 2, 'Has not worked in a design office; this post is 80% design.', $hr);
+
+            // The REASON is on the record, not in the timeline — an applicant's classification is
+            // restricted, and "not taken forward" is as much as the activity entry says (§68).
+            $applications->reject($turnedDown->refresh(), 'Not enough design office experience for this post. Worth keeping for a site engineer vacancy.', $hr);
+
+            $applications->makeOffer($hired->refresh(), $hr);
+
+            // Hiring writes the personnel record and counts the head — the vacancy closes ITSELF at
+            // the number of openings that were approved, which is why there is no "mark as filled"
+            // and why the rejection above had to happen first: nothing can be filed against a
+            // vacancy that is already full.
+            $starter = $applications->hire($hired->refresh(), [
+                'employee_no' => 'MEI-0027',
+                'hired_on' => now()->subWeeks(3)->toDateString(),
+                'supervisor_id' => $staff['MEI-0005']->getKey(),
+                'employment_type' => 'permanent',
+                'probation_ends_on' => now()->addMonths(3)->toDateString(),
+            ], $hr);
+
+            // The new starter's joining list, part done. The item still open is the sign-in — and
+            // the personnel record genuinely has no account against it, because hiring writes the
+            // person and never the login (§6).
+            $starterList = $lists->start($starter, 'onboarding', $joining, [
+                'started_on' => now()->subWeeks(3)->toDateString(),
+                'due_on' => now()->addWeek()->toDateString(),
+            ], $hr);
+
+            foreach ($starterList->items()->orderBy('sequence')->get() as $item) {
+                $done = match (true) {
+                    str_starts_with($item->label, 'Sign and return') => 'Signed on the first morning and filed.',
+                    str_starts_with($item->label, 'Collect identity') => 'Degree certificate and NYSC discharge seen and copied.',
+                    str_starts_with($item->label, 'Introduce the line manager') => null,
+                    str_starts_with($item->label, 'Issue PPE') => 'Helmet, boots and pass 2451 issued at the gate.',
+                    default => false,
+                };
+
+                if ($done !== false) {
+                    $lists->tick($item, $done, $hr);
+                }
+            }
+
+            // ------------------------------------------------------------ the head still open
+            $inspectorPost = $vacancies->create([
+                'title' => 'QA/QC Inspector',
+                'position_id' => $post['QAI']->id,
+                'org_unit_id' => $unit['QA']->id,
+                'location_id' => $place['SITE-DT']->id,
+                'hiring_manager_id' => $qaManager->getKey(),
+                'employment_type' => 'contract',
+                'openings' => 2,
+                'summary' => 'Witness and sign off welding, coating and civil works at the Delta '
+                    .'Terminal site. Two heads, both on the site rotation.',
+                'requirements' => 'CSWIP 3.1 or equivalent, NDT appreciation, five years on '
+                    .'oil and gas construction.',
+                'target_start_date' => now()->addMonth()->toDateString(),
+                'closes_on' => now()->addWeeks(3)->toDateString(),
+            ], $qaManager);
+
+            $vacancies->submit($inspectorPost, $qaManager);
+            $this->decide(
+                $inspectorPost->refresh(),
+                $opsDirector,
+                Decision::Approve,
+                'Two heads approved on the site rate, for the duration of the terminal contract only.',
+            );
+
+            $offered = $applications->createFor($inspectorPost->refresh(), [
+                'first_name' => 'Idris',
+                'last_name' => 'Mohammed',
+                'email' => 'idris.mohammed@example.com',
+                'phone' => '+234 803 555 0233',
+                'source' => 'referral',
+                'notes' => 'Referred by Kelechi Nwosu. CSWIP current until next March.',
+            ], $hr);
+
+            $idrisPanel = $applications->addStage($offered, [
+                'name' => 'Site interview',
+                'scheduled_at' => now()->subDays(9),
+                'interviewer_id' => $qaManager->getKey(),
+            ], $qaManager);
+            $applications->recordStage($idrisPanel, 'passed', 4, 'Knows the coating spec and has witnessed to it before.', $qaManager);
+            $applications->makeOffer($offered->refresh(), $hr);
+
+            $inScreening = $applications->createFor($inspectorPost->refresh(), [
+                'first_name' => 'Chiamaka',
+                'last_name' => 'Nwosu',
+                'email' => 'chiamaka.nwosu@example.com',
+                'phone' => '+234 805 555 0311',
+                'source' => 'website',
+                'notes' => 'Certificates to be verified with the issuing body before any offer.',
+            ], $hr);
+
+            // Booked, not yet held — the outcome is blank, which is what a pending stage looks like.
+            $applications->addStage($inScreening, [
+                'name' => 'Site interview',
+                'scheduled_at' => now()->addDays(4),
+                'interviewer_id' => $qaManager->getKey(),
+            ], $qaManager);
+
+            $applications->createFor($inspectorPost->refresh(), [
+                'first_name' => 'Blessing',
+                'last_name' => 'Eke',
+                'email' => 'blessing.eke@example.com',
+                'phone' => '+234 806 555 0422',
+                'source' => 'agency',
+                'notes' => 'Applied through the agency framework; CV to be read.',
+            ], $hr);
+
+            $withdrew = $applications->createFor($inspectorPost->refresh(), [
+                'first_name' => 'Samuel',
+                'last_name' => 'Okoro',
+                'email' => 'samuel.okoro@example.com',
+                'phone' => '+234 807 555 0518',
+                'source' => 'referral',
+            ], $hr);
+            $applications->withdraw($withdrew, 'Took a permanent post elsewhere before we interviewed.', $hr);
+
+            // ------------------------------------------------------------ the head still waiting
+            $nightHse = $vacancies->create([
+                'title' => 'HSE Officer — night shift',
+                'position_id' => $post['HSEO']->id,
+                'org_unit_id' => $unit['HSE']->id,
+                'location_id' => $place['SITE-DT']->id,
+                'hiring_manager_id' => $hseManager->getKey(),
+                'employment_type' => 'contract',
+                'openings' => 1,
+                'summary' => 'Cover the night shift at the terminal while the pipe-rack erection '
+                    .'runs around the clock. Six months, reviewed at the end of the erection.',
+                'requirements' => 'NEBOSH General Certificate, first aid at work, previous night '
+                    .'shift experience on a live site.',
+                'target_start_date' => now()->addWeeks(6)->toDateString(),
+                'closes_on' => now()->addWeeks(4)->toDateString(),
+            ], $hseManager);
+
+            $vacancies->submit($nightHse, $hseManager);
+
+            // Deliberately left undecided: it is sitting in Chinedu Balogun's My Approvals right now.
+
+            // ------------------------------------------------------------ leaving
+            // Cleared, because the registers say she holds nothing. Still `clearing` rather than
+            // completed: her last day has not arrived, and the service refuses to finish an exit
+            // for somebody who is still employed.
+            $resigning = $exits->open($staff['MEI-0008'], [   // Priya Raghunathan
+                'reason' => 'resignation',
+                'notified_on' => now()->subDays(6)->toDateString(),
+                'last_working_day' => now()->addWeeks(3)->toDateString(),
+                'notes' => 'Moving to a client-side role in Port Harcourt. Two months\' notice, '
+                    .'working it in full.',
+                'eligible_for_rehire' => true,
+            ], $hr);
+
+            $leaverList = $resigning->checklist;
+
+            if ($leaverList !== null) {
+                foreach ($leaverList->items()->orderBy('sequence')->limit(3)->get() as $item) {
+                    $lists->tick($item, $item->requires_note ? 'Done and witnessed by HR.' : null, $hr);
+                }
+            }
+
+            $exits->clear($resigning->refresh(), $hr);
+
+            // NOT cleared, and the screen will say why: the asset register still has her calibrated
+            // instrument. Nobody can tick their way past this one (§84).
+            $exits->open($staff['MEI-0016'], [               // Ruth Okafor
+                'reason' => 'end_of_contract',
+                'notified_on' => now()->subDays(2)->toDateString(),
+                'last_working_day' => now()->addWeeks(6)->toDateString(),
+                'notes' => 'Fixed-term inspection contract ends with the coating campaign.',
+                'eligible_for_rehire' => true,
+            ], $hr);
+        });
+    }
+
+    /**
+     * The same three registers in a company of eight — Kestrel.
+     *
+     * ONE EXIT IS FINISHED HERE, and it is the row worth opening: completing Josh Aiken's exit ends
+     * the employment AND switches his sign-in off in one transaction, so the demo contains a person
+     * who is genuinely no longer able to log in while every approval he ever made still points at
+     * his account. Nothing is deleted.
+     *
+     * The cover for his desk is the requisition immediately above it, which is how the two halves of
+     * this chapter meet: somebody left, and the company is already advertising the seat.
+     */
+    private function seedKestrelHiring(Organization $organization): void
+    {
+        $this->context->within($organization, function () use ($organization) {
+            $vacancies = app(VacancyService::class);
+            $applications = app(ApplicantService::class);
+            $lists = app(ChecklistService::class);
+            $exits = app(EmployeeExitService::class);
+
+            $staff = $this->staff();
+            $unit = $this->unitsByCode();
+            $place = $this->locationsByCode();
+            $post = Position::query()->get()->keyBy('code');
+
+            $generalist = $this->accountOf($staff, 'KFM-008');      // Marianne Ellis — finance AND HR
+            $md = $this->accountOf($staff, 'KFM-001');              // Rowan Calder — decides
+            $opsManager = $this->accountOf($staff, 'KFM-002');      // Priti Shah
+            $maintManager = $this->accountOf($staff, 'KFM-003');    // Duncan Reilly
+
+            // Eight people and two vans: this company's joining list is the platform's minus the
+            // items it has no use for, plus the one that matters to it. The other company added
+            // two items to the same starting list and kept all seven — same code, same screen.
+            $joining = $lists->defaultTemplate($organization->id, 'onboarding');
+
+            if ($joining !== null) {
+                $joining->items()->where('label', 'Agree the first objectives')->delete();
+
+                ChecklistTemplateItem::create([
+                    'organization_id' => $organization->id,
+                    'checklist_template_id' => $joining->getKey(),
+                    'label' => 'Add to the out-of-hours call-out rota',
+                    'sequence' => (int) $joining->items()->max('sequence') + 1,
+                    'requires_note' => false,
+                ]);
+            }
+
+            // ------------------------------------------------------------ the technician they hired
+            $technicianPost = $vacancies->create([
+                'title' => 'Mobile Electrical Technician',
+                'position_id' => $post['ET']->id,
+                'org_unit_id' => $unit['MNT-ELE']->id,
+                'location_id' => $place['LDS']->id,
+                'hiring_manager_id' => $maintManager->getKey(),
+                'employment_type' => 'permanent',
+                'openings' => 1,
+                'summary' => 'Second electrical technician covering the Leeds and Sheffield PPM '
+                    .'rounds, on the call-out rota one week in three.',
+                'requirements' => '18th edition, City & Guilds 2391 testing and inspection, full '
+                    .'driving licence. Emergency lighting experience preferred.',
+                'target_start_date' => now()->subWeeks(2)->toDateString(),
+                'closes_on' => now()->addWeek()->toDateString(),
+            ], $maintManager);
+
+            $vacancies->submit($technicianPost, $maintManager);
+            $this->decide(
+                $technicianPost->refresh(),
+                $md,
+                Decision::Approve,
+                'Approved. The Leeds round has outgrown one pair of hands and we are paying for it in call-outs.',
+            );
+
+            $newTech = $applications->createFor($technicianPost->refresh(), [
+                'first_name' => 'Harriet',
+                'last_name' => 'Nolan',
+                'email' => 'harriet.nolan@example.com',
+                'phone' => '+44 7700 900412',
+                'source' => 'website',
+                'notes' => 'Six years with a facilities contractor in Bradford; knows the tenant '
+                    .'fit-out side as well as the plant.',
+            ], $generalist);
+
+            $this->attachDemoCv(
+                $newTech,
+                'Six years of commercial electrical maintenance; testing, inspection and emergency lighting.',
+                $generalist,
+            );
+
+            $interview = $applications->addStage($newTech, [
+                'name' => 'Interview with the Maintenance Manager',
+                'scheduled_at' => now()->subWeeks(5),
+                'interviewer_id' => $maintManager->getKey(),
+            ], $maintManager);
+            $applications->recordStage($interview, 'passed', 5, 'Straightforward, tidy work and happy on the rota. Offer it.', $maintManager);
+
+            $otherCandidate = $applications->createFor($technicianPost->refresh(), [
+                'first_name' => 'Dean',
+                'last_name' => 'Marsh',
+                'email' => 'dean.marsh@example.com',
+                'phone' => '+44 7700 900518',
+                'source' => 'agency',
+            ], $generalist);
+            $applications->withdraw($otherCandidate, 'Accepted an offer closer to home before we could interview.', $generalist);
+
+            $applications->makeOffer($newTech->refresh(), $generalist);
+
+            // The head is for one person, so this hire fills the vacancy and shuts it: the other
+            // application had to be closed before it, not after.
+            $joiner = $applications->hire($newTech->refresh(), [
+                'employee_no' => 'KFM-009',
+                'hired_on' => now()->subWeeks(2)->toDateString(),
+                'supervisor_id' => $staff['KFM-003']->getKey(),
+                'employment_type' => 'permanent',
+                'probation_ends_on' => now()->addMonths(4)->toDateString(),
+            ], $generalist);
+
+            $joinerList = $lists->start($joiner, 'onboarding', $joining, [
+                'started_on' => now()->subWeeks(2)->toDateString(),
+                'due_on' => now()->addDays(3)->toDateString(),
+            ], $generalist);
+
+            foreach ($joinerList->items()->orderBy('sequence')->limit(3)->get() as $item) {
+                $lists->tick($item, $item->requires_note ? 'Seen, copied and filed by Marianne.' : null, $generalist);
+            }
+
+            // ------------------------------------------------------------ the desk being covered
+            $coverPost = $vacancies->create([
+                'title' => 'Helpdesk Coordinator — maternity cover',
+                'position_id' => $post['HC']->id,
+                'org_unit_id' => $unit['OPS-HD']->id,
+                'location_id' => $place['MCR']->id,
+                'hiring_manager_id' => $opsManager->getKey(),
+                'employment_type' => 'fixed_term',
+                'openings' => 1,
+                'summary' => 'Twelve months covering the helpdesk: logging tenant calls, dispatching '
+                    .'the engineers and chasing the PPM schedule.',
+                'requirements' => 'Helpdesk or scheduling experience, calm on the phone, comfortable '
+                    .'with a CAFM system.',
+                'target_start_date' => now()->addWeeks(3)->toDateString(),
+                'closes_on' => now()->addWeeks(2)->toDateString(),
+            ], $opsManager);
+
+            $vacancies->submit($coverPost, $opsManager);
+            $this->decide(
+                $coverPost->refresh(),
+                $md,
+                Decision::Approve,
+                'Approved for twelve months. The helpdesk cannot go dark now that Josh has gone.',
+            );
+
+            $applications->createFor($coverPost->refresh(), [
+                'first_name' => 'Leah',
+                'last_name' => 'Sutcliffe',
+                'email' => 'leah.sutcliffe@example.com',
+                'phone' => '+44 7700 900633',
+                'source' => 'agency',
+                'notes' => 'Two years on a facilities helpdesk in Salford.',
+            ], $generalist);
+
+            $secondCandidate = $applications->createFor($coverPost->refresh(), [
+                'first_name' => 'Owen',
+                'last_name' => 'Pritchard',
+                'email' => 'owen.pritchard@example.com',
+                'phone' => '+44 7700 900771',
+                'source' => 'referral',
+                'notes' => 'Erin knows him from a previous contract.',
+            ], $generalist);
+
+            $applications->addStage($secondCandidate, [
+                'name' => 'Interview with the Operations Manager',
+                'scheduled_at' => now()->addDays(3),
+                'interviewer_id' => $opsManager->getKey(),
+            ], $opsManager);
+
+            // ------------------------------------------------------------ the head still waiting
+            // In a company of eight the MD decides every head personally, and the route says so in
+            // data rather than in code. This one is sitting in Rowan Calder's My Approvals.
+            $apprenticePost = $vacancies->create([
+                'title' => 'Apprentice Mechanical Technician',
+                'position_id' => $post['MT']->id,
+                'org_unit_id' => $unit['MNT-MEC']->id,
+                'location_id' => $place['MCR']->id,
+                'hiring_manager_id' => $maintManager->getKey(),
+                'employment_type' => 'apprenticeship',
+                'openings' => 1,
+                'summary' => 'Three-year apprenticeship shadowing the mechanical rounds, day '
+                    .'release at the college.',
+                'requirements' => 'Level 2 maths and English, and an interest in building services.',
+                'target_start_date' => now()->addMonths(2)->toDateString(),
+                'closes_on' => now()->addWeeks(5)->toDateString(),
+            ], $maintManager);
+
+            $vacancies->submit($apprenticePost, $maintManager);
+
+            // ------------------------------------------------------------ the one who left
+            // Notice served, worked out, nothing outstanding, last day already past. This is the
+            // only exit in the demo that goes all the way: it ends the employment, switches the
+            // sign-in off and revokes the access in one transaction — and leaves every timesheet,
+            // approval and job he ever touched exactly where it was.
+            $leaving = $exits->open($staff['KFM-007'], [        // Josh Aiken, helpdesk
+                'reason' => 'resignation',
+                'notified_on' => now()->subWeeks(7)->toDateString(),
+                'last_working_day' => now()->subDays(10)->toDateString(),
+                'notes' => 'Left to study full time. Four weeks\' notice, worked in full.',
+                'interview_notes' => 'Enjoyed the team and the variety; found the call-out rota hard '
+                    .'to plan around while studying. Asked us to look again at how the rota is '
+                    .'published — it goes out a week ahead and that is not long enough.',
+                'eligible_for_rehire' => true,
+            ], $generalist);
+
+            $exitList = $leaving->checklist;
+
+            if ($exitList !== null) {
+                foreach ($exitList->items()->orderBy('sequence')->get() as $item) {
+                    $lists->tick($item, $item->requires_note ? 'Returned and checked off on his last afternoon.' : null, $generalist);
+                }
+            }
+
+            $exits->clear($leaving->refresh(), $generalist);
+            $exits->complete($leaving->refresh(), $generalist);
+        });
+    }
+
+    /**
+     * A CV on the private disk, through the real upload path.
+     *
+     * The same argument as `uploadRevision()` above: a row with a made-up `cv_path` seeds an
+     * applicant whose download button 404s, and a CV is precisely the file §67 is about — somebody's
+     * address, phone number and employment history, streamed only to an authorized reader.
+     */
+    private function attachDemoCv(Applicant $applicant, string $summary, User $actor): void
+    {
+        $bytes = $this->pdfs->renderHtml(
+            $applicant->fullName().' — curriculum vitae',
+            '<h1>'.e($applicant->fullName()).'</h1>'
+            .'<p>'.e($summary).'</p>'
+            .'<p><em>Demonstration file. What matters here is that the bytes are on the private '
+            .'disk and the download route has to authorize before it will hand them over.</em></p>',
+        );
+
+        $path = sys_get_temp_dir().DIRECTORY_SEPARATOR.'demo-cv-'.Str::random(16).'.pdf';
+        file_put_contents($path, $bytes);
+
+        try {
+            app(ApplicantService::class)->attachCv(
+                $applicant,
+                new UploadedFile($path, Str::slug($applicant->fullName()).'-cv.pdf', 'application/pdf', null, true),
+                $actor,
+            );
+        } finally {
+            @unlink($path);
+        }
     }
 
     /**
