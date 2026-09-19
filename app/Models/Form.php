@@ -37,6 +37,7 @@ class Form extends Model
     {
         return [
             'is_active' => 'boolean',
+            'requires_approval' => 'boolean',
         ];
     }
 
@@ -61,6 +62,19 @@ class Form extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    /**
+     * The approval route submissions on this form enter, when the company nominated one.
+     *
+     * Null means "no particular route", which is not the same as "no approval" — that is
+     * `requires_approval`. A form that requires approval and nominates nothing falls through to the
+     * tenant's default route for form submissions, exactly as a document whose category names no
+     * workflow does. See the migration.
+     */
+    public function workflow(): BelongsTo
+    {
+        return $this->belongsTo(Workflow::class);
     }
 
     /**

@@ -13,6 +13,7 @@ use App\Models\FormSubmission;
 use App\Models\FormVersion;
 use App\Models\OptionList;
 use App\Models\User;
+use App\Models\Workflow;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -89,6 +90,8 @@ final class FormDefinitionService
                 'key' => $key,
                 'description' => $this->textOrNull($attributes['description'] ?? null),
                 'category' => $this->textOrNull($attributes['category'] ?? null),
+                'requires_approval' => (bool) ($attributes['requires_approval'] ?? false),
+                'workflow_id' => $this->approvalRouteId($attributes),
                 'is_active' => true,
                 'created_by' => $actor->getKey(),
             ]);
@@ -140,6 +143,12 @@ final class FormDefinitionService
                 'key' => $key,
                 'description' => $this->textOrNull($attributes['description'] ?? null),
                 'category' => $this->textOrNull($attributes['category'] ?? null),
+                'requires_approval' => array_key_exists('requires_approval', $attributes)
+                    ? (bool) $attributes['requires_approval']
+                    : (bool) $form->requires_approval,
+                'workflow_id' => array_key_exists('workflow_id', $attributes)
+                    ? $this->approvalRouteId($attributes)
+                    : $form->workflow_id,
                 'is_active' => array_key_exists('is_active', $attributes)
                     ? (bool) $attributes['is_active']
                     : (bool) $form->is_active,
@@ -657,6 +666,29 @@ final class FormDefinitionService
             ->pluck('name', 'key')->all();
     }
 
+    /**
+     * The approval routes a form is allowed to nominate, for the picker.
+     *
+     * `usable` and `forEntity` do the same two jobs the save-time check does, and they do them here
+     * as a courtesy rather than as the control — a select box is a suggestion, and the id that
+     * arrives back is re-checked in approvalRouteId() whatever this list said (§84).
+     *
+     * `usable` is the one worth naming: a workflow that is still a draft has stages nobody has
+     * agreed to, and offering it would let a company bind its permits to a route that changes under
+     * them the next time somebody saves the builder.
+     *
+     * @return array<int,string>
+     */
+    public function approvalRoutes(): array
+    {
+        return Workflow::query()
+            ->forEntity('form_submission')
+            ->usable()
+            ->orderBy('name')
+            ->pluck('name', 'id')
+            ->all();
+    }
+
     /** How many times this form has been filled in, across every version of it. */
     public function submissionCount(Form $form): int
     {
@@ -1041,6 +1073,37 @@ final class FormDefinitionService
         }
 
         return trim((string) $given) ?: null;
+    }
+
+    /**
+     * The approval route a form nominated, confirmed to be one it is allowed to nominate.
+     *
+     * §74 AND §75 IN ONE METHOD. The id arrives from a select box, which is to say from whatever
+     * the browser posted. Three things are re-checked here and none of them are checked by the
+     * select box: that the workflow exists at all, that it belongs to THIS company — the global
+     * scope does that, and a workflow id from another tenant therefore simply does not resolve —
+     * and that it is a route for filled-in forms rather than for documents or purchase requests.
+     *
+     * The last one is the interesting one. A route pointed at the wrong module does not fail
+     * loudly; it resolves stages against a record whose fields they were never written for, and a
+     * condition reading `form_id` on a document matches nothing, so the stage is skipped and the
+     * form is approved by an empty route. Refusing it here means the misconfiguration is a blank
+     * field on a screen instead of a permit nobody approved.
+     *
+     * @param  array<string,mixed>  $attributes
+     */
+    private function approvalRouteId(array $attributes): ?int
+    {
+        $given = $attributes['workflow_id'] ?? null;
+
+        if (blank($given)) {
+            return null;
+        }
+
+        return Workflow::query()
+            ->whereKey((int) $given)
+            ->forEntity('form_submission')
+            ->value('id');
     }
 
     private function normaliseKey(string $given, string $fallback): string

@@ -9,6 +9,7 @@ use App\Engines\Audit\ActivityRecorder;
 use App\Engines\Configuration\FormCompiler;
 use App\Engines\Configuration\NumberGenerator;
 use App\Engines\Configuration\StatusMachine;
+use App\Engines\Workflow\WorkflowEngine;
 use App\Models\Form;
 use App\Models\FormField;
 use App\Models\FormSubmission;
@@ -18,6 +19,7 @@ use App\Models\Project;
 use App\Models\Signature;
 use App\Models\Status;
 use App\Models\User;
+use App\Models\WorkflowInstance;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -64,6 +66,7 @@ final class FormSubmissionService
         private readonly NumberGenerator $numbers,
         private readonly StatusMachine $statuses,
         private readonly ActivityRecorder $activity,
+        private readonly WorkflowEngine $workflow,
     ) {}
 
     // ================================================================== starting one
@@ -201,7 +204,7 @@ final class FormSubmissionService
             );
         }
 
-        return DB::transaction(function () use ($submission, $actor) {
+        $submission = DB::transaction(function () use ($submission, $actor) {
             $submission->submitted_by = $actor->getKey();
             $submission->submitted_at = now();
             $submission->status_id = $this->statusNamed('submitted')?->id ?? $submission->status_id;
@@ -213,6 +216,59 @@ final class FormSubmissionService
 
             return $submission;
         });
+
+        $this->route($submission, $actor);
+
+        return $submission;
+    }
+
+    /**
+     * Send a submitted sheet out for approval, if its form says it goes out for approval.
+     *
+     * AFTER THE SUBMISSION IS COMMITTED, NOT INSIDE IT, and that ordering is deliberate. Starting a
+     * route resolves assignees, writes stage instances and fires notifications; a failure anywhere
+     * in that — a stage whose role resolves to nobody, a workflow retired since the form nominated
+     * it — must not roll back the act of submitting. The sheet was submitted; that is a fact about
+     * what the person did, and it should not be undone because the approval configuration is
+     * wrong. A submission with no route is visible and fixable. A submission that silently
+     * un-submitted itself is neither.
+     *
+     * A ROUTING FAILURE IS RECORDED, NEVER SWALLOWED. The engine raising here means the company's
+     * approval configuration cannot serve this form, and the timeline is where somebody finds that
+     * out — otherwise the sheet simply sits in "Submitted" forever with nobody able to say why
+     * nothing happened.
+     */
+    private function route(FormSubmission $submission, User $actor): void
+    {
+        $submission->loadMissing('form.workflow');
+
+        if (! $submission->requiresWorkflow()) {
+            return;
+        }
+
+        try {
+            // `resubmit`, not `start`, and it handles both. A sheet sent back for correction
+            // already has an instance sitting in `revision_requested`, and starting a second one
+            // would give the same permit two approval histories — the engine's resubmit reopens
+            // the existing one at the next attempt, which is what the trail on the record screen
+            // is counting. With no prior instance it falls through to `start()` itself.
+            $instance = $this->workflow->resubmit($submission, $actor);
+        } catch (\DomainException $e) {
+            $this->activity->record($submission, 'approval_not_started',
+                'This was submitted but could not be sent for approval: '.$e->getMessage(),
+                [], $actor, $submission->project_id, $submission->org_unit_id);
+
+            return;
+        }
+
+        if ($instance === null) {
+            // The form asks for approval and the company has configured no route that serves it.
+            // Said plainly on the record rather than left as silence (§73).
+            $this->activity->record($submission, 'approval_not_started',
+                'This form needs approval, but no approval route is configured for filled-in forms. '
+                .'An administrator needs to set one on the form or publish a default route.',
+                [], $actor, $submission->project_id, $submission->org_unit_id);
+        }
     }
 
     /**
@@ -248,6 +304,103 @@ final class FormSubmissionService
         $this->statuses->transition($submission, $status, $actor, $reason);
 
         return $submission->refresh();
+    }
+
+    // ================================================================== what the route decided
+
+    /*
+     | Called from FormSubmission's workflow hooks, inside the engine's closing transaction.
+     |
+     | THE APPROVER'S OWN PERMISSIONS ARE NOT RE-ASKED HERE, and that is not an oversight. Somebody
+     | holding `approval.act` was handed this decision BY the route the company configured; the
+     | register's transition whitelist describes what people may do to a submission by hand, which
+     | is a different question. An approver who had to hold `form.review` as well would mean every
+     | company that routes permits to a site manager must also grant that manager the run of the
+     | forms register — so the route would be ignored and the permission granted, which is the
+     | outcome this avoids.
+     */
+
+    /** The route approved it: accepted, and closed. */
+    public function markApproved(FormSubmission $submission, WorkflowInstance $instance): void
+    {
+        $this->settle($submission, $instance, 'accepted', 'approved');
+    }
+
+    /** The route rejected it. The answers stand as the record of what was rejected. */
+    public function markRejected(FormSubmission $submission, WorkflowInstance $instance): void
+    {
+        $this->settle($submission, $instance, 'rejected', 'rejected');
+    }
+
+    /**
+     * Changes were asked for: back to the person who filled it in.
+     *
+     * Lands on `returned` rather than `draft`, the same place `returnForCorrection()` puts it, so
+     * "an approver sent this back" and "a reviewer sent this back" leave the sheet in one state
+     * that means one thing. isEditable() reads that status, so the tablet reopens.
+     */
+    public function markReturned(FormSubmission $submission, WorkflowInstance $instance): void
+    {
+        $this->settle($submission, $instance, 'returned', 'returned for correction');
+    }
+
+    /**
+     * Move a submission to where the route says it ended up.
+     *
+     * TOLERATES A TENANT THAT EDITED ITS OWN TRANSITIONS. §63 says the status vocabulary and the
+     * moves between statuses are the company's to change, and a company that removed
+     * submitted → accepted has not thereby said approvals should stop working. The machine is asked
+     * first, so the move is checked, recorded and notified like any other; if it refuses, the
+     * status is set anyway, because the route's decision is the authority here and a sheet frozen
+     * in "Submitted" after everybody approved it is the worse failure. Both paths leave a trail.
+     */
+    private function settle(
+        FormSubmission $submission,
+        WorkflowInstance $instance,
+        string $statusKey,
+        string $outcome,
+    ): void {
+        $actor = $this->finalApprover($instance);
+        $status = $this->statusNamed($statusKey);
+
+        if ($status === null) {
+            // The company renamed or deleted this status. Nothing to move to, and inventing one
+            // would put a word on the screen that is in none of their lists (§63).
+            return;
+        }
+
+        if ($actor !== null) {
+            try {
+                $this->statuses->transition($submission, $status, $actor,
+                    'Moved by the approval route.');
+            } catch (\DomainException) {
+                $submission->forceFill(['status_id' => $status->getKey()])->save();
+            }
+        } else {
+            $submission->forceFill(['status_id' => $status->getKey()])->save();
+        }
+
+        $this->activity->record($submission, 'approval_'.$statusKey,
+            'The approval route '.$outcome.' '.$submission->displayName().'.',
+            ['workflow_instance_id' => $instance->getKey()], $actor,
+            $submission->project_id, $submission->org_unit_id);
+    }
+
+    /**
+     * Whoever cast the deciding vote.
+     *
+     * The LAST stage to have acted on this attempt, not the first: on a two-stage route, recording
+     * the technical reviewer as the person who approved a permit rather than the manager who
+     * endorsed it would misattribute the decision in the one record an auditor reads.
+     */
+    private function finalApprover(WorkflowInstance $instance): ?User
+    {
+        return $instance->stageInstances()
+            ->where('attempt', $instance->attempt)
+            ->whereNotNull('acted_by')
+            ->reorder()
+            ->orderByDesc('sequence')
+            ->first()?->actor;
     }
 
     // ================================================================== signing

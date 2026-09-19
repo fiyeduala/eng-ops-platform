@@ -160,9 +160,18 @@ class FormSubmissionController extends Controller
         $submission->load(['form', 'status', 'project', 'orgUnit', 'creator', 'submitter',
             'version.sections', 'version.fields', 'answers', 'signatures']);
 
+        // The route this sheet is travelling, if it is travelling one. Loaded the way every other
+        // routable register loads it — the frozen stage copies and the decisions written against
+        // them, in two queries rather than one per stage (§89).
+        $instance = $submission->currentWorkflowInstance()?->load([
+            'currentStageInstance.stage',
+            'stageInstances' => fn ($q) => $q->with(['stage', 'approvals.user:id,name'])->orderBy('sequence'),
+        ]);
+
         return view('form-submissions.show', [
             'submission' => $submission,
             'version' => $submission->version,
+            'instance' => $instance,
             'values' => $this->compiler->valuesFor($submission),
             'compiler' => $this->compiler,
             'transitions' => $this->statuses->available(

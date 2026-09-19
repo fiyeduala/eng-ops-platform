@@ -12,7 +12,7 @@
     FormDefinitionService — the grey is CSS and a form post does not read CSS (§6, §84).
 
     Expects: $form, $version, $versions, $sections, $fieldsBySection, $columnsByParent, $tables,
-             $types, $optionLists, $submissions, $canEdit, $canPublish, $canDelete
+             $types, $optionLists, $approvalRoutes, $submissions, $canEdit, $canPublish, $canDelete
 --}}
 @php
     $editable = $version?->isEditable() ?? false;
@@ -485,6 +485,18 @@
                         <dd><x-badge :tone="$form->is_active ? 'success' : 'neutral'">{{ $form->is_active ? 'Yes' : 'No' }}</x-badge></dd>
                     </div>
                     <div class="flex justify-between gap-3">
+                        <dt class="text-[var(--text-muted)]">Approval</dt>
+                        <dd class="text-right text-[var(--text-body)]">
+                            @if (! $form->requires_approval)
+                                Not needed
+                            @elseif ($form->workflow)
+                                {{ $form->workflow->name }}
+                            @else
+                                The company's default route
+                            @endif
+                        </dd>
+                    </div>
+                    <div class="flex justify-between gap-3">
                         <dt class="text-[var(--text-muted)]">Filled in</dt>
                         <dd class="tabular-nums text-[var(--text-body)]">{{ $submissions }}</dd>
                     </div>
@@ -538,6 +550,43 @@
                             Switching a form off stops it being offered and keeps every submission
                             ever made against it.
                         </p>
+
+                        {{-- Approval. Set on the FORM rather than on each sheet, because who
+                             approves a permit is policy the company decides once — a screen that
+                             asked the person filling one in would be asking them to pick their own
+                             approver. The route only appears once approval is asked for, since a
+                             route on a form that is not routed is a setting that does nothing. --}}
+                        <div class="space-y-2 border-t border-[var(--surface-border)] pt-3"
+                             x-data="{ routed: {{ $form->requires_approval ? 'true' : 'false' }} }">
+                            <label class="flex items-center gap-2 text-sm text-[var(--text-body)]">
+                                <input type="hidden" name="requires_approval" value="0">
+                                <input type="checkbox" name="requires_approval" value="1" x-model="routed">
+                                Sheets filled in on this form go out for approval
+                            </label>
+                            <p class="help">
+                                Leave this off for anything that records what happened rather than
+                                asks permission — a sign-in sheet, a toolbox talk, a delivery note.
+                            </p>
+
+                            <div x-show="routed" x-cloak>
+                                <label class="label" for="form-workflow">Approval route</label>
+                                <select id="form-workflow" name="workflow_id" class="select">
+                                    <option value="">The company's default route</option>
+                                    @foreach ($approvalRoutes as $routeId => $routeName)
+                                        <option value="{{ $routeId }}"
+                                                @selected((int) $form->workflow_id === (int) $routeId)>{{ $routeName }}</option>
+                                    @endforeach
+                                </select>
+                                @if (empty($approvalRoutes))
+                                    <p class="help">
+                                        No approval routes have been published for filled-in forms
+                                        yet. Build one under Approvals, or leave this on the default.
+                                    </p>
+                                @else
+                                    <p class="help">Who is asked, in what order, and what happens if nobody answers.</p>
+                                @endif
+                            </div>
+                        </div>
 
                         <div class="flex justify-end gap-2">
                             <button type="button" class="btn btn-secondary btn-sm" @click="open = false">Cancel</button>

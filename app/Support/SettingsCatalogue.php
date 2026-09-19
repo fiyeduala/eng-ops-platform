@@ -69,9 +69,21 @@ final class SettingsCatalogue
 
         return [
             'org' => [
-                'label' => 'Structure vocabulary',
-                'description' => 'What this company calls each level of its organization. These labels appear throughout the system, so a company with Directorates never sees the word Division.',
+                'label' => 'Company naming',
+                'description' => 'What this company calls itself on a document, and what it calls each level of its organization. These labels appear throughout the system, so a company with Directorates never sees the word Division.',
                 'settings' => [
+                    // Seeded blank, and it has to be reachable from a screen or it stays blank
+                    // forever. A numbering scheme whose pattern leads with {ORG} silently drops the
+                    // token when this is empty, so "MER/ENG/26/007" comes out as "ENG/26/007" —
+                    // correct, unique, and not the reference the company prints on its drawings.
+                    // §73: the walkthrough has to be completable without a developer, and this is
+                    // the one value in the numbering chain that nothing else can supply.
+                    'org.short_code' => [
+                        'label' => 'Short code',
+                        'type' => 'string',
+                        'help' => 'Two to six letters standing for the company on a document reference, e.g. MER for Meridian Engineering. Leave it blank if your references do not begin with the company.',
+                        'rules' => ['nullable', 'string', 'max:6', 'regex:/^[A-Za-z0-9]*$/'],
+                    ],
                     'org.label.division' => ['label' => 'Level 1 is called', 'type' => 'string', 'rules' => ['required', 'string', 'max:40']],
                     'org.label.department' => ['label' => 'Level 2 is called', 'type' => 'string', 'rules' => ['required', 'string', 'max:40']],
                     'org.label.section' => ['label' => 'Level 3 is called', 'type' => 'string', 'rules' => ['required', 'string', 'max:40']],
@@ -93,19 +105,61 @@ final class SettingsCatalogue
                 ],
             ],
 
+            /*
+             * Approvals.
+             *
+             * THESE ARE THE KEYS THE ESCALATION ENGINE ACTUALLY READS, and saying so is the whole
+             * point of the group. It previously offered five settings — a reminder delay, an
+             * escalation delay, a delegation switch, a "rejections must state a reason" switch and
+             * an auto-approve-on-timeout switch — of which exactly none were read by any code. A
+             * screen that offers a company a lever connected to nothing is worse than a screen that
+             * offers nothing: the company sets it, believes it, and finds out otherwise when an
+             * approval they thought was chased for a fortnight turns out never to have been.
+             *
+             * Three of the five are gone rather than wired, and each for its own reason:
+             *
+             *   · `reminder_after_days` and `escalate_after_days` were two names for one ladder.
+             *     EscalationService already reminds the approvers (level 1), then their supervisors
+             *     and the person being held up (level 2), then anybody who can reassign (level 3).
+             *     What it needed was not two more delays but the two knobs below, which are the
+             *     ones it reads.
+             *
+             *   · `require_rejection_reason` described something the platform does unconditionally
+             *     and would not stop doing: ApprovalDecisionRequest requires a comment for every
+             *     decision that is not an approval. Offering to switch that off would be offering
+             *     something the validator refuses.
+             *
+             *   · `auto_approve_on_timeout` is deleted rather than implemented, and it is the one
+             *     worth being explicit about. Its own help text called it strongly discouraged. To
+             *     honour it, something would have to write an approval record naming a person who
+             *     did not approve — a false entry in exactly the history §59 exists to protect, and
+             *     one indistinguishable afterwards from a real decision. Level 3 of the ladder is
+             *     the honest answer to "nobody acted": tell somebody who can unstick it.
+             */
             'workflow' => [
                 'label' => 'Approvals and workflow',
                 'description' => 'How approvals behave when nobody acts. These are company policy, not code.',
                 'settings' => [
-                    'workflow.reminder_after_days' => ['label' => 'Remind the approver after', 'type' => 'integer', 'help' => 'Working days of inaction before a reminder is sent. 0 disables reminders.', 'rules' => ['required', 'integer', 'between:0,30']],
-                    'workflow.escalate_after_days' => ['label' => 'Escalate to their supervisor after', 'type' => 'integer', 'help' => 'Working days of inaction before the approval is escalated up the reporting line. 0 disables escalation.', 'rules' => ['required', 'integer', 'between:0,90']],
-                    'workflow.allow_delegation' => ['label' => 'Approvers may delegate while away', 'type' => 'boolean'],
-                    'workflow.require_rejection_reason' => ['label' => 'A rejection must state a reason', 'type' => 'boolean'],
-                    'workflow.auto_approve_on_timeout' => [
-                        'label' => 'Approve automatically if nobody acts in time',
+                    'workflow.escalation_step_hours' => [
+                        'label' => 'Hours between each chase',
+                        'type' => 'integer',
+                        'help' => 'The first chase goes to the approvers as soon as a stage passes its time limit. Each step after that waits this long: their supervisors next, then anybody who can reassign the approval.',
+                        'rules' => ['required', 'integer', 'between:1,720'],
+                    ],
+                    'workflow.escalation_max_level' => [
+                        'label' => 'Chase as far as',
+                        'type' => 'select',
+                        'options' => [
+                            1 => 'The approvers themselves',
+                            2 => 'Their supervisors, and whoever is being held up',
+                            3 => 'Anybody who can reassign the approval',
+                        ],
+                        'help' => 'A stage with no time limit is never chased, whatever this says — the limit is set on the stage, in the workflow builder.',
+                    ],
+                    'workflow.allow_delegation' => [
+                        'label' => 'Approvers may delegate while away',
                         'type' => 'boolean',
-                        'help' => 'Strongly discouraged. An approval nobody made still carries the approver’s name in the record.',
-                        'sensitive' => true,
+                        'help' => 'Turning this off stops delegation everywhere, even on routes whose stages allow it. Individual stages can still forbid it while this is on.',
                     ],
                 ],
             ],

@@ -6,8 +6,8 @@
     answers against today's questions is the failure the whole versioning design exists to
     prevent, and it is the kind that is invisible until somebody is being audited.
 
-    Expects: $submission, $version, $values, $compiler, $transitions, $editable, $canDelete,
-             $canReview, $canSign, $hash, $actorId, $signable
+    Expects: $submission, $version, $values, $compiler, $instance, $transitions, $editable,
+             $canDelete, $canReview, $canSign, $hash, $actorId, $signable
 --}}
 <x-layouts.app :title="$submission->displayName()">
 
@@ -128,6 +128,30 @@
                     </x-register.fact>
                 </dl>
             </div>
+
+            {{-- Where the sheet has got to, if it was routed at all.
+
+                 THE SECOND BRANCH IS THE IMPORTANT ONE. A form whose builder asked for approval,
+                 on a submitted sheet with no instance, means the routing did not happen — almost
+                 always because nobody has built a route for filled-in forms yet. Saying so here is
+                 the difference between a company discovering that during setup and discovering it
+                 when somebody asks why a permit has been waiting three weeks (§73). --}}
+            @if ($instance)
+                <x-workflow-progress :instance="$instance"/>
+            @elseif ($submission->isSubmitted() && $submission->requiresWorkflow())
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Approval</h3>
+                        <x-badge tone="warning">Not routed</x-badge>
+                    </div>
+                    <p class="p-5 text-sm text-[var(--text-muted)]">
+                        This form asks for approval, but the sheet was never sent to anybody —
+                        there is no approval route set up for filled-in forms. The sheet itself is
+                        submitted and nothing on it has been lost; an administrator can build the
+                        route under Approvals and resubmit.
+                    </p>
+                </div>
+            @endif
 
             @if ($canReview)
                 <div class="card">

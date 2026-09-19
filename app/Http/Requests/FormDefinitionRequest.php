@@ -40,12 +40,26 @@ class FormDefinitionRequest extends FormRequest
             'description' => ['nullable', 'string', 'max:500'],
             'category' => ['nullable', 'string', 'max:60'],
             'is_active' => ['nullable', 'boolean'],
+
+            // Whether submissions go out for approval, and which route they take.
+            //
+            // `exists` IS NOT USED HERE, and that is not an oversight. A plain exists rule would
+            // pass for a workflow belonging to another company — the rule queries the table, not
+            // the tenant — and it would pass for a route built to approve documents. Both are
+            // re-checked in FormDefinitionService::approvalRouteId() against a scoped query, which
+            // is the only place that can answer them honestly (§74, §75, §84). This rule's job is
+            // the part that really is about the payload: that it is a number, if it is anything.
+            'requires_approval' => ['nullable', 'boolean'],
+            'workflow_id' => ['nullable', 'integer'],
         ];
     }
 
     /** @return array<string,mixed> */
     public function formAttributes(): array
     {
-        return $this->safe()->only(['name', 'key', 'description', 'category', 'is_active']);
+        return $this->safe()->only([
+            'name', 'key', 'description', 'category', 'is_active',
+            'requires_approval', 'workflow_id',
+        ]);
     }
 }

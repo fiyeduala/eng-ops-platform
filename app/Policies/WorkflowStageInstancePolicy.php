@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Policies;
 
+use App\Engines\Access\AccessResolver;
+use App\Engines\Access\ScopeCompiler;
+use App\Engines\Configuration\SettingsRepository;
 use App\Models\User;
 use App\Models\WorkflowStageInstance;
 use Illuminate\Database\Eloquent\Model;
@@ -35,6 +38,14 @@ use Illuminate\Support\Facades\Gate;
 class WorkflowStageInstancePolicy extends ScopedPolicy
 {
     protected string $module = 'approval';
+
+    public function __construct(
+        AccessResolver $resolver,
+        ScopeCompiler $compiler,
+        private readonly SettingsRepository $settings,
+    ) {
+        parent::__construct($resolver, $compiler);
+    }
 
     public function view(User $user, Model $record): bool
     {
@@ -94,9 +105,20 @@ class WorkflowStageInstancePolicy extends ScopedPolicy
      * configured to allow it. Delegation is recorded on the resulting approval — `delegated_from`
      * — so the history says who was asked and who answered, which is the whole point of allowing it
      * at all.
+     *
+     * TWO SWITCHES, NOT ONE, AND THEY ARE NOT THE SAME SWITCH. `workflow.allow_delegation` is the
+     * company saying whether it does this at all; `allow_delegate` on the stage is a route saying
+     * whether THIS decision may be handed on. A company that has decided nobody delegates should
+     * not have to find every stage of every route and untick it, and — more to the point — should
+     * not have that decision quietly undone by whoever builds the next route. The company setting
+     * is therefore a veto over the stage flag rather than a default for it.
      */
     public function delegate(User $user, WorkflowStageInstance $stageInstance): bool
     {
+        if (! $this->settings->bool('workflow.allow_delegation', true)) {
+            return false;
+        }
+
         $stage = $stageInstance->relationLoaded('stage') ? $stageInstance->stage : $stageInstance->stage()->first();
 
         return $stageInstance->isPending()

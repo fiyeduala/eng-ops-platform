@@ -167,11 +167,12 @@ class OrganizationProvisioner
             'timesheet.max_hours_per_day' => 24,
 
             // --- workflow behaviour ------------------------------------------------------
-            'workflow.escalate_after_days' => 3,
-            'workflow.reminder_after_days' => 1,
+            // The two escalation keys are the ones EscalationService reads; see SettingsCatalogue
+            // for why the three that used to sit here — a reminder delay, a rejection-reason
+            // switch and auto-approve-on-timeout — are gone rather than wired.
+            'workflow.escalation_step_hours' => 24,
+            'workflow.escalation_max_level' => 3,
             'workflow.allow_delegation' => true,
-            'workflow.auto_approve_on_timeout' => false,   // never default to approving silently
-            'workflow.require_rejection_reason' => true,
 
             // --- documents ---------------------------------------------------------------
             'document.numbering_format' => '{PROJECT}-{DISCIPLINE}-{TYPE}-{SEQ:4}',

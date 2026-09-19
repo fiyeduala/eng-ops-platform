@@ -112,6 +112,12 @@ class FormController extends Controller
 
         $version = $this->versionOnScreen($form, $request->query('version'));
 
+        // Eager, because the Details card names the nominated route and lazy loading is off. It
+        // cannot come from the picker's list either: a route that has since been deactivated is
+        // still the one bound to this form, and a screen that showed a blank there would be
+        // telling somebody their permits go nowhere when they go somewhere retired.
+        $form->loadMissing('workflow');
+
         // Loaded in two queries rather than one per section: sections, then every field on the
         // version keyed by section, then the table columns keyed by parent (§89).
         $sections = $version?->sections()->get() ?? collect();
@@ -126,6 +132,7 @@ class FormController extends Controller
             'columnsByParent' => $fields->whereNotNull('parent_field_id')->groupBy('parent_field_id'),
             'types' => FormField::TYPES,
             'optionLists' => $this->service->optionLists(),
+            'approvalRoutes' => $this->service->approvalRoutes(),
             'submissions' => $this->service->submissionCount($form),
             'canEdit' => $request->user()->can('update', $form),
             'canPublish' => $request->user()->can('publish', $form),

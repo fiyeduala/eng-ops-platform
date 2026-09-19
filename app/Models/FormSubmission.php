@@ -8,6 +8,8 @@ use App\Engines\Access\Concerns\BelongsToOrganization;
 use App\Engines\Access\Concerns\Scopeable;
 use App\Engines\Audit\Concerns\Auditable;
 use App\Engines\Audit\Concerns\HasActivity;
+use App\Engines\Workflow\Concerns\HasWorkflow;
+use App\Services\FormSubmissionService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -21,10 +23,16 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * One filled-in form — somebody's answers, against the questions as they stood that day.
  *
  * NOT RegisterRecord, though it looks like one. That concern is the spine of the Phase 4
- * engineering registers and carries a discipline, a confidentiality level, a due date and a
- * workflow, none of which a form submission has: a submission is about whatever its form is about,
- * and pretending it has an engineering discipline would put "Piping" on a visitor sign-in sheet.
- * The traits it genuinely needs are composed directly instead.
+ * engineering registers and carries a discipline, a confidentiality level and a due date, none of
+ * which a form submission has: a submission is about whatever its form is about, and pretending it
+ * has an engineering discipline would put "Piping" on a visitor sign-in sheet. The traits it
+ * genuinely needs are composed directly instead.
+ *
+ * IT DOES ROUTE FOR APPROVAL, through the same HasWorkflow trait every other routable module uses
+ * (§78). Whether a given submission is routed at all is the FORM's decision, not this record's —
+ * a permit goes to the HSE manager because the permit form says so, and a sign-in sheet goes
+ * nowhere. Nothing here chooses a route, because whoever fills a sheet in must not be the person
+ * who picks who approves it.
  *
  * `form_version_id` IS THE WHOLE DESIGN. It is set once, never changed, and every answer is read
  * through it — so a submission always means what it meant when it was made, whatever has happened
@@ -36,7 +44,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  */
 class FormSubmission extends Model
 {
-    use Auditable, BelongsToOrganization, HasActivity, HasFactory, Scopeable, SoftDeletes;
+    use Auditable, BelongsToOrganization, HasActivity, HasFactory, HasWorkflow, Scopeable, SoftDeletes;
 
     protected $guarded = ['id'];
 
@@ -236,4 +244,98 @@ class FormSubmission extends Model
     {
         return [];
     }
+
+    // ------------------------------------------------------------------ workflow hooks
+
+    /**
+     * The module the workflow builder files these under.
+     *
+     * `form_submission`, not `form`, and for the same reason the status vocabulary splits: a route
+     * approves a filled-in sheet, never the form it was filled in on. A builder that offered one
+     * "Forms" entry would let somebody build an approval route for a form DEFINITION — which is
+     * what `form.publish` is for — and wire it to records it was never meant to touch.
+     */
+    public function workflowEntityType(): string
+    {
+        return 'form_submission';
+    }
+
+    /** Named rather than derived, because "Form Submissions" is not what anybody calls these. */
+    public static function workflowEntityLabel(): string
+    {
+        return 'Filled-in forms';
+    }
+
+    /**
+     * What a stage CONDITION may branch on.
+     *
+     * A whitelist, and a short one. The obvious omission is the answers: a company would dearly
+     * like "route to the safety manager when the gas reading is over 5%", and it is exactly the
+     * thing this list must not offer. Answers live in `form_answers`, keyed by a field id that
+     * belongs to one edition of one form, so a condition naming one would silently stop matching
+     * the moment the form was republished — and worse, a stage condition is readable by anybody who
+     * can open the workflow builder, so branching on an answer would publish the contents of
+     * submissions to people holding only `workflow.view` (§61, §68).
+     *
+     * `form_id` is the useful one, and it is safe: it says which form, not what anybody wrote on it.
+     *
+     * @return array<int,string>
+     */
+    public function workflowConditionFields(): array
+    {
+        return ['form_id', 'status_id', 'org_unit_id', 'project_id'];
+    }
+
+    /**
+     * The route this submission enters, chosen by the form and never by the submission.
+     *
+     * Null here does not mean "no approval" — it means "no particular route", and the engine falls
+     * through to the tenant default. `requiresWorkflow()` is the one that says no.
+     */
+    public function resolveWorkflowDefinition(): ?Workflow
+    {
+        return $this->form?->workflow;
+    }
+
+    /**
+     * Most forms are not approval processes, and this is where that is honoured.
+     *
+     * A sign-in sheet, a toolbox talk register, a delivery note: submitting one records that it
+     * happened, and there is nobody to ask. Only a form whose builder ticked "needs approval" is
+     * routed, and a form that did not tick it is not routed EVEN IF the tenant has a default route
+     * for form submissions — the false here means do not fall back, which is the distinction
+     * Document::requiresWorkflow() exists to make.
+     */
+    public function requiresWorkflow(): bool
+    {
+        return $this->form?->requires_approval === true;
+    }
+
+    // The route decided; the register's own status follows. Delegated to the service because a
+    // status move on this register is a StatusMachine transition with a fallback, and two places
+    // that knew how to do that would eventually disagree about one of them.
+
+    public function onWorkflowApproved(WorkflowInstance $instance): void
+    {
+        app(FormSubmissionService::class)->markApproved($this, $instance);
+    }
+
+    public function onWorkflowRejected(WorkflowInstance $instance): void
+    {
+        app(FormSubmissionService::class)->markRejected($this, $instance);
+    }
+
+    public function onWorkflowRevisionRequested(WorkflowInstance $instance): void
+    {
+        app(FormSubmissionService::class)->markReturned($this, $instance);
+    }
+
+    /**
+     * A cancelled route leaves the sheet where it was.
+     *
+     * Cancelling an approval is a statement about the approval, not about the answers. The
+     * submission stays submitted, because it was — and quietly reopening it for editing would
+     * discard the fact that somebody was once told it was ready.
+     */
+    public function onWorkflowCancelled(WorkflowInstance $instance): void {}
 }
