@@ -183,13 +183,22 @@ class StatusMachine
     }
 
     /**
-     * The module key for a record: 'project', 'task', 'meeting'.
+     * The status vocabulary a record belongs to: 'project', 'task', 'meeting'.
      *
-     * Read from the model's own permission module so the status vocabulary, the permission
-     * catalogue and the numbering scheme all key off one string.
+     * Normally the model's own permission module, so the vocabulary, the permission catalogue and
+     * the numbering scheme all key off one string. `statusEntityType()` exists for the handful of
+     * records where those two are deliberately NOT the same word: a form submission is governed by
+     * the `form` permissions — the same authority that built the form governs what is filled in on
+     * it — but has its own statuses, because "Draft" on a blank inspection sheet and "Draft" on the
+     * inspection form itself are different facts about different things. Without the hook the
+     * machine would hunt for submission statuses under 'form' and find a form's.
      */
     private function entityTypeOf(Model $record): string
     {
+        if (method_exists($record, 'statusEntityType')) {
+            return $record::statusEntityType();
+        }
+
         return method_exists($record, 'permissionModule')
             ? $record::permissionModule()
             : str(class_basename($record))->snake()->toString();

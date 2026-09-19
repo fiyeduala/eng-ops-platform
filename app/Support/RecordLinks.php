@@ -52,6 +52,8 @@ final class RecordLinks
         'employee' => 'employees.show',
         'user' => 'users.show',
         'org_unit' => 'org-units.show',
+        'form' => 'forms.show',
+        'form_submission' => 'form-submissions.show',
     ];
 
     /**

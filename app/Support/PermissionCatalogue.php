@@ -50,7 +50,12 @@ final class PermissionCatalogue
             // ------------------------------------------------------------- workflow & forms
             'workflow' => ['Workflow', 'Workflow Definitions', ['view', 'create', 'edit', 'delete', 'manage', 'publish']],
             'approval' => ['Workflow', 'Approval Centre', ['view', 'act', 'delegate', 'reassign']],
-            'form' => ['Workflow', 'Custom Forms', [...self::CRUD, 'manage', 'publish', 'submit']],
+            // `review` is what somebody does to a SUBMISSION; `manage` and `publish` are what
+            // somebody does to a DEFINITION. Folding the first into either of the others would
+            // mean the supervisor who signs off a scaffold sheet could also rewrite the sheet —
+            // which is a door to a different room, and the kind an administrator grants without
+            // reading because the label said the same word.
+            'form' => ['Workflow', 'Custom Forms', [...self::CRUD, 'manage', 'publish', 'submit', 'review']],
 
             // ------------------------------------------------------------- projects
             'project' => ['Projects', 'Projects', [...self::CRUD, 'manage', 'archive', 'view_financials', 'view_confidential']],

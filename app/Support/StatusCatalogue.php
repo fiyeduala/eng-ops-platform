@@ -1340,6 +1340,54 @@ final class StatusCatalogue
                  */
                 'transitions' => [],
             ],
+
+            /*
+             * --- Phase 7: the form builder --------------------------------------------
+             *
+             * ONE VOCABULARY FOR EVERY FORM THE COMPANY EVER BUILDS, which is a harder constraint
+             * than any other entry in this file. The forms module serves a scaffold inspection, a
+             * visitor sign-in, a permit checklist and a plant handover with the same seven words —
+             * so every word here has to be true of all of them, and anything that presumes a
+             * subject has been left out. There is no `passed`, no `failed`, no `approved as noted`:
+             * those are what a PARTICULAR form's answers say, and a company that wants them puts a
+             * question on the form or configures a workflow (Part 4), rather than having the
+             * platform guess which of its forms are the kind that pass.
+             *
+             * `draft → submitted` IS NOT A TRANSITION ANYBODY CAN CLICK, and its absence is the
+             * security decision in this block. Submitting is not a change of status: it validates
+             * every answer against the version's rules, stamps who submitted it and when, and
+             * closes the answers to further editing. A row here would put all of that behind a
+             * select box that skipped it (§84) — exactly the reasoning that leaves the visitor
+             * graph empty. The only way in is FormSubmissionService::submit(), guarded by
+             * `form.submit`.
+             *
+             * `returned` IS THE ONLY WAY BACK TO EDITABLE, and it is deliberately a status of its
+             * own rather than a move straight to `draft`. "This was sent back to me" and "I have
+             * not sent this yet" are different facts to the person holding the tablet, and a
+             * register that collapses them cannot show a supervisor what is waiting on somebody.
+             */
+            'form_submission' => [
+                'statuses' => [
+                    'draft' => ['label' => 'Draft', 'color' => 'neutral', 'initial' => true],
+                    'submitted' => ['label' => 'Submitted', 'color' => 'brand'],
+                    'under_review' => ['label' => 'Under review', 'color' => 'brand'],
+                    'returned' => ['label' => 'Returned for correction', 'color' => 'warning'],
+                    'accepted' => ['label' => 'Accepted', 'color' => 'success', 'terminal' => true],
+                    'rejected' => ['label' => 'Rejected', 'color' => 'danger', 'terminal' => true],
+                    'cancelled' => ['label' => 'Cancelled', 'color' => 'neutral', 'terminal' => true],
+                ],
+                'transitions' => [
+                    ['submitted', 'under_review', 'Start review', 'form.review'],
+                    ['submitted', 'accepted', 'Accept', 'form.review'],
+                    ['under_review', 'accepted', 'Accept', 'form.review'],
+                    ['submitted', 'returned', 'Return for correction', 'form.review', true],
+                    ['under_review', 'returned', 'Return for correction', 'form.review', true],
+                    ['under_review', 'rejected', 'Reject', 'form.review', true],
+                    // A returned submission goes back to its author to be resubmitted — the way
+                    // out of here is FormSubmissionService::submit() again, not a status change.
+                    [null, 'cancelled', 'Cancel', 'form.manage', true],
+                ],
+            ],
         ];
     }
 

@@ -414,6 +414,25 @@ class NumberGenerator
             // the company raises purchase orders in five, and VIS-2026-09-00001 stays readable where
             // a yearly sequence would be into six figures by November.
             'visitor' => ['prefix' => 'VIS', 'pattern' => '{PREFIX}-{YYYY}-{MM}-{SEQ}', 'reset_period' => 'monthly', 'padding' => 5],
+
+            /*
+             * --- Phase 7: the form builder --------------------------------------------
+             *
+             * ONE SERIES FOR EVERY FORM IN THE COMPANY, and the alternative was seriously
+             * considered: a scheme per form, so that scaffold inspections run SCAF-2026-0001 and
+             * sign-ins run VIS-2026-0001 on their own counters. It is rejected because the set of
+             * forms is COMPANY-CREATED AND UNBOUNDED. A scheme per form means the numbering screen
+             * grows a row every time somebody drafts anything, a form deleted in March leaves an
+             * orphan scheme holding a live counter, and a form renamed leaves a series prefixed
+             * with what it used to be called. None of that is visible to the person it happens to.
+             *
+             * What a company that wants the form named in the number does instead is add {FORM} to
+             * this pattern — FormSubmissionService passes the form's key as a token on every
+             * issue, so it resolves without a line of code. That is the configurability doctrine
+             * doing the work: ship the plain series, leave the richer one reachable from the
+             * numbering screen (§64, §73).
+             */
+            'form_submission' => ['prefix' => 'FRM', 'pattern' => '{PREFIX}-{YYYY}-{SEQ}', 'reset_period' => 'yearly', 'padding' => 5],
         ];
     }
 }

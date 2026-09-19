@@ -36,6 +36,10 @@ use App\Http\Controllers\EmployeeExitController;
 use App\Http\Controllers\EmployeeMovementController;
 use App\Http\Controllers\EmployeePayController;
 use App\Http\Controllers\ExpenseController;
+use App\Http\Controllers\FormController;
+use App\Http\Controllers\FormFieldController;
+use App\Http\Controllers\FormSectionController;
+use App\Http\Controllers\FormSubmissionController;
 use App\Http\Controllers\FuelLogController;
 use App\Http\Controllers\GoodsReceiptController;
 use App\Http\Controllers\HseInspectionController;
@@ -3107,6 +3111,144 @@ Route::middleware(['auth', 'password.current'])->group(function () {
                 ->where('register', '[a-z_]+')->name('reorder');
         });
     });
+
+    /*
+     * The form builder (§73).
+     *
+     * NOT UNDER `configuration/`, unlike the four editors above it, and the difference is real
+     * rather than cosmetic. A status vocabulary is something an administrator sets up once; a form
+     * is a thing people OPEN — it appears in an approval inbox, in a search result, in a link
+     * pasted into a memo. RecordLinks maps the `form` morph alias to `forms.show`, and a record
+     * that lives under an administration prefix reads to everybody as administration.
+     *
+     * FIVE PERMISSION GROUPS, AND THE SPLIT IS THE POINT. Reading a definition is baseline, because
+     * anybody who may fill a form in has to be served its questions. Editing is `form.edit`.
+     * PUBLISHING IS ITS OWN AUTHORITY: drafting an inspection sheet and deciding that every site
+     * supervisor in the company fills it in tomorrow are different decisions, and a system that
+     * cannot express the difference forces a company to grant the stronger one to everybody who
+     * needs the weaker one. Deleting is narrower still, and the service refuses it outright the
+     * moment a single submission exists.
+     *
+     * Each group's middleware names the SAME permission its policy will ask for, rather than a
+     * wider OR. A route that lets somebody in and a policy that then refuses them is a 403 on a
+     * page they were invited to, which reads as a broken system rather than a boundary.
+     */
+    Route::prefix('forms')->name('forms.')
+        ->whereNumber(['form', 'version', 'section', 'field'])
+        ->group(function () {
+
+            // Declared before `{form}`, though whereNumber already separates them. The literal
+            // first means the rule survives somebody relaxing the constraint later.
+            Route::middleware('permission:form.create')->group(function () {
+                Route::get('new', [FormController::class, 'create'])->name('create');
+                Route::post('/', [FormController::class, 'store'])->name('store');
+            });
+
+            Route::middleware('permission:form.view')->group(function () {
+                Route::get('/', [FormController::class, 'index'])->name('index');
+                Route::get('{form}', [FormController::class, 'show'])->name('show');
+            });
+
+            Route::middleware('permission:form.edit')->group(function () {
+                Route::put('{form}', [FormController::class, 'update'])->name('update');
+
+                Route::post('{form}/draft', [FormController::class, 'openDraft'])->name('draft');
+                Route::delete('{form}/versions/{version}', [FormController::class, 'discardDraft'])
+                    ->name('versions.discard');
+
+                Route::post('{form}/versions/{version}/sections', [FormSectionController::class, 'store'])
+                    ->name('sections.store');
+                Route::post('{form}/versions/{version}/sections/reorder', [FormSectionController::class, 'reorder'])
+                    ->name('sections.reorder');
+                Route::put('{form}/sections/{section}', [FormSectionController::class, 'update'])
+                    ->name('sections.update');
+                Route::delete('{form}/sections/{section}', [FormSectionController::class, 'destroy'])
+                    ->name('sections.destroy');
+
+                Route::post('{form}/sections/{section}/fields', [FormFieldController::class, 'store'])
+                    ->name('fields.store');
+                Route::post('{form}/sections/{section}/fields/reorder', [FormFieldController::class, 'reorder'])
+                    ->name('fields.reorder');
+                Route::put('{form}/fields/{field}', [FormFieldController::class, 'update'])
+                    ->name('fields.update');
+                Route::delete('{form}/fields/{field}', [FormFieldController::class, 'destroy'])
+                    ->name('fields.destroy');
+            });
+
+            Route::middleware('permission:form.publish')->group(function () {
+                Route::post('{form}/versions/{version}/publish', [FormController::class, 'publish'])
+                    ->name('versions.publish');
+                Route::post('{form}/retire', [FormController::class, 'retire'])->name('retire');
+            });
+
+            Route::middleware('permission:form.delete')->group(function () {
+                Route::delete('{form}', [FormController::class, 'destroy'])->name('destroy');
+            });
+        });
+
+    /*
+    |--------------------------------------------------------------------------
+    | Filled-in forms
+    |--------------------------------------------------------------------------
+    |
+    | A SEPARATE REGISTER FROM THE BUILDER, under its own prefix and its own policy, because a
+    | submission is a RECORD and a form is CONFIGURATION. Everything about their authorization
+    | differs: a form definition is company-wide reading that a handful of administrators write,
+    | while a submission carries a project and a department and is therefore subject to the full
+    | scope machinery — an inspection on the Bonny job is readable by the people whose reach covers
+    | the Bonny job and by nobody else (§6, §75).
+    |
+    | SAVE AND SUBMIT ARE DIFFERENT ENDPOINTS BEHIND DIFFERENT PERMISSIONS, and `submit` is a POST
+    | of its own rather than a flag on the update. Recording readings and asserting the sheet is
+    | true are different acts; a company that wants a technician doing the first and a supervisor
+    | doing the second cannot express that if one route does both.
+    |
+    | THERE IS NO draft → submitted TRANSITION on the status graph, deliberately, so the status
+    | endpoint below cannot be used to skip the validation, the stamps and the freeze that
+    | submitting performs. The only door in is `form-submissions.submit` (§84).
+    */
+    Route::prefix('form-submissions')->name('form-submissions.')
+        ->whereNumber('submission')
+        ->group(function () {
+            Route::middleware('permission:form.create')->group(function () {
+                Route::get('new', [FormSubmissionController::class, 'create'])->name('create');
+                Route::post('/', [FormSubmissionController::class, 'store'])->name('store');
+            });
+
+            Route::middleware('permission:form.view')->group(function () {
+                Route::get('/', [FormSubmissionController::class, 'index'])->name('index');
+                Route::get('{submission}', [FormSubmissionController::class, 'show'])->name('show');
+            });
+
+            Route::middleware('permission:form.edit')->group(function () {
+                Route::get('{submission}/fill', [FormSubmissionController::class, 'edit'])->name('edit');
+                Route::put('{submission}', [FormSubmissionController::class, 'update'])->name('update');
+            });
+
+            Route::middleware('permission:form.submit')->group(function () {
+                Route::post('{submission}/submit', [FormSubmissionController::class, 'submit'])->name('submit');
+
+                /*
+                 | Signing is the same authority as submitting, on purpose — FormSubmissionPolicy
+                 | says why. A withdrawal is a DELETE of a signature only in the HTTP sense: the
+                 | service writes a second row saying the person stepped back, and the original is
+                 | never touched (§59).
+                 */
+                Route::post('{submission}/sign/{field}', [FormSubmissionController::class, 'sign'])
+                    ->whereNumber('field')->name('sign');
+                Route::delete('{submission}/sign/{field}', [FormSubmissionController::class, 'withdrawSignature'])
+                    ->whereNumber('field')->name('sign.withdraw');
+            });
+
+            Route::middleware('permission:form.review')->group(function () {
+                Route::post('{submission}/send-back', [FormSubmissionController::class, 'sendBack'])->name('send-back');
+                Route::post('{submission}/status', [FormSubmissionController::class, 'transition'])->name('status');
+            });
+
+            Route::middleware('permission:form.delete')->group(function () {
+                Route::delete('{submission}', [FormSubmissionController::class, 'destroy'])->name('destroy');
+            });
+        });
 
     Route::middleware('permission:audit_log.view')->group(function () {
         Route::get('audit', [AuditLogController::class, 'index'])->name('audit.index');

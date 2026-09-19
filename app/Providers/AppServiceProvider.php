@@ -139,6 +139,12 @@ use App\Models\EmployeePayComponent;
 use App\Models\EmployeeSalary;
 use App\Models\Expense;
 use App\Models\Follower;
+use App\Models\Form;
+use App\Models\FormAnswer;
+use App\Models\FormField;
+use App\Models\FormSection;
+use App\Models\FormSubmission;
+use App\Models\FormVersion;
 use App\Models\FuelLog;
 use App\Models\GoodsReceipt;
 use App\Models\GoodsReceiptItem;
@@ -276,6 +282,8 @@ use App\Policies\EmployeePolicy;
 use App\Policies\EmployeeSalaryPolicy;
 use App\Policies\ExpensePolicy;
 use App\Policies\FollowerPolicy;
+use App\Policies\FormPolicy;
+use App\Policies\FormSubmissionPolicy;
 use App\Policies\FuelLogPolicy;
 use App\Policies\GoodsReceiptItemPolicy;
 use App\Policies\GoodsReceiptPolicy;
@@ -512,6 +520,16 @@ class AppServiceProvider extends ServiceProvider
             'approval' => Approval::class,
             'signature' => Signature::class,
 
+            // --- Phase 7: the form builder -------------------------------------------
+            // 'form_submission' is what a Signature stores in `signable_type` and what an
+            // activity entry names, so it is permanent from the day the first form is signed.
+            'form' => Form::class,
+            'form_version' => FormVersion::class,
+            'form_section' => FormSection::class,
+            'form_field' => FormField::class,
+            'form_submission' => FormSubmission::class,
+            'form_answer' => FormAnswer::class,
+
             'transmittal' => Transmittal::class,
             'transmittal_item' => TransmittalItem::class,
             'template' => Template::class,
@@ -721,6 +739,22 @@ class AppServiceProvider extends ServiceProvider
             // CustomFieldValue has NO policy, deliberately. A value is readable exactly when the
             // record carrying it is readable; a second, weaker answer to that question is how a
             // confidential record leaks one field at a time. See the model.
+
+            // --- Phase 7: the form builder -------------------------------------------
+            // Versions, sections and questions all answer to the FORM's policy, through
+            // accessParentRelation. A question that could be read on its own terms would be a
+            // way round the form's gate, one field at a time (§94).
+            Form::class => FormPolicy::class,
+            FormVersion::class => FormPolicy::class,
+            FormSection::class => FormPolicy::class,
+            FormField::class => FormPolicy::class,
+
+            // A submission is a RECORD, not configuration: it carries a project and a department
+            // and is scoped like every other record. Hence a policy of its own rather than two
+            // more rows above.
+            FormSubmission::class => FormSubmissionPolicy::class,
+
+            // FormAnswer has NO policy, for the same reason CustomFieldValue has none.
 
             // --- Phase 2: projects ---------------------------------------------------
             Project::class => ProjectPolicy::class,

@@ -225,6 +225,14 @@ class Navigation
                     // real role — the person who needs to see where a submission has got to.
                     ['label' => 'My approvals', 'route' => 'approvals.index', 'icon' => 'gavel',
                         'permission' => ['approval.view', 'approval.act'], 'active' => 'approvals.*'],
+
+                    // Filled-in forms, listed with the work rather than with the builder that
+                    // defined them. The distinction is the point: an inspection sheet somebody
+                    // completed on site is a record, and looking for it in an administration menu
+                    // is looking in the wrong place. `form.view` is enough to be shown this — the
+                    // access engine decides which submissions the list actually contains (§96).
+                    ['label' => 'Filled-in forms', 'route' => 'form-submissions.index', 'icon' => 'check-square',
+                        'permission' => 'form.view', 'active' => 'form-submissions.*'],
                 ],
             ],
             [
@@ -433,6 +441,17 @@ class Navigation
                         'permission' => ['numbering.view', 'numbering.manage'], 'active' => 'configuration.numbering.*'],
                     ['label' => 'Workflows', 'route' => 'workflows.index', 'icon' => 'target',
                         'permission' => ['workflow.view', 'workflow.manage'], 'active' => 'workflows.*'],
+
+                    // Listed under Administration rather than beside the registers, because what
+                    // you reach here is the BUILDER — the questions, the versions, the publish
+                    // button. Filling a form in is a different act with a different permission,
+                    // and it will be reached from where the work is rather than from a settings
+                    // menu. `form.view` alone is enough to be shown this: reading a definition is
+                    // baseline, and a read-only visit is what the page gives somebody who holds
+                    // nothing more (§96).
+                    ['label' => 'Forms', 'route' => 'forms.index', 'icon' => 'file-text',
+                        'permission' => ['form.view', 'form.manage'], 'active' => 'forms.*'],
+
                     ['label' => 'Document registers', 'route' => 'document-categories.index', 'icon' => 'archive',
                         'permission' => ['document_category.view', 'document_category.manage'],
                         'active' => 'document-categories.*'],
