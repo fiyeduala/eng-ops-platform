@@ -9,6 +9,7 @@ use App\Engines\Access\Concerns\Scopeable;
 use App\Engines\Audit\Concerns\Auditable;
 use App\Engines\Audit\Concerns\HasActivity;
 use App\Engines\Workflow\Concerns\HasWorkflow;
+use App\Models\Concerns\HasCustomFields;
 use App\Services\DocumentVersionService;
 use App\Support\Enums\Confidentiality;
 use App\Support\Enums\DocumentKind;
@@ -41,7 +42,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  */
 class Document extends Model
 {
-    use Auditable, BelongsToOrganization, HasActivity, HasFactory, HasWorkflow, Scopeable, SoftDeletes;
+    use Auditable, BelongsToOrganization, HasActivity, HasCustomFields, HasFactory, HasWorkflow, Scopeable, SoftDeletes;
 
     protected $guarded = ['id'];
 

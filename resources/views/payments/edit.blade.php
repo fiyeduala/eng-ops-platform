@@ -11,6 +11,10 @@
             <x-field label="Confidentiality" name="confidentiality" required><x-select name="confidentiality" :options="$confidentialities" :selected="old('confidentiality', $payment->confidentiality?->value ?? $payment->confidentiality)"/></x-field>
         </div>
         <x-field label="Notes" name="notes" class="mt-4"><x-textarea name="notes" rows="2">{{ old('notes', $payment->notes) }}</x-textarea></x-field>
+        {{-- The fields this company added to this register (§73). Renders nothing until
+             somebody defines one on Configuration → Custom fields. --}}
+        <x-custom-fields.form entity-type="payment" :record="$payment" class="card mt-5"/>
+
         <div class="mt-6 flex gap-2"><button class="btn btn-primary">Save changes</button><a href="{{ route('payments.show', $payment) }}" class="btn btn-ghost">Cancel</a></div>
     </form>
 </x-layouts.app>

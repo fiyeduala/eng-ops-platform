@@ -41,6 +41,8 @@ use Illuminate\Support\Facades\DB;
  */
 class MemoService
 {
+    use Concerns\SavesCustomFields;
+
     public function __construct(
         private readonly NumberGenerator $numbers,
         private readonly StatusMachine $statuses,
@@ -53,7 +55,11 @@ class MemoService
      */
     public function create(array $attributes, User $actor): Memo
     {
-        return DB::transaction(function () use ($attributes, $actor) {
+        // Validated before the transaction opens, by the same engine every other register uses.
+        $custom = $this->validatedCustomFields('memo', $attributes, null);
+        $attributes = $this->withoutCustomFields($attributes);
+
+        return DB::transaction(function () use ($attributes, $custom, $actor) {
             $memo = new Memo($attributes);
 
             // Tenant, number, status and authorship belong to the service, never to the request.
@@ -70,6 +76,8 @@ class MemoService
             $memo->issued_by = null;
 
             $memo->save();
+
+            $this->customFields()->save($memo, $custom);
 
             $this->activity->record(
                 $memo,
@@ -105,16 +113,22 @@ class MemoService
             $attributes['withdrawn_reason'],
         );
 
-        return DB::transaction(function () use ($memo, $attributes, $actor) {
+        $custom = $this->validatedCustomFields('memo', $attributes, $memo);
+        $attributes = $this->withoutCustomFields($attributes);
+
+        return DB::transaction(function () use ($memo, $attributes, $custom, $actor) {
             $memo->fill($attributes);
 
             $changed = array_keys($memo->getDirty());
 
+            $memo->save();
+
+            // A payload that changed nothing but a custom answer is still a change to the record.
+            $changed = [...$changed, ...$this->customFields()->save($memo, $custom)];
+
             if ($changed === []) {
                 return $memo;
             }
-
-            $memo->save();
 
             $this->activity->record(
                 $memo,

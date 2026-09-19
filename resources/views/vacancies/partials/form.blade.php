@@ -36,3 +36,8 @@
 <x-field label="What the person needs" name="requirements" class="mt-4">
     <x-textarea name="requirements" rows="4">{{ old('requirements', $vacancy->requirements) }}</x-textarea>
 </x-field>
+
+
+{{-- The fields this company added to this register (§73). Renders nothing until
+     somebody defines one on Configuration → Custom fields. --}}
+<x-custom-fields.form entity-type="vacancy" :record="$vacancy" class="card mt-5"/>

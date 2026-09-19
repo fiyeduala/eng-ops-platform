@@ -140,3 +140,8 @@
         </div>
     </div>
 </div>
+
+
+{{-- The fields this company added to this register (§73). Renders nothing until
+     somebody defines one on Configuration → Custom fields. --}}
+<x-custom-fields.form entity-type="rfi" :record="$rfi" class="card mt-5"/>

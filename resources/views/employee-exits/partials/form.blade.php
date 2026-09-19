@@ -43,3 +43,8 @@
         <x-textarea name="interview_notes" rows="4">{{ old('interview_notes', $exit->interview_notes) }}</x-textarea>
     </x-field>
 @endif
+
+
+{{-- The fields this company added to this register (§73). Renders nothing until
+     somebody defines one on Configuration → Custom fields. --}}
+<x-custom-fields.form entity-type="employee_exit" :record="$exit" class="card mt-5"/>

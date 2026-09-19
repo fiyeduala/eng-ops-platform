@@ -33,3 +33,8 @@
         <x-textarea name="summary" rows="6" required>{{ old('summary', $case->summary) }}</x-textarea>
     </x-field>
 </div>
+
+
+{{-- The fields this company added to this register (§73). Renders nothing until
+     somebody defines one on Configuration → Custom fields. --}}
+<x-custom-fields.form entity-type="disciplinary_case" :record="$case" class="card mt-5"/>

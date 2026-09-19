@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\HasCustomFields;
 use App\Models\Concerns\RegisterRecord;
 use App\Support\Enums\Confidentiality;
 use Brick\Math\BigDecimal;
@@ -25,7 +26,7 @@ use Illuminate\Database\Eloquent\Relations\MorphOne;
  */
 class Expense extends Model
 {
-    use RegisterRecord;
+    use HasCustomFields, RegisterRecord;
 
     public const DEFAULT_CATEGORIES = [
         'Travel', 'Accommodation', 'Meals', 'Fuel', 'Fees and permits',

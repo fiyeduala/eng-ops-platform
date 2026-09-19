@@ -132,15 +132,22 @@ class ConfigurationController extends Controller
                 'tiles' => [
                     [
                         'label' => 'Custom fields',
-                        'route' => 'custom-fields.index',
+                        'route' => 'configuration.custom-fields.index',
                         'icon' => 'clipboard',
                         'permission' => ['custom_field.view', 'custom_field.manage'],
                         'blurb' => 'The things your company records that nobody else does, added to any register without a developer.',
                     ],
                     [
+                        'label' => 'Option lists',
+                        'route' => 'configuration.option-lists.index',
+                        'icon' => 'scroll',
+                        'permission' => ['custom_field.view', 'custom_field.manage'],
+                        'blurb' => 'Your own words for disciplines, causes and classes — whatever a dropdown on any form should offer.',
+                    ],
+                    [
                         'label' => 'Numbering schemes',
-                        'route' => 'numbering.index',
-                        'icon' => 'flag',
+                        'route' => 'configuration.numbering.index',
+                        'icon' => 'pin',
                         'permission' => ['numbering.view', 'numbering.manage'],
                         'blurb' => 'How every reference number is built, and where the counter resets.',
                     ],

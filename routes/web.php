@@ -22,6 +22,7 @@ use App\Http\Controllers\ConfigurationController;
 use App\Http\Controllers\ContractController;
 use App\Http\Controllers\CorrectiveActionController;
 use App\Http\Controllers\CostCenterController;
+use App\Http\Controllers\CustomFieldController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DeliverableController;
 use App\Http\Controllers\DisciplinaryCaseController;
@@ -50,6 +51,8 @@ use App\Http\Controllers\MeetingController;
 use App\Http\Controllers\MemoController;
 use App\Http\Controllers\NcrController;
 use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\NumberingController;
+use App\Http\Controllers\OptionListController;
 use App\Http\Controllers\OrganizationController;
 use App\Http\Controllers\OrgUnitController;
 use App\Http\Controllers\OvertimeRequestController;
@@ -3014,6 +3017,94 @@ Route::middleware(['auth', 'password.current'])->group(function () {
                 ->where('entityType', '[a-z_]+')->whereNumber('transition')->name('transitions.update');
             Route::delete('{entityType}/transitions/{transition}', [StatusConfigController::class, 'destroyTransition'])
                 ->where('entityType', '[a-z_]+')->whereNumber('transition')->name('transitions.destroy');
+        });
+    });
+
+    /*
+     * Reference numbering (§64).
+     *
+     * NO `store` AND NO `destroy`. A scheme is provisioned by NumberGenerator the first time a
+     * record of its kind is created — and by opening its page here — so there is nothing to create;
+     * and deleting one would only cause the next record to provision a fresh scheme starting at 1,
+     * reissuing references that are already on paper. See NumberingController.
+     *
+     * The preview endpoint is a POST that saves nothing and consumes no number. It is a POST rather
+     * than a GET because a half-composed pattern is form state, not an address — putting it in a
+     * query string would leave draft patterns in every proxy log and browser history between here
+     * and the administrator.
+     */
+    Route::prefix('configuration/numbering')->name('configuration.numbering.')->group(function () {
+        Route::middleware('permission:numbering.view,numbering.manage')->group(function () {
+            Route::get('/', [NumberingController::class, 'index'])->name('index');
+            Route::get('{entityType}', [NumberingController::class, 'show'])
+                ->where('entityType', '[a-z_]+')->name('show');
+            Route::post('{entityType}/preview', [NumberingController::class, 'preview'])
+                ->where('entityType', '[a-z_]+')->name('preview');
+        });
+
+        Route::middleware('permission:numbering.manage')->group(function () {
+            Route::put('{entityType}', [NumberingController::class, 'update'])
+                ->where('entityType', '[a-z_]+')->name('update');
+        });
+    });
+
+    /*
+     * Option lists — the company's own words for everything that is not a status.
+     *
+     * GATED ON `custom_field.*`, not a module of its own. An option list exists to be the contents
+     * of a dropdown field, and the person who adds "Cost code" to the project register is the
+     * person who decides which cost codes there are; a separate permission would produce an
+     * administrator who can create a select field and then cannot fill it. See OptionListPolicy.
+     */
+    Route::prefix('configuration/option-lists')->name('configuration.option-lists.')->group(function () {
+        Route::middleware('permission:custom_field.view,custom_field.manage')->group(function () {
+            Route::get('/', [OptionListController::class, 'index'])->name('index');
+            Route::get('{option_list}', [OptionListController::class, 'show'])
+                ->whereNumber('option_list')->name('show');
+        });
+
+        Route::middleware('permission:custom_field.manage')->group(function () {
+            Route::post('/', [OptionListController::class, 'store'])->name('store');
+            Route::put('{option_list}', [OptionListController::class, 'update'])
+                ->whereNumber('option_list')->name('update');
+            Route::delete('{option_list}', [OptionListController::class, 'destroy'])
+                ->whereNumber('option_list')->name('destroy');
+
+            Route::post('{option_list}/options', [OptionListController::class, 'storeItem'])
+                ->whereNumber('option_list')->name('options.store');
+            Route::post('{option_list}/options/reorder', [OptionListController::class, 'reorderItems'])
+                ->whereNumber('option_list')->name('options.reorder');
+            Route::put('{option_list}/options/{item}', [OptionListController::class, 'updateItem'])
+                ->whereNumber('option_list')->whereNumber('item')->name('options.update');
+            Route::delete('{option_list}/options/{item}', [OptionListController::class, 'destroyItem'])
+                ->whereNumber('option_list')->whereNumber('item')->name('options.destroy');
+        });
+    });
+
+    /**
+     * The custom-field builder (§73).
+     *
+     * Two kinds of segment, kept in separate namespaces on purpose. `registers/{register}` is a
+     * catalogue key — a word, checked against CustomFieldCatalogue in the controller and never
+     * trusted as a table name. `fields/{custom_field}` is a bound model, numeric, tenant-scoped.
+     * Sharing one segment between them would make a register called "7" a routing ambiguity and,
+     * worse, make "is this a register or a record?" a question the router answered by accident.
+     */
+    Route::prefix('configuration/custom-fields')->name('configuration.custom-fields.')->group(function () {
+        Route::middleware('permission:custom_field.view,custom_field.manage')->group(function () {
+            Route::get('/', [CustomFieldController::class, 'index'])->name('index');
+            Route::get('registers/{register}', [CustomFieldController::class, 'show'])
+                ->where('register', '[a-z_]+')->name('show');
+        });
+
+        Route::middleware('permission:custom_field.manage')->group(function () {
+            Route::post('fields', [CustomFieldController::class, 'store'])->name('store');
+            Route::put('fields/{custom_field}', [CustomFieldController::class, 'update'])
+                ->whereNumber('custom_field')->name('update');
+            Route::delete('fields/{custom_field}', [CustomFieldController::class, 'destroy'])
+                ->whereNumber('custom_field')->name('destroy');
+            Route::post('registers/{register}/reorder', [CustomFieldController::class, 'reorder'])
+                ->where('register', '[a-z_]+')->name('reorder');
         });
     });
 

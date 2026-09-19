@@ -41,6 +41,8 @@ use Illuminate\Support\Facades\DB;
  */
 class TaskService
 {
+    use Concerns\SavesCustomFields;
+
     public function __construct(
         private readonly NumberGenerator $numbers,
         private readonly StatusMachine $statuses,
@@ -54,7 +56,11 @@ class TaskService
      */
     public function create(array $attributes, User $actor): Task
     {
-        return DB::transaction(function () use ($attributes, $actor) {
+        // Validated before the transaction opens, by the same engine every other register uses.
+        $custom = $this->validatedCustomFields('task', $attributes, null);
+        $attributes = $this->withoutCustomFields($attributes);
+
+        return DB::transaction(function () use ($attributes, $custom, $actor) {
             $task = new Task($attributes);
 
             // Tenant, number, status and authorship belong to the service. A caller able to pass
@@ -72,6 +78,8 @@ class TaskService
 
             $this->guardParent($task);
             $task->save();
+
+            $this->customFields()->save($task, $custom);
 
             $this->subscribe($task, (int) $actor->id, 'creator', $actor);
 
@@ -124,17 +132,23 @@ class TaskService
             $attributes['completed_by'],
         );
 
-        return DB::transaction(function () use ($task, $attributes, $actor) {
+        $custom = $this->validatedCustomFields('task', $attributes, $task);
+        $attributes = $this->withoutCustomFields($attributes);
+
+        return DB::transaction(function () use ($task, $attributes, $custom, $actor) {
             $task->fill($attributes);
             $this->guardParent($task);
 
             $changed = array_keys($task->getDirty());
 
+            $task->save();
+
+            // A payload that changed nothing but a custom answer is still a change to the record.
+            $changed = [...$changed, ...$this->customFields()->save($task, $custom)];
+
             if ($changed === []) {
                 return $task;
             }
-
-            $task->save();
 
             $this->activity->record(
                 $task,

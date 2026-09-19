@@ -105,3 +105,8 @@
         <x-textarea name="notes" rows="3">{{ old('notes', $visitor->notes) }}</x-textarea>
     </x-field>
 </div>
+
+
+{{-- The fields this company added to this register (§73). Renders nothing until
+     somebody defines one on Configuration → Custom fields. --}}
+<x-custom-fields.form entity-type="visitor" :record="$visitor" class="card mt-5"/>

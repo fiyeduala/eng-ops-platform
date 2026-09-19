@@ -45,6 +45,8 @@ use Illuminate\Support\Facades\DB;
  */
 class MeetingService
 {
+    use Concerns\SavesCustomFields;
+
     public function __construct(
         private readonly NumberGenerator $numbers,
         private readonly StatusMachine $statuses,
@@ -60,7 +62,11 @@ class MeetingService
      */
     public function create(array $attributes, User $actor): Meeting
     {
-        return DB::transaction(function () use ($attributes, $actor) {
+        // Validated before the transaction opens, by the same engine every other register uses.
+        $custom = $this->validatedCustomFields('meeting', $attributes, null);
+        $attributes = $this->withoutCustomFields($attributes);
+
+        return DB::transaction(function () use ($attributes, $custom, $actor) {
             $meeting = new Meeting($attributes);
 
             $meeting->organization_id = $actor->organization_id;
@@ -81,6 +87,8 @@ class MeetingService
             $meeting->minutes_circulated_at = null;
 
             $meeting->save();
+
+            $this->customFields()->save($meeting, $custom);
 
             $this->activity->record(
                 $meeting,
@@ -121,13 +129,19 @@ class MeetingService
             $attributes['cancelled_reason'],
         );
 
-        return DB::transaction(function () use ($meeting, $attributes, $actor) {
+        $custom = $this->validatedCustomFields('meeting', $attributes, $meeting);
+        $attributes = $this->withoutCustomFields($attributes);
+
+        return DB::transaction(function () use ($meeting, $attributes, $custom, $actor) {
             $previousStartsAt = $meeting->starts_at?->toDateTimeString();
             $previousLocation = $meeting->location;
 
             $meeting->fill($attributes);
 
             $changed = array_keys($meeting->getDirty());
+
+            // A payload that changed nothing but a custom answer is still a change to the record.
+            $changed = [...$changed, ...$this->customFields()->save($meeting, $custom)];
 
             if ($changed === []) {
                 return $meeting;

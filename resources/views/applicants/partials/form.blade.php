@@ -13,3 +13,8 @@
 <x-field label="CV" name="cv" class="mt-4" help="PDF, Word or a scan, up to 8MB. Stored privately — it is never a public link.">
     <input type="file" name="cv" class="input" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png">
 </x-field>
+
+
+{{-- The fields this company added to this register (§73). Renders nothing until
+     somebody defines one on Configuration → Custom fields. --}}
+<x-custom-fields.form entity-type="applicant" :record="$applicant" class="card mt-5"/>

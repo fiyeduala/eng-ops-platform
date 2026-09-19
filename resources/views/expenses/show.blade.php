@@ -80,4 +80,8 @@
             @endif
         </div>
     </div>
+
+    {{-- What this company recorded in its own fields (§73). --}}
+    <x-custom-fields.facts :record="$expense" class="card mt-5"/>
+
 </x-layouts.app>

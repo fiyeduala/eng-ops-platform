@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\HasCustomFields;
 use App\Models\Concerns\RegisterRecord;
 use App\Support\Enums\Confidentiality;
 use Illuminate\Database\Eloquent\Builder;
@@ -33,7 +34,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
  */
 class Submittal extends Model
 {
-    use RegisterRecord;
+    use HasCustomFields, RegisterRecord;
 
     /**
      * Starting types, used until a company edits `engineering.submittal_types`.

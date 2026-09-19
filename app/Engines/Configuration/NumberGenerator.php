@@ -69,13 +69,33 @@ class NumberGenerator
      */
     public function preview(string $entityType, array $tokens = []): string
     {
-        $scheme = $this->schemeFor($entityType);
+        return $this->previewScheme($this->schemeFor($entityType), $tokens);
+    }
+
+    /**
+     * What a given scheme WOULD produce — including one carrying unsaved edits.
+     *
+     * The numbering editor has to show an administrator the consequence of a pattern BEFORE they
+     * commit to it, and the rendering rules are subtle enough — per-token widths, unresolved
+     * tokens dropped, the separators around them collapsed — that a second implementation living
+     * in the editor would eventually disagree with this one about what a number looks like. So the
+     * editor hands a modified scheme instance here instead of rendering it itself.
+     *
+     * The counter used is the LIVE one, so the example is the number that would actually come out
+     * next rather than a hypothetical first issue. Nothing is consumed.
+     *
+     * @param  array<string,string|int|null>  $tokens
+     */
+    public function previewScheme(NumberingScheme $scheme, array $tokens = []): string
+    {
         $moment = now();
 
-        $next = DB::table('number_sequences')
-            ->where('numbering_scheme_id', $scheme->id)
-            ->where('period_key', $scheme->periodKeyFor($moment))
-            ->value('next_value');
+        $next = $scheme->exists
+            ? DB::table('number_sequences')
+                ->where('numbering_scheme_id', $scheme->getKey())
+                ->where('period_key', $scheme->periodKeyFor($moment))
+                ->value('next_value')
+            : null;
 
         return $this->render($scheme, (int) ($next ?? $scheme->start_at), $moment, $tokens);
     }

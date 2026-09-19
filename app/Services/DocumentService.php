@@ -36,6 +36,8 @@ use Illuminate\Support\Facades\DB;
  */
 class DocumentService
 {
+    use Concerns\SavesCustomFields;
+
     public function __construct(
         private readonly NumberGenerator $numbers,
         private readonly StatusMachine $statuses,
@@ -60,7 +62,11 @@ class DocumentService
      */
     public function create(array $attributes, User $actor): Document
     {
-        return DB::transaction(function () use ($attributes, $actor) {
+        // Validated before the transaction opens, by the same engine every other register uses.
+        $custom = $this->validatedCustomFields('document', $attributes, null);
+        $attributes = $this->withoutCustomFields($attributes);
+
+        return DB::transaction(function () use ($attributes, $custom, $actor) {
             $category = isset($attributes['document_category_id'])
                 ? DocumentCategory::query()->find($attributes['document_category_id'])
                 : null;
@@ -82,6 +88,8 @@ class DocumentService
             }
 
             $document->save();
+
+            $this->customFields()->save($document, $custom);
 
             $this->activity->record(
                 $document,
@@ -115,7 +123,10 @@ class DocumentService
      */
     public function update(Document $document, array $attributes, User $actor): Document
     {
-        return DB::transaction(function () use ($document, $attributes, $actor) {
+        $custom = $this->validatedCustomFields('document', $attributes, $document);
+        $attributes = $this->withoutCustomFields($attributes);
+
+        return DB::transaction(function () use ($document, $attributes, $custom, $actor) {
             $before = $document->only(['title', 'confidentiality', 'document_category_id', 'owner_id']);
 
             $document->fill($this->safeAttributes($attributes));
@@ -130,6 +141,9 @@ class DocumentService
                 $document->only(array_keys($before)),
                 $before,
             ));
+
+            // A payload that changed nothing but a custom answer is still a change to the record.
+            $changed = [...$changed, ...$this->customFields()->save($document, $custom)];
 
             if ($changed !== []) {
                 $this->activity->record(

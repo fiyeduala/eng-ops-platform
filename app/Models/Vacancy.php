@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\HasCustomFields;
 use App\Models\Concerns\RegisterRecord;
 use App\Services\VacancyService;
 use App\Support\Enums\Confidentiality;
@@ -24,7 +25,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class Vacancy extends Model
 {
-    use RegisterRecord;
+    use HasCustomFields, RegisterRecord;
 
     protected $guarded = ['id'];
 

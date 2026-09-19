@@ -228,3 +228,8 @@
     </div>
 
 @endif
+
+
+{{-- The fields this company added to this register (§73). Renders nothing until
+     somebody defines one on Configuration → Custom fields. --}}
+<x-custom-fields.form entity-type="goods_receipt" :record="$goodsReceipt" class="card mt-5"/>

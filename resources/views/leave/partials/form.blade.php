@@ -18,3 +18,8 @@
     <x-textarea name="reason" rows="3">{{ old('reason', $leave->reason) }}</x-textarea>
 </x-field>
 <p class="mt-3 text-xs text-[var(--text-muted)]">Days are counted on the server from the company's working days and public holidays.</p>
+
+
+{{-- The fields this company added to this register (§73). Renders nothing until
+     somebody defines one on Configuration → Custom fields. --}}
+<x-custom-fields.form entity-type="leave_request" :record="$leave" class="card mt-5"/>

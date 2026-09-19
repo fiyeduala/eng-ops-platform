@@ -8,6 +8,7 @@ use App\Engines\Access\Concerns\BelongsToOrganization;
 use App\Engines\Access\Concerns\Scopeable;
 use App\Engines\Audit\Concerns\Auditable;
 use App\Engines\Audit\Concerns\HasActivity;
+use App\Models\Concerns\HasCustomFields;
 use App\Support\Enums\Confidentiality;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -42,7 +43,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  */
 class Memo extends Model
 {
-    use Auditable, BelongsToOrganization, HasActivity, HasFactory, Scopeable, SoftDeletes;
+    use Auditable, BelongsToOrganization, HasActivity, HasCustomFields, HasFactory, Scopeable, SoftDeletes;
 
     protected $guarded = ['id'];
 

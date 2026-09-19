@@ -36,6 +36,8 @@ use Illuminate\Support\Facades\DB;
  */
 class ProjectService
 {
+    use Concerns\SavesCustomFields;
+
     public function __construct(
         private readonly NumberGenerator $numbers,
         private readonly StatusMachine $statuses,
@@ -49,7 +51,11 @@ class ProjectService
      */
     public function create(array $attributes, User $actor): Project
     {
-        return DB::transaction(function () use ($attributes, $actor) {
+        // Validated before the transaction opens, by the same engine every other register uses.
+        $custom = $this->validatedCustomFields('project', $attributes, null);
+        $attributes = $this->withoutCustomFields($attributes);
+
+        return DB::transaction(function () use ($attributes, $custom, $actor) {
             $project = new Project($attributes);
 
             // Tenant, number, status and authorship are the service's to set. A caller that could
@@ -61,6 +67,8 @@ class ProjectService
             $project->status_id ??= $this->statuses->initialFor('project')?->id;
             $project->is_active = $attributes['is_active'] ?? true;
             $project->save();
+
+            $this->customFields()->save($project, $custom);
 
             $this->seatManager($project, $actor);
 
@@ -90,15 +98,22 @@ class ProjectService
         // if a future form request grows careless.
         unset($attributes['number'], $attributes['organization_id'], $attributes['created_by']);
 
-        return DB::transaction(function () use ($project, $attributes, $actor) {
+        $custom = $this->validatedCustomFields('project', $attributes, $project);
+        $attributes = $this->withoutCustomFields($attributes);
+
+        return DB::transaction(function () use ($project, $attributes, $custom, $actor) {
             $project->fill($attributes);
             $changed = array_keys($project->getDirty());
+
+            $project->save();
+
+            // A payload that changed nothing but a custom answer is still a change to the record,
+            // and the timeline should say so.
+            $changed = [...$changed, ...$this->customFields()->save($project, $custom)];
 
             if ($changed === []) {
                 return $project;
             }
-
-            $project->save();
 
             // A handover puts the incoming manager on the team, for the same reason creation does.
             // It does not remove the outgoing one: their membership is a separate decision, and

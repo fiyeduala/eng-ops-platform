@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\HasCustomFields;
 use App\Models\Concerns\RegisterRecord;
 use App\Support\Enums\Confidentiality;
 use Brick\Math\BigDecimal;
@@ -22,7 +23,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  */
 class Income extends Model
 {
-    use RegisterRecord;
+    use HasCustomFields, RegisterRecord;
 
     public const DEFAULT_CATEGORIES = [
         'Contract billing', 'Variation', 'Service call-out', 'Equipment hire',

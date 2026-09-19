@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\HasCustomFields;
 use App\Models\Concerns\RegisterRecord;
 use App\Support\Enums\Confidentiality;
 use Illuminate\Database\Eloquent\Builder;
@@ -39,7 +40,7 @@ use Illuminate\Support\Collection;
  */
 class Quotation extends Model
 {
-    use RegisterRecord;
+    use HasCustomFields, RegisterRecord;
 
     protected $table = 'quotations';
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\HasCustomFields;
 use App\Models\Concerns\RegisterRecord;
 use App\Support\Enums\ChangeDisposition;
 use App\Support\Enums\Confidentiality;
@@ -33,7 +34,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class ChangeRequest extends Model
 {
-    use RegisterRecord;
+    use HasCustomFields, RegisterRecord;
 
     /**
      * Where the change came from. A configurable-looking list that is deliberately fixed, because

@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Engines\Audit\ActivityRecorder;
+use App\Engines\Configuration\CustomFieldRegistry;
 use App\Engines\Configuration\NumberGenerator;
 use App\Engines\Configuration\StatusMachine;
 use App\Models\User;
+use App\Services\Concerns\SavesCustomFields;
 use App\Support\Enums\Confidentiality;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
@@ -36,6 +38,8 @@ use Illuminate\Support\Facades\DB;
  */
 abstract class RegisterService
 {
+    use SavesCustomFields;
+
     public function __construct(
         protected readonly NumberGenerator $numbers,
         protected readonly StatusMachine $statuses,
@@ -62,7 +66,13 @@ abstract class RegisterService
      */
     public function create(array $attributes, User $actor): Model
     {
-        return DB::transaction(function () use ($attributes, $actor) {
+        // Validated BEFORE the transaction opens. A company's own fields are validated by the same
+        // engine on every path into this method — form, import, workflow — because the type
+        // declared in configuration is the only thing standing between a TEXT column and whatever
+        // arrived (§84). See validatedCustomFields() for why create enforces more than update.
+        $custom = $this->validatedCustomFields($this->entityType(), $attributes, null);
+
+        return DB::transaction(function () use ($attributes, $custom, $actor) {
             $class = $this->modelClass();
 
             /** @var Model $record */
@@ -94,6 +104,11 @@ abstract class RegisterService
             $this->beforeCreate($record, $attributes, $actor);
 
             $record->save();
+
+            // After the save, because a value is filed against the record's key. Inside the
+            // transaction, because a record that exists without the answers its company considers
+            // mandatory is a record that fails its own validation the next time anyone opens it.
+            $this->customFields()->save($record, $custom);
 
             $this->activity->record(
                 $record,
@@ -159,6 +174,8 @@ abstract class RegisterService
      */
     public function update(Model $record, array $attributes, User $actor): Model
     {
+        $custom = $this->validatedCustomFields($this->entityType(), $attributes, $record);
+
         $record->fill($this->safeAttributes($attributes));
 
         // The one register whose identifier belongs to the user rather than to the generator. See
@@ -167,15 +184,20 @@ abstract class RegisterService
             $record->setAttribute('number', trim((string) $attributes['number']));
         }
 
-        // Nothing to say and nothing to record. Writing an activity entry for a save that changed
-        // no columns fills a record's timeline with noise that hides the entries that matter.
-        if (! $record->isDirty()) {
-            return $record;
-        }
-
         $changed = array_keys($record->getDirty());
 
+        // A no-op when nothing is dirty, which is why the early return can wait until the custom
+        // fields have had their say: an edit that changed only a company's own field changed the
+        // record, and a timeline that missed it would be lying by omission.
         $record->save();
+
+        $changed = [...$changed, ...$this->customFields()->save($record, $custom)];
+
+        // Nothing to say and nothing to record. Writing an activity entry for a save that changed
+        // nothing fills a record's timeline with noise that hides the entries that matter.
+        if ($changed === []) {
+            return $record;
+        }
 
         $this->activity->record(
             $record,
@@ -353,6 +375,10 @@ abstract class RegisterService
         $denied = array_merge([
             'id', 'organization_id', 'number', 'created_by',
             'created_at', 'updated_at', 'deleted_at',
+
+            // Not a column on any register. It goes to its own table via the registry, and a
+            // fill() that let it through would try to write a column that does not exist.
+            CustomFieldRegistry::INPUT_KEY,
         ], $this->protectedAttributes());
 
         if (method_exists($this, 'itemRelation')) {

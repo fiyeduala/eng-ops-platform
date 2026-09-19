@@ -17,4 +17,8 @@
                 @if($budget->statusKey()==='approved' && auth()->user()->can('manage',$budget))<form method="POST" action="{{ route('budgets.close',$budget) }}" class="mt-5">@csrf<button class="btn btn-secondary btn-sm w-full">Close budget</button></form>@endif
             </div>@if($canDelete)<div class="card p-5"><x-delete-form :action="route('budgets.destroy',$budget)" label="Delete draft budget" confirm="Delete this draft budget?"/></div>@endif</div>
     </div>
+
+    {{-- What this company recorded in its own fields (§73). --}}
+    <x-custom-fields.facts :record="$budget" class="card mt-5"/>
+
 </x-layouts.app>

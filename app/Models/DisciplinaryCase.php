@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\HasCustomFields;
 use App\Models\Concerns\RegisterRecord;
 use App\Support\Enums\Confidentiality;
 use Illuminate\Database\Eloquent\Builder;
@@ -43,7 +44,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class DisciplinaryCase extends Model
 {
-    use RegisterRecord;
+    use HasCustomFields, RegisterRecord;
 
     /** Starting vocabularies. The company owns all three from the first edit (§47). */
     public const DEFAULT_CATEGORIES = ['conduct', 'attendance', 'performance', 'safety', 'property', 'other'];

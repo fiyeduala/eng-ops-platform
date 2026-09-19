@@ -23,6 +23,10 @@
             </x-field>
         </div>
 
+        {{-- The fields this company added to this register (§73). Renders nothing until
+             somebody defines one on Configuration → Custom fields. --}}
+        <x-custom-fields.form entity-type="performance_review" :record="$review" class="card mt-5"/>
+
         <div class="mt-6 flex items-center gap-2">
             <button class="btn btn-primary">Save changes</button>
             <a href="{{ route('performance-reviews.show', $review) }}" class="btn btn-ghost">Cancel</a>

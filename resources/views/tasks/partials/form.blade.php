@@ -123,3 +123,8 @@
         <x-input name="actual_hours" type="number" step="0.25" min="0" :value="$task->actual_hours"/>
     </x-field>
 </div>
+
+
+{{-- The fields this company added to this register (§73). Renders nothing until
+     somebody defines one on Configuration → Custom fields. --}}
+<x-custom-fields.form entity-type="task" :record="$task" class="card mt-5"/>

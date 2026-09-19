@@ -173,3 +173,8 @@
         </div>
     </div>
 </div>
+
+
+{{-- The fields this company added to this register (§73). Renders nothing until
+     somebody defines one on Configuration → Custom fields. --}}
+<x-custom-fields.form entity-type="client" :record="$client" class="card mt-5"/>

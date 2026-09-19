@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\HasCustomFields;
 use App\Models\Concerns\RegisterRecord;
 use App\Support\Enums\Confidentiality;
 use App\Support\Enums\RfiDirection;
@@ -37,7 +38,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
  */
 class Rfi extends Model
 {
-    use RegisterRecord;
+    use HasCustomFields, RegisterRecord;
 
     protected $guarded = ['id'];
 

@@ -11,6 +11,8 @@ use App\Models\ChecklistTemplateItem;
 use App\Models\DocumentCategory;
 use App\Models\LeaveType;
 use App\Models\NumberingScheme;
+use App\Models\OptionList;
+use App\Models\OptionListItem;
 use App\Models\Organization;
 use App\Models\ProjectRole;
 use App\Models\ProjectType;
@@ -67,6 +69,7 @@ class OrganizationProvisioner
                 $this->seedSettings($organization);
                 $this->seedStatuses($organization);
                 $this->seedNumberingSchemes($organization);
+                $this->seedOptionLists($organization);
                 $this->seedProjectCatalogue($organization);
 
                 // Order matters: the registers point at the approval route, so the route has to
@@ -464,6 +467,73 @@ class OrganizationProvisioner
                 'start_at' => 1,
                 'is_active' => true,
             ]);
+        }
+    }
+
+    /**
+     * A starter vocabulary for the things this platform has no opinion about (§63, §73).
+     *
+     * NOT MARKED `is_system`, and that is the decision. A system list is one whose key CODE names
+     * as a literal, and nothing in this application names a discipline — so a company that works
+     * only in marine civils must be free to delete the mechanical entries, or the whole list. These
+     * are a starting point, not a schema.
+     *
+     * Disciplines earn their place because `document.numbering_format` ships with {DISCIPLINE} in
+     * it: without a list to draw from, that token is a promise the platform cannot keep on the
+     * first day. The rest is what a multidiscipline engineering firm actually uses, which is the
+     * §92 standard — realistic and fictional, never a row called "Option 1".
+     */
+    public function seedOptionLists(Organization $organization): void
+    {
+        $lists = [
+            'disciplines' => [
+                'name' => 'Disciplines',
+                'description' => 'The engineering disciplines your work is divided between.',
+                'items' => [
+                    'civil' => 'Civil', 'structural' => 'Structural', 'mechanical' => 'Mechanical',
+                    'electrical' => 'Electrical', 'instrumentation' => 'Instrumentation',
+                    'process' => 'Process', 'architectural' => 'Architectural',
+                    'geotechnical' => 'Geotechnical', 'multidiscipline' => 'Multidiscipline',
+                ],
+            ],
+            'document_classes' => [
+                'name' => 'Document classes',
+                'description' => 'What kind of document this is, in the words your clients use.',
+                'items' => [
+                    'drawing' => 'Drawing', 'specification' => 'Specification',
+                    'calculation' => 'Calculation', 'report' => 'Report',
+                    'datasheet' => 'Datasheet', 'procedure' => 'Procedure',
+                    'schedule' => 'Schedule', 'model' => 'Model',
+                ],
+            ],
+        ];
+
+        foreach ($lists as $key => $definition) {
+            if (OptionList::query()->where('key', $key)->exists()) {
+                continue;
+            }
+
+            $list = OptionList::create([
+                'organization_id' => $organization->id,
+                'key' => $key,
+                'name' => $definition['name'],
+                'description' => $definition['description'],
+                'is_system' => false,
+                'is_active' => true,
+            ]);
+
+            $sort = 0;
+
+            foreach ($definition['items'] as $value => $label) {
+                OptionListItem::create([
+                    'organization_id' => $organization->id,
+                    'option_list_id' => $list->id,
+                    'value' => $value,
+                    'label' => $label,
+                    'sort' => $sort++,
+                    'is_active' => true,
+                ]);
+            }
         }
     }
 

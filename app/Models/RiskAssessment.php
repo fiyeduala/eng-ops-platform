@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\HasCustomFields;
 use App\Models\Concerns\RegisterRecord;
 use App\Support\Enums\Confidentiality;
 use Illuminate\Database\Eloquent\Builder;
@@ -30,7 +31,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class RiskAssessment extends Model
 {
-    use RegisterRecord;
+    use HasCustomFields, RegisterRecord;
 
     protected $guarded = ['id'];
 

@@ -27,6 +27,11 @@
                 <x-field label="Confidentiality" name="confidentiality" required help="Never lower than the record being paid."><x-select name="confidentiality" :options="$confidentialities" :selected="old('confidentiality', $payment->confidentiality?->value ?? $payment->confidentiality)"/></x-field>
             </div>
             <x-field label="Notes" name="notes" class="mt-4"><x-textarea name="notes" rows="2">{{ old('notes') }}</x-textarea></x-field>
+
+            {{-- The fields this company added to this register (§73). Inside the @if, because a
+                 page saying "there is nothing to pay" must not grow a form under that sentence. --}}
+            <x-custom-fields.form entity-type="payment" :record="$payment" class="card mt-5"/>
+
             <div class="mt-6 flex gap-2"><button class="btn btn-primary">Save payment</button><a href="{{ route('payments.index') }}" class="btn btn-ghost">Cancel</a></div>
         @endif
     </form>

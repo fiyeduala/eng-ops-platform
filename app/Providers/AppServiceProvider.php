@@ -11,6 +11,7 @@ use App\Engines\Access\OrganizationContext;
 use App\Engines\Access\ScopeCompiler;
 use App\Engines\Audit\AuditContext;
 use App\Engines\Audit\AuditLogger;
+use App\Engines\Configuration\CustomFieldRegistry;
 use App\Engines\Configuration\SettingsRepository;
 use App\Engines\Workflow\AssigneeResolver;
 use App\Events\AnnouncementPublished;
@@ -120,6 +121,8 @@ use App\Models\ClientContact;
 use App\Models\Contract;
 use App\Models\CorrectiveAction;
 use App\Models\CostCenter;
+use App\Models\CustomField;
+use App\Models\CustomFieldValue;
 use App\Models\Deliverable;
 use App\Models\DisciplinaryCase;
 use App\Models\Document;
@@ -162,6 +165,8 @@ use App\Models\Notification;
 use App\Models\NotificationPreference;
 use App\Models\NumberingScheme;
 use App\Models\NumberSequence;
+use App\Models\OptionList;
+use App\Models\OptionListItem;
 use App\Models\Organization;
 use App\Models\OrgUnit;
 use App\Models\OvertimeRequest;
@@ -257,6 +262,7 @@ use App\Policies\ClientPolicy;
 use App\Policies\ContractPolicy;
 use App\Policies\CorrectiveActionPolicy;
 use App\Policies\CostCenterPolicy;
+use App\Policies\CustomFieldPolicy;
 use App\Policies\DeliverablePolicy;
 use App\Policies\DisciplinaryCasePolicy;
 use App\Policies\DocumentCategoryPolicy;
@@ -294,6 +300,7 @@ use App\Policies\NcrPolicy;
 use App\Policies\NotificationPolicy;
 use App\Policies\NumberingSchemePolicy;
 use App\Policies\NumberSequencePolicy;
+use App\Policies\OptionListPolicy;
 use App\Policies\OrganizationPolicy;
 use App\Policies\OrgUnitPolicy;
 use App\Policies\OvertimeRequestPolicy;
@@ -391,6 +398,12 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(AuditLogger::class);
         $this->app->singleton(SettingsRepository::class);
 
+        // Same reason: a listing renders forty records and every one of them asks which fields its
+        // register carries. Shared, the answer is one query per register per request; unshared, it
+        // is one per record (§89). CustomFieldRegistry::flush() exists so the configuration screen
+        // can invalidate that memo the moment it changes a definition.
+        $this->app->singleton(CustomFieldRegistry::class);
+
         // Shared for a different reason: a custom assignee rule registered by a tenant must be
         // visible to the workflow engine AND to the builder that lists what can be chosen. Two
         // instances would mean a rule that resolves at runtime but cannot be selected in the UI.
@@ -461,6 +474,10 @@ class AppServiceProvider extends ServiceProvider
             'status_transition' => StatusTransition::class,
             'numbering_scheme' => NumberingScheme::class,
             'number_sequence' => NumberSequence::class,
+            'option_list' => OptionList::class,
+            'option_list_item' => OptionListItem::class,
+            'custom_field' => CustomField::class,
+            'custom_field_value' => CustomFieldValue::class,
 
             'project' => Project::class,
             'project_type' => ProjectType::class,
@@ -694,6 +711,16 @@ class AppServiceProvider extends ServiceProvider
             StatusTransition::class => StatusTransitionPolicy::class,
             NumberingScheme::class => NumberingSchemePolicy::class,
             NumberSequence::class => NumberSequencePolicy::class,
+
+            // Option lists answer to `custom_field.*` — the same administrator, the same job. See
+            // OptionListPolicy for why that is one permission rather than two.
+            OptionList::class => OptionListPolicy::class,
+            OptionListItem::class => OptionListPolicy::class,
+            CustomField::class => CustomFieldPolicy::class,
+
+            // CustomFieldValue has NO policy, deliberately. A value is readable exactly when the
+            // record carrying it is readable; a second, weaker answer to that question is how a
+            // confidential record leaks one field at a time. See the model.
 
             // --- Phase 2: projects ---------------------------------------------------
             Project::class => ProjectPolicy::class,

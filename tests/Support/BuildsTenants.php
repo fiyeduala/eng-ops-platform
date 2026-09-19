@@ -215,6 +215,7 @@ trait BuildsTenants
 
             $provisioner->seedStatuses($organization);
             $provisioner->seedNumberingSchemes($organization);
+            $provisioner->seedOptionLists($organization);
             $provisioner->seedProjectCatalogue($organization);
         });
 

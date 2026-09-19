@@ -21,3 +21,8 @@
 </div>
 <x-field label="Description" name="description" class="mt-4"><x-textarea name="description" rows="3">{{ old('description', $expense->description) }}</x-textarea></x-field>
 <x-field label="Notes" name="notes" class="mt-4"><x-textarea name="notes" rows="2">{{ old('notes', $expense->notes) }}</x-textarea></x-field>
+
+
+{{-- The fields this company added to this register (§73). Renders nothing until
+     somebody defines one on Configuration → Custom fields. --}}
+<x-custom-fields.form entity-type="expense" :record="$expense" class="card mt-5"/>

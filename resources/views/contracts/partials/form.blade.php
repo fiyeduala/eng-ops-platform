@@ -247,3 +247,8 @@
         </div>
     </div>
 </div>
+
+
+{{-- The fields this company added to this register (§73). Renders nothing until
+     somebody defines one on Configuration → Custom fields. --}}
+<x-custom-fields.form entity-type="contract" :record="$contract" class="card mt-5"/>

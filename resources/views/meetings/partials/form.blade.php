@@ -138,3 +138,8 @@
         is checked again when you save.
     </p>
 @endif
+
+
+{{-- The fields this company added to this register (§73). Renders nothing until
+     somebody defines one on Configuration → Custom fields. --}}
+<x-custom-fields.form entity-type="meeting" :record="$meeting" class="card mt-5"/>

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Engines\Workflow\Contracts\SpawnsFromRecord;
+use App\Models\Concerns\HasCustomFields;
 use App\Models\Concerns\RegisterRecord;
 use App\Services\CorrectiveActionService;
 use App\Support\Enums\Confidentiality;
@@ -39,7 +40,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
  */
 class CorrectiveAction extends Model implements SpawnsFromRecord
 {
-    use RegisterRecord;
+    use HasCustomFields, RegisterRecord;
 
     protected $guarded = ['id'];
 
