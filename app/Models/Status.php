@@ -33,7 +33,25 @@ class Status extends Model
             'is_initial' => 'boolean',
             'is_terminal' => 'boolean',
             'is_active' => 'boolean',
+            'is_system' => 'boolean',
         ];
+    }
+
+    /**
+     * Is this status one the application's own code moves records into by key?
+     *
+     * Service code says `moveTo($run, 'approved')` as a string literal, and `moveTo()` looks the key
+     * up among ACTIVE statuses and silently does nothing when it is absent. So renaming the key,
+     * deleting it or deactivating it does not produce an error — it produces a platform where the
+     * workflow engine approves a payroll run and the register still reads Submitted.
+     *
+     * A company may still rename the LABEL, recolour and reorder a system status, which is what §73
+     * actually promises. Statuses a company added itself carry no code dependency and are entirely
+     * its own.
+     */
+    public function isSystem(): bool
+    {
+        return (bool) $this->is_system;
     }
 
     // ------------------------------------------------------------------ relationships

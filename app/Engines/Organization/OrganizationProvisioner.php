@@ -390,6 +390,10 @@ class OrganizationProvisioner
                     'is_initial' => $status['initial'] ?? false,
                     'is_terminal' => $status['terminal'] ?? false,
                     'is_active' => true,
+                    // It came from the catalogue, so service code may move records into it by key.
+                    // The configuration editor lets it be relabelled but not rekeyed, deleted or
+                    // deactivated — see the migration that added this column.
+                    'is_system' => true,
                 ])->id;
             }
 

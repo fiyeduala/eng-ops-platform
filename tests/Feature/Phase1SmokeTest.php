@@ -87,6 +87,12 @@ final class Phase1SmokeTest extends TestCase
                 'is_active' => true,
             ]),
             'audit_log' => AuditLog::query()->latest('id')->firstOrFail(),
+
+            // Not a model — the status editor takes a module key in the path. Named here so the
+            // configuration screens join all three passes, including the one that checks an
+            // account holding nothing at all is refused. 'task' is chosen because the provisioner
+            // seeds it with several statuses and several moves, so the page renders with rows.
+            'entityType' => 'task',
         ]);
 
         // A project, so the delivery pages join all three passes with a real record rather than

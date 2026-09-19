@@ -400,6 +400,19 @@ class Navigation
             [
                 'label' => 'Administration',
                 'items' => [
+                    // First, and on its own, because it is the way IN to everything below it. The
+                    // individual screens stay listed: somebody who edits statuses every week should
+                    // not have to go through a hub to reach them, and somebody configuring a company
+                    // for the first time should not have to know which of fourteen items to start
+                    // with (§73).
+                    ['label' => 'Configuration', 'route' => 'configuration.index', 'icon' => 'sliders',
+                        'permission' => ['setting.view', 'setting.manage', 'status.view', 'status.manage',
+                            'workflow.view', 'workflow.manage', 'custom_field.view', 'custom_field.manage',
+                            'numbering.view', 'numbering.manage', 'form.view', 'form.manage',
+                            'escalation.view', 'escalation.manage', 'template.view', 'template.manage',
+                            'organization.view', 'organization.configure'],
+                        'active' => 'configuration.index'],
+
                     ['label' => 'User accounts', 'route' => 'users.index', 'icon' => 'key',
                         'permission' => ['user.view', 'user.manage'], 'active' => 'users.*'],
                     ['label' => 'Roles & permissions', 'route' => 'roles.index', 'icon' => 'shield',
@@ -408,6 +421,8 @@ class Navigation
                         'permission' => ['organization.view', 'organization.configure'], 'active' => 'organization.*'],
                     ['label' => 'Settings', 'route' => 'settings.index', 'icon' => 'sliders',
                         'permission' => ['setting.view', 'setting.manage'], 'active' => 'settings.*'],
+                    ['label' => 'Statuses & transitions', 'route' => 'configuration.statuses.index', 'icon' => 'flag',
+                        'permission' => ['status.view', 'status.manage'], 'active' => 'configuration.statuses.*'],
                     ['label' => 'Workflows', 'route' => 'workflows.index', 'icon' => 'target',
                         'permission' => ['workflow.view', 'workflow.manage'], 'active' => 'workflows.*'],
                     ['label' => 'Document registers', 'route' => 'document-categories.index', 'icon' => 'archive',

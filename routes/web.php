@@ -18,6 +18,7 @@ use App\Http\Controllers\ChangeRequestController;
 use App\Http\Controllers\ChecklistTemplateController;
 use App\Http\Controllers\ClientContactController;
 use App\Http\Controllers\ClientController;
+use App\Http\Controllers\ConfigurationController;
 use App\Http\Controllers\ContractController;
 use App\Http\Controllers\CorrectiveActionController;
 use App\Http\Controllers\CostCenterController;
@@ -76,6 +77,7 @@ use App\Http\Controllers\RfqController;
 use App\Http\Controllers\RiskAssessmentController;
 use App\Http\Controllers\RoleController;
 use App\Http\Controllers\SettingController;
+use App\Http\Controllers\StatusConfigController;
 use App\Http\Controllers\StockController;
 use App\Http\Controllers\StockItemController;
 use App\Http\Controllers\SubmittalController;
@@ -2961,6 +2963,59 @@ Route::middleware(['auth', 'password.current'])->group(function () {
         ->middleware('permission:setting.view,setting.manage')->name('settings.index');
     Route::put('settings', [SettingController::class, 'update'])
         ->middleware('permission:setting.manage')->name('settings.update');
+
+    /*
+    |--------------------------------------------------------------------------
+    | Admin Configuration Center (§73)
+    |--------------------------------------------------------------------------
+    |
+    | The hub is gated on holding ANY configuration permission — `permission:` ORs its arguments —
+    | because the page itself shows nothing but the tiles the viewer may already open, and refusing
+    | somebody with `status.manage` alone would leave them no door into their own editor. What each
+    | tile leads to is gated separately and always more narrowly.
+    |
+    | THE STATUS EDITOR IS GATED TWICE OVER, and deliberately: `permission:status.manage` on the
+    | route says "this kind of person", StatusPolicy on the action says "this record", and
+    | StatusConfigService says "this change". Reading is `status.view` because the vocabulary is
+    | baseline — it appears on every list in the application — but every write needs `status.manage`.
+    |
+    | `{entityType}` is a free path segment rather than a model, so it is constrained here to the
+    | shape of a module key and checked against StatusCatalogue in the controller (§84). Without the
+    | pattern, `configuration/statuses/create` would route as a register called "create".
+    */
+    Route::get('configuration', [ConfigurationController::class, 'index'])
+        ->middleware('permission:setting.view,setting.manage,status.view,status.manage,'
+            .'workflow.view,workflow.manage,custom_field.view,custom_field.manage,'
+            .'numbering.view,numbering.manage,form.view,form.manage,'
+            .'escalation.view,escalation.manage,template.view,template.manage,'
+            .'organization.view,organization.configure')
+        ->name('configuration.index');
+
+    Route::prefix('configuration/statuses')->name('configuration.statuses.')->group(function () {
+        Route::middleware('permission:status.view,status.manage')->group(function () {
+            Route::get('/', [StatusConfigController::class, 'index'])->name('index');
+            Route::get('{entityType}', [StatusConfigController::class, 'show'])
+                ->where('entityType', '[a-z_]+')->name('show');
+        });
+
+        Route::middleware('permission:status.manage')->group(function () {
+            Route::post('{entityType}', [StatusConfigController::class, 'store'])
+                ->where('entityType', '[a-z_]+')->name('store');
+            Route::post('{entityType}/reorder', [StatusConfigController::class, 'reorder'])
+                ->where('entityType', '[a-z_]+')->name('reorder');
+            Route::put('{entityType}/{status}', [StatusConfigController::class, 'update'])
+                ->where('entityType', '[a-z_]+')->whereNumber('status')->name('update');
+            Route::delete('{entityType}/{status}', [StatusConfigController::class, 'destroy'])
+                ->where('entityType', '[a-z_]+')->whereNumber('status')->name('destroy');
+
+            Route::post('{entityType}/transitions', [StatusConfigController::class, 'storeTransition'])
+                ->where('entityType', '[a-z_]+')->name('transitions.store');
+            Route::put('{entityType}/transitions/{transition}', [StatusConfigController::class, 'updateTransition'])
+                ->where('entityType', '[a-z_]+')->whereNumber('transition')->name('transitions.update');
+            Route::delete('{entityType}/transitions/{transition}', [StatusConfigController::class, 'destroyTransition'])
+                ->where('entityType', '[a-z_]+')->whereNumber('transition')->name('transitions.destroy');
+        });
+    });
 
     Route::middleware('permission:audit_log.view')->group(function () {
         Route::get('audit', [AuditLogController::class, 'index'])->name('audit.index');
