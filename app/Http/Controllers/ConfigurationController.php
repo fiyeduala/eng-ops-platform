@@ -122,7 +122,7 @@ class ConfigurationController extends Controller
                         'route' => 'escalations.index',
                         'icon' => 'bell',
                         'permission' => ['escalation.view', 'escalation.manage'],
-                        'blurb' => 'What the platform does on its own when something sits too long.',
+                        'blurb' => 'What the platform does on its own when an approval sits too long.',
                     ],
                 ],
             ],
@@ -178,6 +178,20 @@ class ConfigurationController extends Controller
                 'label' => 'Keeping honest',
                 'description' => 'What the platform watches for you, and the record of everything anybody changed.',
                 'tiles' => [
+                    [
+                        'label' => 'Renewals & expiry',
+                        'route' => 'configuration.expiry-watches.index',
+                        'icon' => 'clock',
+                        'permission' => ['expiry_watch.view', 'expiry_watch.manage'],
+                        'blurb' => 'Which dates get chased — certificates, insurances, permits, training — how far ahead, and who hears.',
+                    ],
+                    [
+                        'label' => 'Measures',
+                        'route' => 'configuration.kpis.index',
+                        'icon' => 'activity',
+                        'permission' => ['kpi.view', 'kpi.manage'],
+                        'blurb' => 'The figures this company watches, each one counted over the records the person looking may see.',
+                    ],
                     [
                         'label' => 'Audit trail',
                         'route' => 'audit.index',

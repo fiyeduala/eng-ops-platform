@@ -18,7 +18,6 @@ use App\Events\AnnouncementPublished;
 use App\Events\ApprovalDecided;
 use App\Events\ApprovalRequested;
 use App\Events\AssetCustodyTransferred;
-use App\Events\AssetMaintenanceDue;
 use App\Events\ChangeRequestDecided;
 use App\Events\CorrectiveActionAssigned;
 use App\Events\DocumentApproved;
@@ -48,6 +47,7 @@ use App\Events\PurchaseRequestDecided;
 use App\Events\PurchaseRequestSubmitted;
 use App\Events\QualityInspectionCompleted;
 use App\Events\QualityInspectionRequested;
+use App\Events\RecordExpiring;
 use App\Events\RfiAnswered;
 use App\Events\RfqAwarded;
 use App\Events\RfqIssued;
@@ -55,13 +55,11 @@ use App\Events\StockFellBelowReorderLevel;
 use App\Events\SubmittalReviewed;
 use App\Events\TaskAssigned;
 use App\Events\TransmittalIssued;
-use App\Events\VehicleDocumentExpiring;
 use App\Events\WorkflowStalled;
 use App\Listeners\NotifyAnnouncementAudience;
 use App\Listeners\NotifyApprovalAssignees;
 use App\Listeners\NotifyApprovalOutcome;
 use App\Listeners\NotifyAssetCustodyTransferred;
-use App\Listeners\NotifyAssetMaintenanceDue;
 use App\Listeners\NotifyChangeRequestDecided;
 use App\Listeners\NotifyCorrectiveActionAssigned;
 use App\Listeners\NotifyDocumentApproved;
@@ -91,6 +89,7 @@ use App\Listeners\NotifyPurchaseRequestDecided;
 use App\Listeners\NotifyPurchaseRequestSubmitted;
 use App\Listeners\NotifyQualityInspectionCompleted;
 use App\Listeners\NotifyQualityInspectionRequested;
+use App\Listeners\NotifyRecordExpiring;
 use App\Listeners\NotifyRfiAnswered;
 use App\Listeners\NotifyRfqAwarded;
 use App\Listeners\NotifyRfqIssued;
@@ -98,7 +97,6 @@ use App\Listeners\NotifyStockBelowReorderLevel;
 use App\Listeners\NotifySubmittalReviewed;
 use App\Listeners\NotifyTaskAssignee;
 use App\Listeners\NotifyTransmittalIssued;
-use App\Listeners\NotifyVehicleDocumentExpiring;
 use App\Listeners\NotifyWorkflowStalled;
 use App\Listeners\RecordDocumentSignature;
 use App\Models\ActivityLog;
@@ -138,6 +136,7 @@ use App\Models\EmployeeMovement;
 use App\Models\EmployeePayComponent;
 use App\Models\EmployeeSalary;
 use App\Models\Expense;
+use App\Models\ExpiryWatch;
 use App\Models\Follower;
 use App\Models\Form;
 use App\Models\FormAnswer;
@@ -155,6 +154,7 @@ use App\Models\Incident;
 use App\Models\IncidentPerson;
 use App\Models\Income;
 use App\Models\Investigation;
+use App\Models\KpiDefinition;
 use App\Models\LeaveBalance;
 use App\Models\LeaveRequest;
 use App\Models\LeaveType;
@@ -281,6 +281,7 @@ use App\Policies\EmployeeMovementPolicy;
 use App\Policies\EmployeePolicy;
 use App\Policies\EmployeeSalaryPolicy;
 use App\Policies\ExpensePolicy;
+use App\Policies\ExpiryWatchPolicy;
 use App\Policies\FollowerPolicy;
 use App\Policies\FormPolicy;
 use App\Policies\FormSubmissionPolicy;
@@ -294,6 +295,7 @@ use App\Policies\IncidentPersonPolicy;
 use App\Policies\IncidentPolicy;
 use App\Policies\IncomePolicy;
 use App\Policies\InvestigationPolicy;
+use App\Policies\KpiDefinitionPolicy;
 use App\Policies\LeaveRequestPolicy;
 use App\Policies\LeaveSettingsPolicy;
 use App\Policies\LocationPolicy;
@@ -486,6 +488,14 @@ class AppServiceProvider extends ServiceProvider
             'option_list_item' => OptionListItem::class,
             'custom_field' => CustomField::class,
             'custom_field_value' => CustomFieldValue::class,
+            // Phase 7, part 5. Auditable like every other piece of configuration: "who told the
+            // platform to stop warning us about permits" is a question somebody will ask after the
+            // first permit lapses unnoticed.
+            'expiry_watch' => ExpiryWatch::class,
+            // Phase 7, part 5. In the morph map like everything else so that a KPI definition can
+            // be followed, audited and attached to, and so that "which measures count deliverables"
+            // is a question with the same shape as every other question about entity types.
+            'kpi_definition' => KpiDefinition::class,
 
             'project' => Project::class,
             'project_type' => ProjectType::class,
@@ -974,6 +984,10 @@ class AppServiceProvider extends ServiceProvider
             PayslipLine::class => PayslipPolicy::class,
 
             Visitor::class => VisitorPolicy::class,
+
+            // --- administration ------------------------------------------------------
+            ExpiryWatch::class => ExpiryWatchPolicy::class,
+            KpiDefinition::class => KpiDefinitionPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {
@@ -1191,18 +1205,21 @@ class AppServiceProvider extends ServiceProvider
                 NotifyStockBelowReorderLevel::class,
             ],
 
-            // Phase 5, part 4 — assets and fleet. Two of these three are raised by a scheduled
-            // sweep rather than by a person, which is why their listeners resolve no causer: the
-            // system noticed, and putting the scheduler's account against the notice would be a
-            // name in the audit trail against a decision that name did not make.
+            // Phase 5, part 4 — assets and fleet.
             AssetCustodyTransferred::class => [
                 NotifyAssetCustodyTransferred::class,
             ],
-            AssetMaintenanceDue::class => [
-                NotifyAssetMaintenanceDue::class,
-            ],
-            VehicleDocumentExpiring::class => [
-                NotifyVehicleDocumentExpiring::class,
+
+            // Phase 7, part 5 — the generic expiry watch, and the ONE event for every date any
+            // company asked to be warned about. It replaced AssetMaintenanceDue and
+            // VehicleDocumentExpiring, which were two events with two listeners saying the same
+            // sentence about the only two of eleven expiry dates anybody had got round to sweeping.
+            //
+            // Raised by the nightly sweep rather than by a person, so its listener resolves no
+            // causer: the system noticed, and putting the scheduler's account against the notice
+            // would be a name in the audit trail against a decision that name did not make.
+            RecordExpiring::class => [
+                NotifyRecordExpiring::class,
             ],
         ];
 

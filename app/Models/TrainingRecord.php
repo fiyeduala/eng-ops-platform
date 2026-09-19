@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Engines\Expiry\Concerns\HasExpiryDates;
 use App\Models\Concerns\HasCustomFields;
 use App\Models\Concerns\RegisterRecord;
 use App\Support\Enums\Confidentiality;
@@ -32,7 +33,18 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class TrainingRecord extends Model
 {
-    use HasCustomFields, RegisterRecord;
+    use HasCustomFields, HasExpiryDates, RegisterRecord;
+
+    /**
+     * A competency certificate that lapsed is a person who is, on paper, no longer qualified to do
+     * the thing they did this morning — and the first anybody usually hears of it is an auditor
+     * asking. Renewing one takes weeks, which is what the default milestones are shaped around.
+     *
+     * @var array<string,string>
+     */
+    protected static array $expiryDates = [
+        'expires_on' => 'Certificate expires',
+    ];
 
     protected $guarded = ['id'];
 

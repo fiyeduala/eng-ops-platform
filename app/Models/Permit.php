@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Engines\Expiry\Concerns\HasExpiryDates;
 use App\Models\Concerns\HasCustomFields;
 use App\Models\Concerns\RegisterRecord;
 use App\Support\Enums\Confidentiality;
@@ -38,7 +39,18 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class Permit extends Model
 {
-    use HasCustomFields, RegisterRecord;
+    use HasCustomFields, HasExpiryDates, RegisterRecord;
+
+    /**
+     * A permit to work that has quietly passed its end time is the most dangerous stale record in
+     * this platform: somebody is standing in a confined space on the authority of a piece of paper
+     * that stopped being valid at four o'clock. Watched in the company's words, not the column's.
+     *
+     * @var array<string,string>
+     */
+    protected static array $expiryDates = [
+        'valid_to' => 'Permit valid until',
+    ];
 
     protected $guarded = ['id'];
 

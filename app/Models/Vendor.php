@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Engines\Expiry\Concerns\HasExpiryDates;
 use App\Models\Concerns\HasCustomFields;
 use App\Models\Concerns\RegisterRecord;
 use App\Support\Enums\Confidentiality;
@@ -42,7 +43,18 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  */
 class Vendor extends Model
 {
-    use HasCustomFields, RegisterRecord;
+    use HasCustomFields, HasExpiryDates, RegisterRecord;
+
+    /**
+     * Prequalification is what makes a vendor eligible to be asked for a price at all. Letting it
+     * lapse unnoticed means an award to a supplier the company no longer has grounds to trust, and
+     * that is discovered during the audit of the purchase rather than before it.
+     *
+     * @var array<string,string>
+     */
+    protected static array $expiryDates = [
+        'prequalification_expires_on' => 'Prequalification expires',
+    ];
 
     protected $table = 'vendors';
 

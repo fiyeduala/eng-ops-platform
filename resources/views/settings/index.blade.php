@@ -43,8 +43,15 @@
         @method('PUT')
 
         <fieldset @disabled(! $canManage) class="space-y-6">
+            {{--
+                Each group is anchored by its key so another screen can send somebody straight to
+                it. The Configuration Center's "Escalation rules" tile lands on #group-workflow —
+                there is no separate escalation editor, because what happens when an approval sits
+                too long is a setting here plus the deadlines on each workflow stage, and a third
+                place to configure it would be the start of a second approval path (§78).
+            --}}
             @foreach ($groups as $groupKey => $group)
-                <div class="card overflow-hidden">
+                <div class="card overflow-hidden" id="group-{{ $groupKey }}">
                     <div class="card-header flex-col items-start gap-1">
                         <h3 class="card-title">{{ $group['label'] }}</h3>
                         @if (! empty($group['description']))

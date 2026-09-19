@@ -7,6 +7,7 @@ namespace App\Models;
 use App\Engines\Access\Concerns\BelongsToOrganization;
 use App\Engines\Access\Concerns\Scopeable;
 use App\Engines\Audit\Concerns\Auditable;
+use App\Engines\Expiry\Concerns\HasExpiryDates;
 use App\Support\Enums\Confidentiality;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -40,7 +41,74 @@ use Illuminate\Support\Str;
  */
 class VehicleDocument extends Model
 {
-    use Auditable, BelongsToOrganization, HasFactory, Scopeable, SoftDeletes;
+    use Auditable, BelongsToOrganization, HasExpiryDates, HasFactory, Scopeable, SoftDeletes;
+
+    /**
+     * The urgent one, and the reason is legal rather than operational: a truck whose insurance ran
+     * out last week is a truck that must not leave the yard, and the exposure if it does is an
+     * uninsured collision with somebody else's car in it. A watch on this should be told to keep
+     * speaking after the date has passed.
+     *
+     * @var array<string,string>
+     */
+    protected static array $expiryDates = [
+        'expires_on' => 'Document expires',
+    ];
+
+    /**
+     * "Vehicle documents", not "Vehicle Documents".
+     *
+     * The derived name is title-cased, which is invisible on a one-word register and jarring beside
+     * "Asset maintenance" and "Training records" in the same dropdown. This is the escape hatch
+     * doing the small job it exists for.
+     */
+    public static function expiryEntityLabel(): string
+    {
+        return 'Vehicle documents';
+    }
+
+    /**
+     * The driver, the custodian and whoever filed it.
+     *
+     * THE DRIVER IS THE POINT. The fleet manager renews the certificate; the driver is the one who
+     * will be stopped at a checkpoint holding a lapsed one, and a warning that reaches only the
+     * office is how that happens. He owns no row here and follows nothing — he is two hops away,
+     * through the vehicle — which is exactly why this hook exists rather than a column scan.
+     *
+     * @return array<int,int|null>
+     */
+    public function expiryAlsoTell(): array
+    {
+        $this->loadMissing('vehicle.asset');
+
+        return [
+            $this->vehicle?->assigned_driver_id,
+            $this->vehicle?->asset?->custodian_id,
+            $this->created_by,
+        ];
+    }
+
+    /** Following a vehicle is following its paperwork. */
+    public function expiryRelatedRecords(): array
+    {
+        $this->loadMissing('vehicle');
+
+        return [$this->vehicle];
+    }
+
+    /**
+     * Superseded paperwork stops speaking.
+     *
+     * A certificate renewed early keeps its own expiry date, and it should: "were we insured on the
+     * day of the accident" is answered by that row. But it is not the current certificate any more,
+     * and warning about it every year forever is how a fleet officer learns to ignore the warnings.
+     *
+     * @param  Builder<static>  $query
+     */
+    public function scopeExpiryWatchable(Builder $query): Builder
+    {
+        return $query->current();
+    }
 
     /**
      * `vehicle_document.types`.

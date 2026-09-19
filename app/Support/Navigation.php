@@ -418,6 +418,7 @@ class Navigation
                             'workflow.view', 'workflow.manage', 'custom_field.view', 'custom_field.manage',
                             'numbering.view', 'numbering.manage', 'form.view', 'form.manage',
                             'escalation.view', 'escalation.manage', 'template.view', 'template.manage',
+                            'expiry_watch.view', 'expiry_watch.manage', 'kpi.view', 'kpi.manage',
                             'organization.view', 'organization.configure'],
                         'active' => 'configuration.index'],
 
@@ -441,6 +442,18 @@ class Navigation
                         'permission' => ['numbering.view', 'numbering.manage'], 'active' => 'configuration.numbering.*'],
                     ['label' => 'Workflows', 'route' => 'workflows.index', 'icon' => 'target',
                         'permission' => ['workflow.view', 'workflow.manage'], 'active' => 'workflows.*'],
+
+                    // Renewals sits in Administration rather than beside the registers it watches,
+                    // because one watch covers a whole register: "warn us about insurance
+                    // certificates" is a decision about the company, not about any one vehicle.
+                    ['label' => 'Renewals & expiry', 'route' => 'configuration.expiry-watches.index', 'icon' => 'clock',
+                        'permission' => ['expiry_watch.view', 'expiry_watch.manage'],
+                        'active' => 'configuration.expiry-watches.*'],
+
+                    // The BUILDER, not the dashboard. What a company measures is configuration;
+                    // where the resulting figures are read is somewhere people are already working.
+                    ['label' => 'Measures', 'route' => 'configuration.kpis.index', 'icon' => 'activity',
+                        'permission' => ['kpi.view', 'kpi.manage'], 'active' => 'configuration.kpis.*'],
 
                     // Listed under Administration rather than beside the registers, because what
                     // you reach here is the BUILDER — the questions, the versions, the publish

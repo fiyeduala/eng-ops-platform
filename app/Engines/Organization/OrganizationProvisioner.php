@@ -9,6 +9,7 @@ use App\Engines\Configuration\NumberGenerator;
 use App\Models\ChecklistTemplate;
 use App\Models\ChecklistTemplateItem;
 use App\Models\DocumentCategory;
+use App\Models\ExpiryWatch;
 use App\Models\LeaveType;
 use App\Models\NumberingScheme;
 use App\Models\OptionList;
@@ -22,6 +23,7 @@ use App\Models\StatusTransition;
 use App\Models\Workflow;
 use App\Models\WorkflowStage;
 use App\Support\Enums\Confidentiality;
+use App\Support\ExpiryCatalogue;
 use App\Support\RoleTemplates;
 use App\Support\StatusCatalogue;
 use Illuminate\Support\Facades\DB;
@@ -71,6 +73,7 @@ class OrganizationProvisioner
                 $this->seedNumberingSchemes($organization);
                 $this->seedOptionLists($organization);
                 $this->seedProjectCatalogue($organization);
+                $this->seedExpiryWatches($organization);
 
                 // Order matters: the registers point at the approval route, so the route has to
                 // exist first. A register created with a null workflow_id would be silently
@@ -466,6 +469,98 @@ class OrganizationProvisioner
                 'reset_period' => $default['reset_period'],
                 'padding' => $default['padding'],
                 'start_at' => 1,
+                'is_active' => true,
+            ]);
+        }
+    }
+
+    /**
+     * The dates a new company is watched on from its first day (§73).
+     *
+     * WHY ANY DEFAULTS AT ALL, when the whole point of the part is that the company chooses? Because
+     * the alternative to a seeded watch is not a company that thought about it — it is a company
+     * that was never warned about anything and did not know there was a screen to visit. An empty
+     * watch list looks exactly like a working one right up until the first permit lapses.
+     *
+     * TWO OF THESE REPLACE CODE. Vehicle paperwork and maintenance due dates were swept by
+     * `assets:sweep` whether a company wanted it or not; they are seeded here so nothing a company
+     * was already being warned about goes quiet, and they are ordinary rows, so a company that never
+     * wanted them can now switch them off — which it could not before.
+     *
+     * THE REST ARE THE ONES THE HARD-CODED SWEEPS NEVER COVERED. A permit, a competency certificate
+     * and a vendor prequalification all lapse the same way and none of them was watched, for no
+     * better reason than that nobody had written the sweep.
+     *
+     * `warn_when_overdue` IS THE INTERESTING COLUMN. It is true where the record going stale is
+     * itself the hazard — an expired insurance certificate on a truck that is still being driven, a
+     * permit-to-work nobody closed — and false where the date passing is merely a fact somebody will
+     * deal with. Set everywhere it would mean a daily e-mail about something harmless, it is how a
+     * company learns to filter the warnings.
+     *
+     * Idempotent on the same unique key the table enforces, so re-provisioning adds watches
+     * published since without touching the lead times an administrator has retuned.
+     */
+    public function seedExpiryWatches(Organization $organization): void
+    {
+        $watches = [
+            // Legal exposure, and the reason the old listener reached for push as well as e-mail: a
+            // truck whose insurance ran out last week must not leave the yard.
+            ['vehicle_document', 'expires_on', 'Vehicle document expiry', [60, 30, 14, 7, 1], true],
+
+            // A permit still open past its validity is somebody working under a clearance that has
+            // expired, which is the whole reason permits have an end date.
+            ['permit', 'valid_to', 'Permit expiry', [14, 7, 3, 1], true],
+
+            // A lapsed competency is a person on site qualified for work they may no longer do, and
+            // it is discovered during the incident investigation rather than before it.
+            ['hse_training', 'expires_on', 'Training certificate expiry', [60, 30, 14, 7], true],
+
+            // Not a hazard, just work that needs scheduling — so it stops speaking once the date
+            // passes, and the overdue tab on the register is where it lives after that.
+            ['asset_maintenance', 'due_on', 'Maintenance due', [30, 14, 7, 1], false],
+
+            // Letting this lapse means awarding to a supplier the company no longer has grounds to
+            // trust; it is noticed during the audit of the purchase.
+            ['vendor', 'prequalification_expires_on', 'Vendor prequalification expiry', [60, 30, 7], false],
+
+            // A controlled document past its review date is still being worked to, which is the
+            // problem — nothing stops anybody using it and nothing on the page says so.
+            ['document', 'next_review_on', 'Document due for review', [30, 7], false],
+        ];
+
+        foreach ($watches as [$entityType, $dateField, $name, $leadDays, $warnWhenOverdue]) {
+            // Guarded against the catalogue rather than assumed. A default naming a register that
+            // has since stopped offering that date would otherwise create a watch that can never
+            // speak, and the company would have no way of telling it apart from one that simply has
+            // nothing falling due (§84).
+            if (! ExpiryCatalogue::offers($entityType, $dateField)) {
+                continue;
+            }
+
+            $exists = ExpiryWatch::query()
+                ->where('entity_type', $entityType)
+                ->where('date_field', $dateField)
+                ->exists();
+
+            if ($exists) {
+                continue;
+            }
+
+            ExpiryWatch::create([
+                'organization_id' => $organization->id,
+                'entity_type' => $entityType,
+                'date_field' => $dateField,
+                'name' => $name,
+                'lead_days' => $leadDays,
+                'warn_when_overdue' => $warnWhenOverdue,
+                // No roles named by default. A seeded watch that e-mailed a role would decide, on
+                // a company's behalf and before it has met the screen, that its fleet managers want
+                // this — and §68 would then quietly drop the ones who cannot see the record anyway,
+                // which looks like a broken watch rather than a deliberate default.
+                'notify_role_ids' => [],
+                'notify_user_ids' => [],
+                'notify_owner' => true,
+                'notify_followers' => true,
                 'is_active' => true,
             ]);
         }

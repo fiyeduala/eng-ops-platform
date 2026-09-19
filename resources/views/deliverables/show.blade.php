@@ -49,6 +49,7 @@
     @if ($deliverable->isIssued())
         <div class="card mb-5 flex items-start gap-3 border-l-4 border-l-emerald-400 p-4">
             <x-icon name="check" class="mt-0.5 h-4 w-4 shrink-0 text-emerald-600"/>
+            <p class="text-sm text-[var(--text-body)]">
                 Issued {{ $deliverable->actual_issue_on->format('j M Y') }}
                 {{-- Each directive starts after whitespace: Blade skips one preceded by a word
                      character, and `date@endif` left the @if open. --}}
@@ -57,7 +58,6 @@
                     the promised date
                 @endif
                 .
-                    the promised date@endif.
             </p>
         </div>
     @elseif ($deliverable->isOverdue())

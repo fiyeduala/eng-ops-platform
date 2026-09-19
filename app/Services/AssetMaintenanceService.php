@@ -6,16 +6,13 @@ namespace App\Services;
 
 use App\Engines\Audit\ActivityRecorder;
 use App\Engines\Configuration\NumberGenerator;
-use App\Engines\Configuration\SettingsRepository;
 use App\Engines\Configuration\StatusMachine;
-use App\Events\AssetMaintenanceDue;
 use App\Models\Asset;
 use App\Models\AssetMaintenance;
 use App\Models\Status;
 use App\Models\User;
 use App\Support\OptionList;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -37,11 +34,15 @@ use Illuminate\Support\Facades\DB;
  * maintenance is a register nobody trusts twice. The asset returns to `idle` or `in_service`
  * depending on whether anybody actually has it, which is the same rule custody uses.
  *
- * `sweepDue()` IS A QUERY, NOT A STATUS COLUMN. Nothing here writes "overdue" anywhere. The sweep
- * asks the database which open jobs fall inside the company's warning window and raises an event
- * for each; a scheduler that stops running therefore costs the company its WARNINGS and can never
- * make an overdue inspection look current. Same reasoning as vehicle documents, contracts, training
- * records and risk assessments — four registers that already work this way.
+ * "OVERDUE" IS A QUERY, NOT A STATUS COLUMN, and nothing here writes it anywhere. There is no sweep
+ * in this service any more either: warning about a due date is now the expiry engine's job, driven
+ * by a watch the company configured rather than by a method somebody wrote for this register and
+ * for no other (see ExpirySweeper, and AssetMaintenance::expiryAlsoTell() for the part this module
+ * still owns — that the custodian of the machine is told, which only the asset knows).
+ *
+ * The property that mattered survived the move intact: a scheduler that stops running costs the
+ * company its WARNINGS and can never make an overdue inspection look current, because every screen
+ * compares a date to today.
  */
 class AssetMaintenanceService extends RegisterService
 {
@@ -49,7 +50,6 @@ class AssetMaintenanceService extends RegisterService
         NumberGenerator $numbers,
         StatusMachine $statuses,
         ActivityRecorder $activity,
-        private readonly SettingsRepository $settings,
         private readonly OptionList $options,
     ) {
         parent::__construct($numbers, $statuses, $activity);
@@ -312,43 +312,6 @@ class AssetMaintenanceService extends RegisterService
         if (! $active) {
             $this->moveAssetTo($asset, $asset->custodian_id === null && $asset->project_id === null ? 'idle' : 'in_service');
         }
-    }
-
-    /**
-     * Warn about open jobs falling due inside the company's window. Called by the scheduler.
-     *
-     * RAISES EVENTS AND WRITES NOTHING. There is no `is_overdue` column to go stale, no status to
-     * repair after a missed cron, and no state at all that depends on this having run. Running it
-     * twice in a day notifies twice; not running it for a week loses a week of warnings and leaves
-     * every register tab, every filter and every due-date badge exactly as correct as they were.
-     *
-     * @return int how many warnings were raised
-     */
-    public function sweepDue(int $organizationId): int
-    {
-        $days = $this->settings->int('asset.maintenance_warning_days', 30, $organizationId);
-
-        $today = Carbon::today();
-        $horizon = $today->copy()->addDays($days);
-
-        $jobs = AssetMaintenance::query()
-            ->where('organization_id', $organizationId)
-            ->with('asset')
-            ->whereNotNull('due_on')
-            ->where('due_on', '<=', $horizon->toDateString())
-            ->whereHas('status', fn ($q) => $q->where('is_terminal', false))
-            ->get();
-
-        foreach ($jobs as $job) {
-            // Negative for an overdue job, and the listener words it accordingly. Computed here
-            // rather than in the listener so the whole sweep speaks as of one clock.
-            AssetMaintenanceDue::dispatch(
-                $job,
-                (int) $today->diffInDays(Carbon::parse($job->due_on), false),
-            );
-        }
-
-        return $jobs->count();
     }
 
     // ================================================================== helpers

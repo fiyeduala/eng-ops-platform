@@ -45,6 +45,9 @@ final class PermissionCatalogue
             'numbering' => ['Administration', 'Numbering Schemes', ['view', 'manage']],
             'status' => ['Administration', 'Statuses & Transitions', ['view', 'manage']],
             'escalation' => ['Administration', 'Escalation Rules', ['view', 'manage']],
+            // Reading is baseline and managing is not: see ExpiryWatchPolicy for why turning a
+            // watch off is the quietest destructive act in these screens.
+            'expiry_watch' => ['Administration', 'Expiry Watches', ['view', 'manage']],
             'audit_log' => ['Administration', 'Audit Trail', ['view', 'export']],
 
             // ------------------------------------------------------------- workflow & forms
@@ -288,6 +291,21 @@ final class PermissionCatalogue
     public static function exists(string $key): bool
     {
         return in_array($key, self::keys(), true);
+    }
+
+    /**
+     * Which part of the platform a module belongs to, or null where the module is not one of ours.
+     *
+     * The grouping here is the platform's only answer to "where does this module live", so screens
+     * that need to organise a long list of registers borrow it rather than inventing a second one.
+     * Two different groupings would mean "where do I find incidents" has two different answers
+     * depending on which configuration screen somebody happens to be on.
+     */
+    public static function groupFor(string $module): ?string
+    {
+        $modules = self::modules();
+
+        return isset($modules[$module]) ? $modules[$module][0] : null;
     }
 
     /**

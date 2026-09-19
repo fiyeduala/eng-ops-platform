@@ -176,9 +176,31 @@ final class Phase1SmokeTest extends TestCase
         foreach ($this->pages() as $name => $url) {
             $status = $this->actingAs($this->administrator)->get($url)->status();
 
-            if ($status !== 200) {
-                $broken[] = $name.' ('.$url.') returned '.$status;
+            if ($status === 200) {
+                continue;
             }
+
+            // A redirect is allowed, but only to somewhere that renders. Some entries in the menu
+            // are signposts rather than screens — "Escalation rules" lands on the workflow group of
+            // the settings page, because escalation behaviour is a setting plus the deadlines on
+            // each workflow stage, and a second editor for it would be the start of a second
+            // approval path (§78). What this test is really asserting is that every route a person
+            // can reach from the navigation puts a page in front of them, so following the redirect
+            // and demanding 200 at the end of it is the same assertion, not a weaker one: a 302
+            // into a 403, or into another redirect that never settles, still fails here.
+            if ($status === 302) {
+                $landed = $this->actingAs($this->administrator)->followingRedirects()->get($url)->status();
+
+                if ($landed === 200) {
+                    continue;
+                }
+
+                $broken[] = $name.' ('.$url.') redirected, and the destination returned '.$landed;
+
+                continue;
+            }
+
+            $broken[] = $name.' ('.$url.') returned '.$status;
         }
 
         $this->assertSame([], $broken, count($broken).' page(s) did not render for an administrator '

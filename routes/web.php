@@ -36,6 +36,7 @@ use App\Http\Controllers\EmployeeExitController;
 use App\Http\Controllers\EmployeeMovementController;
 use App\Http\Controllers\EmployeePayController;
 use App\Http\Controllers\ExpenseController;
+use App\Http\Controllers\ExpiryWatchController;
 use App\Http\Controllers\FormController;
 use App\Http\Controllers\FormFieldController;
 use App\Http\Controllers\FormSectionController;
@@ -47,6 +48,7 @@ use App\Http\Controllers\HseObservationController;
 use App\Http\Controllers\IncidentController;
 use App\Http\Controllers\IncomeController;
 use App\Http\Controllers\InvestigationController;
+use App\Http\Controllers\KpiDefinitionController;
 use App\Http\Controllers\LeaveRequestController;
 use App\Http\Controllers\LeaveSettingsController;
 use App\Http\Controllers\LocationController;
@@ -2995,6 +2997,7 @@ Route::middleware(['auth', 'password.current'])->group(function () {
             .'workflow.view,workflow.manage,custom_field.view,custom_field.manage,'
             .'numbering.view,numbering.manage,form.view,form.manage,'
             .'escalation.view,escalation.manage,template.view,template.manage,'
+            .'expiry_watch.view,expiry_watch.manage,kpi.view,kpi.manage,'
             .'organization.view,organization.configure')
         ->name('configuration.index');
 
@@ -3111,6 +3114,77 @@ Route::middleware(['auth', 'password.current'])->group(function () {
                 ->where('register', '[a-z_]+')->name('reorder');
         });
     });
+
+    /*
+     * Renewals and expiry (§73).
+     *
+     * A WATCH IS A STANDING INSTRUCTION TO E-MAIL PEOPLE, so `manage` is where every write lives and
+     * reading is deliberately wider: an operations manager who cannot edit a watch should still be
+     * able to answer "are we being warned about the insurance certificates" without asking IT.
+     *
+     * `toggle` is a PUT of its own rather than a flag on `update`, because silencing a watch during
+     * a migration should not be a trip through a seven-field form where one of the other six can be
+     * changed by accident.
+     */
+    Route::prefix('configuration/expiry-watches')->name('configuration.expiry-watches.')->group(function () {
+        Route::get('/', [ExpiryWatchController::class, 'index'])
+            ->middleware('permission:expiry_watch.view,expiry_watch.manage')->name('index');
+
+        Route::middleware('permission:expiry_watch.manage')->group(function () {
+            Route::post('/', [ExpiryWatchController::class, 'store'])->name('store');
+            Route::put('{expiry_watch}', [ExpiryWatchController::class, 'update'])
+                ->whereNumber('expiry_watch')->name('update');
+            Route::put('{expiry_watch}/active', [ExpiryWatchController::class, 'toggle'])
+                ->whereNumber('expiry_watch')->name('toggle');
+            Route::delete('{expiry_watch}', [ExpiryWatchController::class, 'destroy'])
+                ->whereNumber('expiry_watch')->name('destroy');
+        });
+    });
+
+    /*
+     * The measure builder (§56, §73).
+     *
+     * READING IS `kpi.view` AND IT BUYS NOTHING ABOUT THE FIGURES. The index counts every measure
+     * afresh through the viewer's own visibility (§61), so this permission decides whether somebody
+     * sees that a measure EXISTS — which is itself a statement about the company — while what each
+     * number comes out as is decided by their access to the register underneath it.
+     *
+     * `{kpi}` is a bound model, numeric and tenant-scoped, never a catalogue key: unlike statuses or
+     * numbering there is nothing here keyed by register, and a measure is a record like any other.
+     */
+    Route::prefix('configuration/kpis')->name('configuration.kpis.')->group(function () {
+        Route::get('/', [KpiDefinitionController::class, 'index'])
+            ->middleware('permission:kpi.view,kpi.manage')->name('index');
+
+        Route::middleware('permission:kpi.manage')->group(function () {
+            Route::get('new', [KpiDefinitionController::class, 'create'])->name('create');
+            Route::post('/', [KpiDefinitionController::class, 'store'])->name('store');
+            Route::get('{kpi}/edit', [KpiDefinitionController::class, 'edit'])
+                ->whereNumber('kpi')->name('edit');
+            Route::put('{kpi}', [KpiDefinitionController::class, 'update'])
+                ->whereNumber('kpi')->name('update');
+            Route::put('{kpi}/active', [KpiDefinitionController::class, 'toggle'])
+                ->whereNumber('kpi')->name('toggle');
+            Route::delete('{kpi}', [KpiDefinitionController::class, 'destroy'])
+                ->whereNumber('kpi')->name('destroy');
+        });
+    });
+
+    /*
+     * Escalation rules (§25) — a signpost, not a screen.
+     *
+     * THERE IS DELIBERATELY NO SECOND EDITOR HERE. What the platform does when an approval sits too
+     * long is `workflow.escalation_step_hours` and `workflow.escalation_max_level`, which live in
+     * settings with every other company-wide default, plus the per-stage deadlines on each workflow
+     * route. Building a third place to configure the same behaviour would be the beginning of a
+     * second approval path, and §78 says there is exactly one.
+     *
+     * So the Configuration Center tile leads here and here leads to the settings group that holds
+     * the answer, anchored so the administrator lands on it rather than at the top of a long page.
+     */
+    Route::get('configuration/escalations', fn () => redirect()->to(route('settings.index').'#group-workflow'))
+        ->middleware('permission:escalation.view,escalation.manage,setting.view,setting.manage')
+        ->name('escalations.index');
 
     /*
      * The form builder (§73).

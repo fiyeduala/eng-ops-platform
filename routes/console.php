@@ -41,15 +41,21 @@ Schedule::command('approvals:sweep')
  * 06:30 puts the warning in the inbox before the yard opens, which is when somebody can still stop
  * the truck.
  *
- * The sweep writes nothing (see SweepAssetExpiries): if this line is deleted, or the cron is never
+ * ONE ENTRY FOR EVERY REGISTER, not one per module. This replaced `assets:sweep`, which watched
+ * maintenance due dates and vehicle paperwork because those were the two somebody had written a
+ * sweep for; what each company watches is now its own configuration, so a company adding a watch on
+ * its work-at-height permits adds a row rather than a schedule entry. A second line here would be
+ * the beginning of the per-module sprawl the whole part exists to end.
+ *
+ * The sweep writes nothing (see SweepExpiries): if this line is deleted, or the cron is never
  * installed, the company loses its warnings and every expiry date on every screen stays exactly as
  * correct as it was.
  */
-Schedule::command('assets:sweep')
+Schedule::command('expiry:sweep')
     ->dailyAt('06:30')
     ->withoutOverlapping(30)
     ->runInBackground()
-    ->description('Warn about maintenance due and vehicle documents expiring');
+    ->description('Warn about the dates each company asked to be warned about');
 
 /*
  * The one scheduled job on this list that CHANGES data, which is why it is called out here.

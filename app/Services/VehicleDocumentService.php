@@ -5,15 +5,12 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Engines\Audit\ActivityRecorder;
-use App\Engines\Configuration\SettingsRepository;
-use App\Events\VehicleDocumentExpiring;
 use App\Models\User;
 use App\Models\Vehicle;
 use App\Models\VehicleDocument;
 use App\Support\Enums\Confidentiality;
 use App\Support\OptionList;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -29,11 +26,17 @@ use Illuminate\Support\Str;
  *
  * EXPIRY IS A DATE QUERY AND NOTHING ELSE. There is no `is_expired` column, no status vocabulary
  * for this register, and no scheduled command that marks anything. `hasExpired()` compares
- * `expires_on` to today every time it is asked; the register's tabs, the vehicle page and the sweep
- * below all read the same comparison. A scheduler that stops running therefore costs the company
- * its warnings and can never make a lapsed insurance certificate look valid — which is the failure
- * mode that actually matters. Contracts, vendor records, training records and risk assessments work
- * the same way, for the same reason.
+ * `expires_on` to today every time it is asked; the register's tabs, the vehicle page and the
+ * nightly expiry sweep all read the same comparison. A scheduler that stops running therefore costs
+ * the company its warnings and can never make a lapsed insurance certificate look valid — which is
+ * the failure mode that actually matters. Contracts, vendor records, training records and risk
+ * assessments work the same way, for the same reason.
+ *
+ * THE SWEEP NO LONGER LIVES HERE. Warning about a lapsing certificate is the expiry engine's job,
+ * driven by a watch the company can retune or switch off rather than by a method written for this
+ * register alone — see ExpirySweeper. What this module kept is the part only it can answer:
+ * VehicleDocument::expiryAlsoTell() names the DRIVER, who owns no row here and is two hops away
+ * through the vehicle, and scopeExpiryWatchable() keeps superseded paperwork quiet.
  *
  * A DOCUMENT WITH NO EXPIRY NEVER EXPIRES, deliberately. Proof of ownership does not lapse, and a
  * null `expires_on` means exactly that rather than "unknown" — see `VehicleDocument::hasExpired()`.
@@ -57,7 +60,6 @@ class VehicleDocumentService
 
     public function __construct(
         private readonly ActivityRecorder $activity,
-        private readonly SettingsRepository $settings,
         private readonly OptionList $options,
     ) {}
 
@@ -274,43 +276,6 @@ class VehicleDocumentService
         );
 
         return $document;
-    }
-
-    // ================================================================== the sweep
-
-    /**
-     * Warn about certificates lapsing inside the company's window. Called by the scheduler.
-     *
-     * RAISES EVENTS AND WRITES NOTHING — see the class docblock. Documents already expired are
-     * included, with a negative day count, because a lapsed insurance certificate is more urgent
-     * than one lapsing next month and stopping the warnings at the expiry date is exactly when the
-     * company most needs to hear about it.
-     *
-     * @return int how many warnings were raised
-     */
-    public function sweepExpiring(int $organizationId): int
-    {
-        $days = $this->settings->int('vehicle_document.expiry_warning_days', 60, $organizationId);
-
-        $today = Carbon::today();
-        $horizon = $today->copy()->addDays($days);
-
-        $documents = VehicleDocument::query()
-            ->current()
-            ->where('organization_id', $organizationId)
-            ->with('vehicle.asset')
-            ->whereNotNull('expires_on')
-            ->where('expires_on', '<=', $horizon->toDateString())
-            ->get();
-
-        foreach ($documents as $document) {
-            VehicleDocumentExpiring::dispatch(
-                $document,
-                (int) $today->diffInDays(Carbon::parse($document->expires_on), false),
-            );
-        }
-
-        return $documents->count();
     }
 
     // ================================================================== helpers

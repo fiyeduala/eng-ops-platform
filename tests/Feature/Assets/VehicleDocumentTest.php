@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Assets;
 
-use App\Events\VehicleDocumentExpiring;
+use App\Engines\Expiry\ExpirySweeper;
+use App\Events\RecordExpiring;
+use App\Models\ExpiryWatch;
 use App\Models\Organization;
 use App\Models\User;
 use App\Models\Vehicle;
@@ -51,6 +53,37 @@ final class VehicleDocumentTest extends TestCase
         ]);
     }
 
+    /**
+     * How many certificates the nightly sweep would warn about, as this company configured it.
+     *
+     * The watch is created here rather than relied on from the fixtures, because what these tests
+     * are actually about is the thing the ENGINE cannot know on its own: that a superseded
+     * certificate stops speaking. `warn_when_overdue` is on, matching the watch a new company is
+     * seeded with, so a lapsed certificate is reported every day rather than falling silent at the
+     * moment it matters most.
+     *
+     * Must be called inside withinOrganization(): the watch is tenant-scoped like everything else.
+     */
+    private function sweepCertificates(): int
+    {
+        $watch = ExpiryWatch::query()->firstOrCreate(
+            ['entity_type' => 'vehicle_document', 'date_field' => 'expires_on'],
+            [
+                'organization_id' => $this->org->getKey(),
+                'name' => 'Vehicle document expiry',
+                'lead_days' => [60, 30, 14, 7, 1],
+                'warn_when_overdue' => true,
+                'notify_role_ids' => [],
+                'notify_user_ids' => [],
+                'notify_owner' => true,
+                'notify_followers' => true,
+                'is_active' => true,
+            ],
+        );
+
+        return app(ExpirySweeper::class)->sweepWatch($watch);
+    }
+
     #[Test]
     public function renewal_preserves_history_but_removes_the_old_certificate_from_alerts_and_worklists(): void
     {
@@ -68,9 +101,12 @@ final class VehicleDocumentTest extends TestCase
             $this->assertSame(1, VehicleDocument::where('renews_id', $old->id)->count());
             $this->vehicle->load('documents');
             $this->assertFalse($this->vehicle->hasLapsedDocuments());
-            Event::fake([VehicleDocumentExpiring::class]);
-            $this->assertSame(0, app(VehicleDocumentService::class)->sweepExpiring($this->org->id));
-            Event::assertNotDispatched(VehicleDocumentExpiring::class);
+            // The superseded certificate keeps its lapsed date and must stop warning about it.
+            // Nothing in the generic sweep could know that; VehicleDocument::scopeExpiryWatchable()
+            // is what carries the rule across from the sweep this replaced.
+            Event::fake([RecordExpiring::class]);
+            $this->assertSame(0, $this->sweepCertificates());
+            Event::assertNotDispatched(RecordExpiring::class);
         });
         $this->actingFresh($this->manager)->get(route('vehicle-documents.index'))->assertOk()->assertDontSee('OLD-INSURANCE');
         $this->actingFresh($this->manager)->get(route('vehicle-documents.index', ['view' => 'all']))
@@ -94,11 +130,13 @@ final class VehicleDocumentTest extends TestCase
             ], $this->manager);
             $this->vehicle->load('documents');
             $this->assertTrue($this->vehicle->hasLapsedDocuments());
-            Event::fake([VehicleDocumentExpiring::class]);
-            $this->assertSame(1, app(VehicleDocumentService::class)->sweepExpiring($this->org->id));
+            // The replacement does not take effect for five days, so the gap in cover is real and
+            // must still be warned about. Only once the renewal is live does the old one go quiet.
+            Event::fake([RecordExpiring::class]);
+            $this->assertSame(1, $this->sweepCertificates());
             $this->travelTo($effective);
             $this->assertFalse($this->vehicle->hasLapsedDocuments());
-            $this->assertSame(0, app(VehicleDocumentService::class)->sweepExpiring($this->org->id));
+            $this->assertSame(0, $this->sweepCertificates());
             $this->travelBack();
         });
     }

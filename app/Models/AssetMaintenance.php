@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Engines\Expiry\Concerns\HasExpiryDates;
 use App\Models\Concerns\HasCustomFields;
 use App\Models\Concerns\RegisterRecord;
 use App\Support\Enums\Confidentiality;
@@ -37,7 +38,58 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class AssetMaintenance extends Model
 {
-    use HasCustomFields, RegisterRecord;
+    use HasCustomFields, HasExpiryDates, RegisterRecord;
+
+    /**
+     * A due date rather than an expiry, and the generic engine does not mind: what a watch needs is
+     * a date somebody wants warning about before it arrives. Jobs that reached a terminal status
+     * are left out by the sweep itself, so a completed service stops being mentioned.
+     *
+     * @var array<string,string>
+     */
+    protected static array $expiryDates = [
+        'due_on' => 'Maintenance due',
+    ];
+
+    /**
+     * Whoever is to do the work, whoever raised it, and whoever holds the machine.
+     *
+     * The custodian is the one this hook is for: the job names a performer and a creator, but the
+     * person whose generator will not start on Monday is recorded against the ASSET, and a sweep
+     * reading columns on this table alone would never find them.
+     *
+     * @return array<int,int|null>
+     */
+    public function expiryAlsoTell(): array
+    {
+        $this->loadMissing('asset');
+
+        return [$this->performed_by, $this->created_by, $this->asset?->custodian_id];
+    }
+
+    /** Following the machine is following the work done to it. */
+    public function expiryRelatedRecords(): array
+    {
+        $this->loadMissing('asset');
+
+        return [$this->asset];
+    }
+
+    /** The unit holding the machine, not the workshop — see accessOrgUnitColumn(). */
+    public function expiryOrgUnitId(): ?int
+    {
+        $this->loadMissing('asset');
+
+        return $this->asset?->org_unit_id === null ? null : (int) $this->asset->org_unit_id;
+    }
+
+    /** Which site the machine is on today, so the warning is scoped to that job. */
+    public function expiryProjectId(): ?int
+    {
+        $this->loadMissing('asset');
+
+        return $this->asset?->project_id === null ? null : (int) $this->asset->project_id;
+    }
 
     /**
      * `asset_maintenance.types`.

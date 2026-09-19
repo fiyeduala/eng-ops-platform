@@ -8,6 +8,7 @@ use App\Engines\Access\Concerns\BelongsToOrganization;
 use App\Engines\Access\Concerns\Scopeable;
 use App\Engines\Audit\Concerns\Auditable;
 use App\Engines\Audit\Concerns\HasActivity;
+use App\Engines\Expiry\Concerns\HasExpiryDates;
 use App\Engines\Workflow\Concerns\HasWorkflow;
 use App\Models\Concerns\HasCustomFields;
 use App\Services\DocumentVersionService;
@@ -42,7 +43,18 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  */
 class Document extends Model
 {
-    use Auditable, BelongsToOrganization, HasActivity, HasCustomFields, HasFactory, HasWorkflow, Scopeable, SoftDeletes;
+    use Auditable, BelongsToOrganization, HasActivity, HasCustomFields, HasExpiryDates, HasFactory, HasWorkflow, Scopeable, SoftDeletes;
+
+    /**
+     * A controlled document past its review date is still being worked to, which is the problem —
+     * nothing stops anybody using it and nothing on the page says it is overdue for checking. This
+     * is a review date rather than an expiry, and the difference is why the label says so.
+     *
+     * @var array<string,string>
+     */
+    protected static array $expiryDates = [
+        'next_review_on' => 'Due for review',
+    ];
 
     protected $guarded = ['id'];
 
