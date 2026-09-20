@@ -489,6 +489,23 @@ final class KpiCatalogue
     }
 
     /**
+     * One register's columns and their types, for a catalogue that needs to reason about shape.
+     *
+     * Exposed so the report catalogue can read a table without opening a second schema connection
+     * and keeping a second cache beside this one — the two would then disagree about a table the
+     * moment a migration ran mid-request, and in tests, which rebuild the schema between cases,
+     * `flush()` would clear only one of them.
+     *
+     * @return array<string,string> column => type name
+     */
+    public static function columnTypesFor(string $entityType): array
+    {
+        $model = self::prototype($entityType);
+
+        return $model === null ? [] : self::columns($model);
+    }
+
+    /**
      * This table's columns and their types, read once per table per request.
      *
      * @return array<string,string> column => type name

@@ -193,6 +193,13 @@ class ConfigurationController extends Controller
                         'blurb' => 'The figures this company watches, each one counted over the records the person looking may see.',
                     ],
                     [
+                        'label' => 'Reports',
+                        'route' => 'configuration.reports.index',
+                        'icon' => 'clipboard',
+                        'permission' => ['report.view', 'report.create'],
+                        'blurb' => 'The questions this company asks of its own records. Each one answers with the rows the person running it may see.',
+                    ],
+                    [
                         'label' => 'Audit trail',
                         'route' => 'audit.index',
                         'icon' => 'scroll',

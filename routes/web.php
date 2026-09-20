@@ -80,11 +80,13 @@ use App\Http\Controllers\PurchaseOrderController;
 use App\Http\Controllers\PurchaseRequestController;
 use App\Http\Controllers\QualityInspectionController;
 use App\Http\Controllers\QuotationController;
+use App\Http\Controllers\ReportDefinitionController;
 use App\Http\Controllers\ReviewCycleController;
 use App\Http\Controllers\RfiController;
 use App\Http\Controllers\RfqController;
 use App\Http\Controllers\RiskAssessmentController;
 use App\Http\Controllers\RoleController;
+use App\Http\Controllers\SavedFilterController;
 use App\Http\Controllers\SettingController;
 use App\Http\Controllers\StatusConfigController;
 use App\Http\Controllers\StockController;
@@ -2998,6 +3000,7 @@ Route::middleware(['auth', 'password.current'])->group(function () {
             .'numbering.view,numbering.manage,form.view,form.manage,'
             .'escalation.view,escalation.manage,template.view,template.manage,'
             .'expiry_watch.view,expiry_watch.manage,kpi.view,kpi.manage,'
+            .'report.view,report.create,'
             .'organization.view,organization.configure')
         ->name('configuration.index');
 
@@ -3168,6 +3171,87 @@ Route::middleware(['auth', 'password.current'])->group(function () {
             Route::delete('{kpi}', [KpiDefinitionController::class, 'destroy'])
                 ->whereNumber('kpi')->name('destroy');
         });
+    });
+
+    /*
+     * The report builder (§73, docs/11 §1).
+     *
+     * FIVE ABILITIES, NOT TWO, and the split is the point. `report.view` opens a report and gets the
+     * rows the reader is permitted to see — which for somebody with no register access is none, and
+     * the page says so rather than hiding itself. `report.create`, `report.edit` and `report.delete`
+     * govern the question rather than the answer. `report.export` is separate from all of them
+     * because a file outlives the session that produced it and is read by people who never
+     * authenticated; ReportDefinitionPolicy makes that argument at length.
+     *
+     * `report.schedule` exists in the permission catalogue and is routed nowhere. Scheduled delivery
+     * is Phase 8, and a route behind an ability nothing implements is a grant an administrator makes
+     * believing it does something.
+     *
+     * THE RUN ROUTE IS A GET WITH FILTERS IN THE QUERY STRING, deliberately: a report somebody has
+     * narrowed is a link they can send to a colleague, and the colleague gets THEIR OWN rows from it
+     * because the runner scopes to whoever opens it. A shared report URL is safe for the same reason
+     * a shared index-page URL is.
+     */
+    Route::prefix('configuration/reports')->name('configuration.reports.')->group(function () {
+        Route::get('/', [ReportDefinitionController::class, 'index'])
+            ->middleware('permission:report.view')->name('index');
+
+        Route::middleware('permission:report.create')->group(function () {
+            Route::get('new', [ReportDefinitionController::class, 'create'])->name('create');
+            Route::post('/', [ReportDefinitionController::class, 'store'])->name('store');
+        });
+
+        // Before `{report}`, or "new" would bind as a report id — except that `whereNumber` on the
+        // bound routes already prevents it. Both guards are kept: the ordering is what a reader
+        // checks first, and the constraint is what actually holds.
+        Route::get('{report}', [ReportDefinitionController::class, 'show'])
+            ->middleware('permission:report.view')->whereNumber('report')->name('show');
+
+        Route::get('{report}/export/{format}', [ReportDefinitionController::class, 'export'])
+            ->middleware('permission:report.export')->whereNumber('report')->name('export');
+
+        Route::middleware('permission:report.edit')->group(function () {
+            Route::get('{report}/edit', [ReportDefinitionController::class, 'edit'])
+                ->whereNumber('report')->name('edit');
+            Route::put('{report}', [ReportDefinitionController::class, 'update'])
+                ->whereNumber('report')->name('update');
+            Route::put('{report}/active', [ReportDefinitionController::class, 'toggle'])
+                ->whereNumber('report')->name('toggle');
+        });
+
+        Route::delete('{report}', [ReportDefinitionController::class, 'destroy'])
+            ->middleware('permission:report.delete')->whereNumber('report')->name('destroy');
+
+        /*
+         * Saved views (§54, docs/11 §2) — the conditions somebody asks often enough to name.
+         *
+         * NESTED UNDER THE REPORT ON PURPOSE. The register a saved view asks about is read from the
+         * report in the URL, so `entity_type` is never posted and there is no request that attaches
+         * one register's conditions to another's name (§74). The controller additionally refuses a
+         * filter whose register is not this report's — two valid ids, wrongly paired, being the
+         * shape an IDOR attempt takes when each id passes its own check (§94).
+         *
+         * ALL OF THEM CARRY `report.view` AND NO NEW PERMISSION. Keeping your own shortlist is not
+         * an authority a company should have to grant, and the only screen that offers it already
+         * required this permission to open. Who may see a SHARED view, and who may take one down,
+         * is SavedFilterPolicy's question — asked on the record, not at the route.
+         *
+         * `apply` IS A GET THAT REDIRECTS. It hands the stored conditions to the ordinary run route
+         * as a query string, so a saved view and a typed one become the same request; there is no
+         * second path to the rows for a saved view to travel down.
+         */
+        Route::middleware('permission:report.view')
+            ->whereNumber('report')->whereNumber('savedFilter')
+            ->group(function () {
+                Route::post('{report}/views', [SavedFilterController::class, 'store'])
+                    ->name('views.store');
+                Route::get('{report}/views/{savedFilter}', [SavedFilterController::class, 'apply'])
+                    ->name('views.apply');
+                Route::put('{report}/views/{savedFilter}', [SavedFilterController::class, 'update'])
+                    ->name('views.update');
+                Route::delete('{report}/views/{savedFilter}', [SavedFilterController::class, 'destroy'])
+                    ->name('views.destroy');
+            });
     });
 
     /*

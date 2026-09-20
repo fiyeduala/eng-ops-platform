@@ -207,6 +207,7 @@ use App\Models\Quotation;
 use App\Models\QuotationItem;
 use App\Models\QuotationScore;
 use App\Models\RecordPermission;
+use App\Models\ReportDefinition;
 use App\Models\ReviewCycle;
 use App\Models\ReviewCycleCompetency;
 use App\Models\Rfi;
@@ -216,6 +217,7 @@ use App\Models\RfqVendor;
 use App\Models\RiskAssessment;
 use App\Models\RiskAssessmentHazard;
 use App\Models\Role;
+use App\Models\SavedFilter;
 use App\Models\Setting;
 use App\Models\Signature;
 use App\Models\Status;
@@ -340,6 +342,7 @@ use App\Policies\QualityInspectionPolicy;
 use App\Policies\QuotationItemPolicy;
 use App\Policies\QuotationPolicy;
 use App\Policies\QuotationScorePolicy;
+use App\Policies\ReportDefinitionPolicy;
 use App\Policies\ReviewCyclePolicy;
 use App\Policies\RfiPolicy;
 use App\Policies\RfqItemPolicy;
@@ -348,6 +351,7 @@ use App\Policies\RfqVendorPolicy;
 use App\Policies\RiskAssessmentHazardPolicy;
 use App\Policies\RiskAssessmentPolicy;
 use App\Policies\RolePolicy;
+use App\Policies\SavedFilterPolicy;
 use App\Policies\SettingPolicy;
 use App\Policies\SignaturePolicy;
 use App\Policies\StatusPolicy;
@@ -496,6 +500,16 @@ class AppServiceProvider extends ServiceProvider
             // be followed, audited and attached to, and so that "which measures count deliverables"
             // is a question with the same shape as every other question about entity types.
             'kpi_definition' => KpiDefinition::class,
+            // Phase 7, part 6. Here for the same reasons the KPI definition is, plus one of its
+            // own: an export writes an audit entry against the definition it came from (§59), and
+            // an audit subject has to be morphable to be recorded at all.
+            'report_definition' => ReportDefinition::class,
+            // A saved filter is audited too, and for a reason worth naming: who shared which named
+            // question with the whole company, and when they stopped, is the trail behind a filter
+            // nobody admits to creating. Note the alias is the entity type for AUDITING it — the
+            // `entity_type` COLUMN on the table holds the register the filter asks about, which is
+            // a different thing entirely and never this string.
+            'saved_filter' => SavedFilter::class,
 
             'project' => Project::class,
             'project_type' => ProjectType::class,
@@ -988,6 +1002,8 @@ class AppServiceProvider extends ServiceProvider
             // --- administration ------------------------------------------------------
             ExpiryWatch::class => ExpiryWatchPolicy::class,
             KpiDefinition::class => KpiDefinitionPolicy::class,
+            ReportDefinition::class => ReportDefinitionPolicy::class,
+            SavedFilter::class => SavedFilterPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {

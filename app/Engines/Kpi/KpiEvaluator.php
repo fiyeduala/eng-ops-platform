@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Engines\Kpi;
 
 use App\Engines\Access\ActorProfile;
+use App\Engines\Query\FilterCompiler;
 use App\Models\KpiDefinition;
 use App\Models\User;
 use App\Support\KpiCatalogue;
@@ -12,7 +13,6 @@ use Carbon\Carbon;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\Relation;
 
 /**
  * Turns a definition into a number, for one person, at one moment.
@@ -43,6 +43,12 @@ class KpiEvaluator
 {
     public function __construct(
         private readonly ActorProfile $actors,
+
+        // The same compiler the report engine uses, which is the point of it being a separate
+        // class: docs/11 §1 requires a report and the KPI beside it to narrow a register in
+        // exactly the same way, and the only durable way to guarantee that is for there to be
+        // one implementation rather than two that agree today.
+        private readonly FilterCompiler $filters,
     ) {}
 
     /**
@@ -160,7 +166,7 @@ class KpiEvaluator
         // here is what makes the rest of this method unable to widen the answer past the viewer.
         $query = $class::query()->visibleTo($viewer, $kpi->viewPermissionFor($class));
 
-        if (! $this->applyFilters($query, $kpi, $kpi->baseFilters())) {
+        if (! $this->filters->apply($query, $kpi->entity_type, $kpi->baseFilters())) {
             return null;
         }
 
@@ -219,117 +225,6 @@ class KpiEvaluator
         return $query->where($column, $scopeId);
     }
 
-    /**
-     * @param  Builder<Model>  $query
-     * @param  array<int,array{field:string,operator:string,value:mixed}>  $filters
-     * @return bool false where a filter names something the register no longer offers
-     */
-    private function applyFilters(Builder $query, KpiDefinition $kpi, array $filters): bool
-    {
-        foreach ($filters as $filter) {
-            if (! KpiCatalogue::offersFilter($kpi->entity_type, $filter['field'])) {
-                return false;
-            }
-
-            if (! $this->applyFilter($query, $filter)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /**
-     * One condition, compiled.
-     *
-     * The field has already been checked against the register's own whitelist, so what remains is
-     * to place it. A dotted field is a relation walk — `category.code` — and is compiled to a
-     * `whereHas` rather than a join, because a join would multiply rows and turn a count of
-     * documents into a count of document-category pairs.
-     *
-     * @param  Builder<Model>  $query
-     * @param  array{field:string,operator:string,value:mixed}  $filter
-     */
-    private function applyFilter(Builder $query, array $filter): bool
-    {
-        if (! str_contains($filter['field'], '.')) {
-            $this->compare($query, $filter['field'], $filter['operator'], $filter['value']);
-
-            return true;
-        }
-
-        [$relation, $column] = explode('.', $filter['field'], 2);
-        $model = $query->getModel();
-
-        // The whitelist said the path was allowed; this says the relation is still there. A
-        // register that dropped a relation must fall silent rather than throw inside a dashboard.
-        if (! method_exists($model, $relation) || ! $model->{$relation}() instanceof Relation) {
-            return false;
-        }
-
-        if (str_contains($column, '.')) {
-            return false;
-        }
-
-        $query->whereHas($relation, function (Builder $related) use ($column, $filter) {
-            $this->compare($related, $column, $filter['operator'], $filter['value']);
-        });
-
-        return true;
-    }
-
-    /**
-     * @param  Builder<Model>  $query
-     */
-    private function compare(Builder $query, string $column, string $operator, mixed $value): void
-    {
-        $qualified = $query->getModel()->qualifyColumn($column);
-
-        match ($operator) {
-            'is_null' => $query->whereNull($qualified),
-            'not_null' => $query->whereNotNull($qualified),
-            'in' => $query->whereIn($qualified, $this->list($value)),
-            'not_in' => $query->whereNotIn($qualified, $this->list($value)),
-            'between' => $this->between($query, $qualified, $value),
-            default => $query->where($qualified, $operator, $this->scalar($value)),
-        };
-    }
-
-    /** @param  Builder<Model>  $query */
-    private function between(Builder $query, string $column, mixed $value): void
-    {
-        $bounds = $this->list($value);
-
-        if (count($bounds) !== 2) {
-            // Half a range is not a range. Matching nothing is the honest reading of a condition
-            // that cannot be evaluated; matching everything would inflate the number instead.
-            $query->whereRaw('1 = 0');
-
-            return;
-        }
-
-        $query->whereBetween($column, [$bounds[0], $bounds[1]]);
-    }
-
-    /** @return array<int,scalar> */
-    private function list(mixed $value): array
-    {
-        if (is_array($value)) {
-            return array_values(array_filter($value, fn ($item) => is_scalar($item)));
-        }
-
-        if (! is_scalar($value)) {
-            return [];
-        }
-
-        return array_values(array_filter(array_map('trim', explode(',', (string) $value)), fn ($v) => $v !== ''));
-    }
-
-    private function scalar(mixed $value): mixed
-    {
-        return is_scalar($value) || $value === null ? $value : null;
-    }
-
     // ================================================================== the arithmetic
 
     /**
@@ -365,7 +260,7 @@ class KpiEvaluator
 
             $numerator = clone $base;
 
-            if (! $this->applyFilters($numerator, $kpi, $kpi->numeratorFilters())) {
+            if (! $this->filters->apply($numerator, $kpi->entity_type, $kpi->numeratorFilters())) {
                 return KpiResult::unavailable(
                     'This measure filters on something that register no longer offers.', $viewerId,
                 );
