@@ -99,18 +99,33 @@ statuses           entity_type, key, label, color, sort, is_initial, is_terminal
 status_transitions entity_type, from_status_id, to_status_id, permission_key, guard
 numbering_schemes  entity_type, pattern, reset_period(none|yearly|monthly), padding
 number_sequences   scheme_id, period_key, next_value          ← atomic increment
+option_lists ──1:N── option_list_items          ← the vocabularies pickers draw from (§63)
+option_lists       key, name, is_system
+option_list_items  option_list_id, value, label, sort, is_active    ← value frozen once stored
 custom_fields      entity_type, key, label, type, options json, rules, sort, is_required
 custom_field_values entity_type, entity_id, custom_field_id, value_text/number/date/json
-forms ──1:N── form_fields
-forms              name, module, workflow_id, entity_type, is_active, version
-form_submissions   form_id, submitter_id, project_id, org_unit_id, data json, status_id
-form_submission_values form_submission_id, form_field_id, value_*   ← queryable mirror of data
+forms ──1:N── form_versions ──1:N── form_sections ──1:N── form_fields
+forms              name, module, workflow_id, requires_approval, entity_type, is_active
+form_versions      form_id, version, published_at, change_note     ← published editions are frozen
+form_submissions   form_version_id, submitter_id, project_id, org_unit_id, status_id
+form_answers       form_submission_id, form_field_id, value_*      ← queryable, one text column
 templates          type, name, body(html), placeholders json
-escalation_rules   entity_type, condition json, after_days, notify_type, notify_ref, sequence
-expiry_watches     watchable_type/id, field, thresholds json, last_notified_at
-kpi_definitions    name, module, formula json, target, unit, direction, period
-kpi_snapshots      kpi_definition_id, period_key, scope_type, scope_id, value
+expiry_watches     entity_type, field, thresholds json, audience, last_run_at
+kpi_definitions    name, entity_type, formula json, target, unit, direction, period
 ```
+
+**Reconciled against the build (Phase 7).** Three differences from the design above are deliberate:
+
+- **A submission binds to a `form_version`, not a `form`.** Somebody who opens an inspection on
+  Tuesday answers Tuesday's questions even if the form is republished on Wednesday, and the record
+  screen renders March's answers against March's questions. Binding to the form would make every
+  historical sheet re-render against today's questionnaire.
+- **`escalation_rules` was not created, on purpose.** What happens when an approval sits too long is
+  a setting plus the per-stage deadlines on each workflow — a third place to configure it would be
+  the beginning of a second approval path (§78). See docs/07.
+- **`kpi_snapshots` is not created yet** (Phase 8). A snapshot is a number counted for somebody, and
+  storing one has to answer whose visibility it was counted through before it can be shown to
+  anybody else.
 
 ---
 
@@ -228,8 +243,19 @@ audit_logs           organization_id, user_id, action, auditable_type/id, old_va
                      new_values json, ip, user_agent, url, created_at       ← APPEND ONLY
 activity_logs        organization_id, causer_id, subject_type/id, project_id, verb,
                      description, properties json, created_at
-reports / report_schedules / saved_filters
+report_definitions   entity_type, name, description, columns json, filters json,
+                     group_by, sort json, is_active, created_by    ← a saved QUESTION, never rows
+saved_filters        user_id, entity_type, name, filters json, visibility, org_unit_id
+                     unique (organization_id, user_id, entity_type, name)
+report_schedules     ← Phase 8, with the daily executive report
 ```
+
+Neither reporting table stores a result. `report_definitions` holds columns, conditions and
+groupings; `saved_filters` holds conditions and nothing that came back. Every run re-derives the
+rows through `visibleTo()` for whoever asked, which is why two people running one report see
+different totals and neither is holding the other's copy (§54, §61). `saved_filters.org_unit_id` is
+deliberately **not** a foreign key: dissolving a department should not cascade-delete the views
+shared with it.
 
 ---
 

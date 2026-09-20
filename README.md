@@ -33,7 +33,9 @@ ORGANIZATION  →  DEPARTMENT / TEAM  →  PROJECT  →  ROLE / ASSIGNMENT
 
 ## Status
 
-Phases 1–4 of nine are complete: the access and organization foundation; the configuration and
+Seven phases of nine are complete.
+
+Phases 1–4: the access and organization foundation; the configuration and
 notification engines with memos, announcements, meetings and the calendar; the document, workflow,
 approval and signature stack — including native in-browser authoring with .docx import and
 .docx/PDF export; and the sixteen engineering, HSE and quality registers, from deliverables and
@@ -42,14 +44,34 @@ that configures a route through the same three HTTP endpoints the builder screen
 an incident against it, and watches the review stage open an investigation and raise a corrective
 action — neither of which the engine or the controller names.
 
-**Phase 5 is complete.** Commercial registers, procurement, warehouses, the stock ledger, assets and
-fleet, project costs, cost centers and budgets, and operational finance are all in: tax codes held
+**Phase 5 — business operations.** Commercial registers, procurement, warehouses, the stock ledger,
+assets and fleet, project costs, cost centers and budgets, and operational finance: tax codes held
 as company data, expense claims, client income, payments against orders, claims and invoices, and
 petty cash with an append-only voucher ledger. The exit criterion — purchase request → approval →
 purchase order → goods receipt → stock → project cost — runs as one chain, and approved claims and
 petty cash payouts land on the same cost ledger that budgets read. Claimant/approver and
 approver/payer separation are enforced by default and can be waived per company, with the waiver
-recorded. See the [development handoff](docs/16-development-handoff.md) for the checkpoint and
+recorded.
+
+**Phase 6 — people.** Employee records, recruitment and onboarding, attendance with mobile clock
+in/out, timesheets and overtime, leave, training, performance, movements, conduct, exit, payroll and
+the visitor book. The exit criterion was that leave and timesheet approvals run on the *same*
+workflow engine as documents; not one of the ten registers added has an approve route, and a test
+asserts that for the whole set rather than for one module, so an eleventh register that grew its own
+approval path would fail it even if its author wrote no test at all.
+
+**Phase 7 — advanced administration.** The half of the platform a company configures for itself
+without a developer: the Admin Configuration Center, editable status vocabularies and transition
+whitelists, gapless numbering schemes, option lists, custom fields on 45 registers, a form builder
+with versioned editions and signatures, forms bound to the existing workflow engine rather than a
+second one, expiry watches, KPI definitions and a report builder with saved, shareable views. Two
+rules run through all of it. Nothing is cached: a KPI figure and a report row count are both counted
+now, through the visibility of whoever asked, because a stored total belongs to whoever it was
+counted for. And nothing a user types names a table, a column or an operator — registers, fields and
+operators all come off a whitelist that is re-checked on the way out as well as in, because a saved
+definition outlives the register it names.
+
+See the [development handoff](docs/16-development-handoff.md) for the checkpoint and
 deployment notes,
 [docs/14-roadmap.md](docs/14-roadmap.md) for what each phase covers and what is deliberately out of
 V1, and [docs/15-hse-quality-architecture.md](docs/15-hse-quality-architecture.md) for how the

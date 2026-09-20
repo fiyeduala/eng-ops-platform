@@ -39,6 +39,13 @@ Node runtime on the production server. Node is used to build browser assets. See
 | Phase 5, part 4 | Committed in `ad0a976`: assets, custody transfers, maintenance, vehicles, fuel logs, vehicle documents, project-cost posting, cost centers and controlled budgets |
 | Phase 5, part 5 | Operational finance: tax codes, expenses, income, payments and petty cash — see [below](#phase-5-part-5--operational-finance--17-september-2026) |
 | Phase 5 exit criterion | Met: purchase request → approval → purchase order → goods receipt → stock transaction → project cost. **Phase 5 is complete.** |
+| Phase 6 — people | **Complete**, closed 2026-09-18 at `7dff004`. Ten HR registers plus payroll and the visitor book. Exit criterion met and widened: no register added in the phase has an approve route, asserted for the set in `DemoSeederTest` |
+| Phase 7 — advanced administration | **Complete**, closed 2026-09-20 at `4b69e82`. Configuration Center, statuses and transitions, numbering, option lists, custom fields, form builder, form → workflow binding, expiry watches, KPIs, report builder and saved views |
+| Phase 7 exit criterion | **Met per surface, with one gap.** Each configuration surface has a test driving it through the screens' own endpoints; there is no single spanning walkthrough for §73 new-company setup or §74 reorganization. Recorded against Phase 9 in the [roadmap](14-roadmap.md) |
+| Suite at Phase 7 close | 973 tests, 6,573 assertions, 0 failures, ~30 minutes on in-memory SQLite |
+
+This checkpoint table is maintained; the dated sections below are a historical record of the
+September 2026 review and are not rewritten as work continues.
 
 At the start of this review, the [README status](../README.md#status) and
 [roadmap](14-roadmap.md) still described Phase 5 as unstarted. The review reconciles that stale
@@ -130,7 +137,10 @@ New coverage lives in `AssetAccessTest`, `AssetLifecycleTest`, `VehicleDocumentT
 `ReceiptAssetTest`. Production MySQL lock contention and a browser/mobile visual walkthrough remain
 separate deployment checks; SQLite regression tests cannot establish those properties.
 
-## Continue in this order
+## Continuation order as of 16 September 2026 (completed — historical)
+
+Every step below was carried out; Phases 5, 6 and 7 have since closed. Kept for the reasoning, not
+as a current instruction list — the [checkpoint table](#current-checkpoint) is what is live.
 
 1. Review the migration notes above before applying the verified asset/fleet checkpoint to a
    populated deployment. Preserve the uncommitted application work when preparing a commit.
@@ -205,6 +215,11 @@ coverage alongside the repairs instead of treating the existing test count as ev
 missing cases.
 
 ## Direction after Phase 5
+
+Phases 6 and 7 below are now delivered; Phase 8 is the live one. Phase 8 inherits four items
+deliberately deferred out of Phase 7 — Excel export (PhpSpreadsheet is not installed), queued
+exports with signed expiring links, DOCX export of reports, and `kpi_snapshots`. They are listed
+with their reasons in the [roadmap](14-roadmap.md#phase-8--executive-intelligence-).
 
 - **Phase 6 — People:** employee records, recruitment/onboarding, attendance, timesheets, overtime,
   leave, training, performance, personnel changes, payroll and visitors. Leave and timesheet

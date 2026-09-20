@@ -14,6 +14,16 @@ Operational tables
          → Renderer: HTML · PDF · Excel · CSV · Print
 ```
 
+**As built (Phase 7 part 6).** `ReportCatalogue` is the whitelist: which registers can be reported
+on, and per register which columns may be printed, which fields may be filtered, and which may be
+grouped or sorted. Nothing a user types names a table, a column or an operator directly, and the
+whitelist is re-checked on the way *out* as well as in, because a definition outlives the register
+it names (§84). `App\Engines\Query\FilterCompiler` is the one compiler, used by both `ReportRunner`
+and `KpiEvaluator` — §1 above asks a report and the KPI beside it to narrow a register identically,
+and two implementations that agree today are not that guarantee. Rows come back through
+`visibleTo()` with the module's own view permission, which is what makes a report safe to share: it
+carries the question and never the reach.
+
 ## 2. Filters (§54)
 
 Universal filter set: date range · organization unit (subtree) · project · employee · status ·
@@ -23,20 +33,51 @@ Filters are declarative and shared between screen and export, so an export alway
 what the user was looking at. Saved filters (`saved_filters`) are per user and shareable within a
 scope.
 
+**As built.** A saved view stores conditions and nothing that came back — no rows, no ids, no
+counts. Sharing puts the *name* on other people's screens; each of them runs it against their own
+visibility, so a director and a site clerk applying one shared view see different rows and both are
+right. Saving rides on `report.view` and there is deliberately no `saved_filter` permission:
+keeping your own shortlist is not an authority a company should have to grant. Sharing with the
+whole company does require `report.create`, because that is publishing.
+
+Three properties are load-bearing and each is asserted by a test:
+
+- **Every route hangs off a report.** The register a view asks about is read from the report the
+  person is standing on, never posted, so there is no id anyone can supply to attach conditions to a
+  register they were not looking at (§74, §84). A view and a report belonging to different registers
+  is refused as not found, which is the shape an IDOR attempt takes when each id passes its own
+  check (§94).
+- **Applying a view is a redirect, not a render.** It redirects into the ordinary run screen with
+  the conditions in the query string, where they meet the same whitelist, the same compiler and the
+  same `visibleTo()` as conditions typed by hand. A saved view is therefore incapable of reaching a
+  row an ad-hoc filter could not, because downstream of the redirect there is no difference between
+  the two.
+- **A view that no longer narrows anything is refused, not run wide.** Conditions naming fields the
+  register has stopped offering are dropped on the way out; if that leaves nothing, applying it
+  would run the report unfiltered and show somebody the whole company under a heading that says
+  otherwise, with a row count they would go on to quote. The view is marked "No longer works" in the
+  list rather than hidden, so it can be found and re-saved.
+
 ## 3. Export (§54, §66)
 
-| Format | Engine | Notes |
-|--------|--------|-------|
-| PDF | Dompdf | branded header/footer, logo, generated-by, timestamp, page x of y |
-| Excel | PhpSpreadsheet | typed cells, frozen header, autofilter |
-| CSV | streamed | large exports stream, never buffered |
-| Print | CSS `@media print` | no server round-trip |
-| DOCX | PhpWord | editable deliverables and minutes |
+| Format | Engine | Status | Notes |
+|--------|--------|--------|-------|
+| PDF | Dompdf | **built** (Phase 7 pt 6) | branded header/footer, logo, generated-by, timestamp, page x of y |
+| CSV | streamed | **built** (Phase 7 pt 6) | large exports stream, never buffered |
+| Print | CSS `@media print` | **built** | no server round-trip |
+| DOCX | PhpWord | built for documents; **not yet wired to reports** | editable deliverables and minutes |
+| Excel | PhpSpreadsheet | **Phase 8** — dependency not installed | typed cells, frozen header, autofilter |
 
 Exports over a row threshold are queued and delivered as a notification with a signed, expiring
-download link — this keeps cPanel PHP timeouts irrelevant.
+download link — this keeps cPanel PHP timeouts irrelevant. **Phase 8.** Phase 7's exports are
+synchronous and stream, which is right for the row counts a builder screen produces and wrong as the
+only path; the threshold, the queue and the signed link land together with Excel, because formatting
+a workbook in memory is the case that makes them necessary.
 
-Every export writes an audit entry recording the filter set and row count (§59).
+Every export writes an audit entry recording the filter set and row count (§59). **Built**, and
+every export re-runs the report rather than exporting a cached answer, so an export obeys the
+exporter's own visibility at the moment they asked for it — not the visibility of whoever last
+opened the screen.
 
 ## 4. Dashboards (§52, §53)
 

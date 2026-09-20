@@ -88,12 +88,20 @@ Public surface: `AuditLogger`, `ActivityRecorder`, `Auditable` trait, `HasActivi
 ### Engine 5 — Configuration
 *Namespace:* `App\Engines\Config`
 
-- Organization structure, roles, permissions, workflows, statuses, numbering, custom fields,
-  forms, templates, categories, escalation rules, KPI definitions, branding, settings.
+- Organization structure, roles, permissions, workflows, statuses and transitions, numbering
+  schemes, option lists, custom fields, forms, templates, categories, escalation (as workflow
+  settings plus per-stage deadlines — not a separate editor), expiry watches, KPI definitions,
+  report definitions and saved views, branding, settings.
 - All are **data**, editable through the Admin Configuration Center.
 
 Public surface: `SettingsRepository`, `FormBuilderService`, `CustomFieldService`,
 `NumberingService`, `StatusRegistry`, `TemplateRenderer`.
+
+**`App\Engines\Query` and `App\Engines\Report` are not a sixth engine.** `FilterCompiler` turns a
+whitelisted condition set into query constraints, and `ReportRunner` composes it with the access
+engine's `visibleTo()` and the catalogue's column list. Both are consumers: the compiler cannot
+widen what access returns, and it is shared with `KpiEvaluator` specifically so that a report and
+the KPI beside it narrow a register through one implementation rather than two that agree today.
 
 ## 3. Request lifecycle
 

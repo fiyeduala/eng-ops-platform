@@ -393,20 +393,91 @@ silent in production:
   precisely the failure the sweep exists to prevent. `lastCutOffBefore()` steps back a day when
   today's has not arrived.
 
-## PHASE 7 — Advanced administration ⬜
+## PHASE 7 — Advanced administration ✅
 
-Form builder (all field types, repeating tables, signatures) · form → workflow binding · custom
-fields · configurable statuses and transitions · workflow builder UI · numbering schemes · KPI
-definitions · escalation rules · expiry watches · report builder · Admin Configuration Center.
+Admin Configuration Center ✅ · configurable statuses and transitions ✅ · numbering schemes ✅ ·
+option lists ✅ · custom fields ✅ · form builder (all field types, repeating tables, signatures) ✅ ·
+form → workflow binding ✅ · expiry watches ✅ · KPI definitions ✅ · report builder ✅ · saved
+views ✅ · escalation rules ✅ (see the note below — deliberately not a new editor).
 
 **Exit criteria:** the §73 "configure a new company" and §74 "reorganization" walkthroughs are
-completed entirely through the UI by a non-developer.
+completed entirely through the UI by a non-developer. **Met per surface, with one gap recorded
+below.** Every configuration surface this phase added is reachable from the Configuration Center,
+built from permissions (§96), and has a test that drives it through the same HTTP endpoints the
+screens post to — `FormBuilderTest::a_form_can_be_built_and_published_entirely_through_the_screen`,
+`ReportAccessSweepTest::a_report_and_a_shared_view_can_be_set_up_entirely_through_the_screens`, and
+`WorkflowEngineTest::a_workflow_defined_entirely_through_the_ui_routes_a_document_through_approval`.
+**The gap:** there is no single spanning test that configures a whole new company end to end, nor
+one that reorganizes a department tree and re-checks reach afterwards. Each piece is proven; the
+walkthrough as one continuous act is not. It belongs in the Phase 9 authorization matrix and is
+listed there.
+
+**Delivered (completed 2026-09-20):**
+
+- **Part 1 — the Configuration Center and the state machine** (`b9e7469`): the hub, plus the status
+  vocabulary and the transition whitelist as things a company edits. `is_system` records, at the
+  only point where it is still known, which statuses the code depends on — a company may relabel,
+  recolour and reorder them, and may not rekey or deactivate them. A move into a status an approval
+  confers must name a permission, or the generic status endpoints would hand out the outcome the
+  approval existed to confer with the engine never involved.
+- **Part 2 — numbering, vocabulary and invented fields** (`2d273af`): gapless, collision-free
+  numbering allocated inside the record's own transaction from a locked row (§64); option lists that
+  freeze the stored value while the wording stays editable (§63); custom fields on 45 registers,
+  with the required-field trap refused rather than allowed to invalidate a year of records, and
+  every rule recompiled server-side from the stored definition (§84).
+- **Part 3 — the form builder and the sheets filled in on it** (`5cb7aa2`): definitions are
+  configuration, submissions are records, and they have separate registers, policies and
+  permissions. A submission binds to the edition published when it was started, so March's answers
+  render against March's questions. Save, submit and sign are three acts and two permissions.
+  Signatures reuse the document module's table and repeat the §28 scope statement in full.
+- **Part 4 — form → workflow binding** (`25483f3`): bound to the form, not the sheet, so nobody
+  nominates their own approver. Five approval settings that had never been wired are reconciled —
+  including auto-approve-on-timeout, deleted rather than implemented, because honouring it would
+  write an approval nobody gave (§59).
+- **Part 5 — expiry watches and KPIs** (`3fdaa72`): one expiry engine replacing two hard-coded
+  sweeps, still behind the single cron entry (§1). A KPI holds no number of its own: every figure is
+  counted through the visibility of whoever asked, and nothing is memoised, because a cached total
+  belongs to whoever it was counted for.
+- **Part 6 — the report builder and saved views** (`4b69e82`): a report is a saved question, not a
+  saved answer. Registers, columns, filterable fields and groupings all come off a whitelist; rows
+  come back through `visibleTo()`, so a shared report carries the question and never the reach.
+  Saved views (§54) are per person and shareable within a scope, and applying one is a redirect into
+  the ordinary run screen rather than a second path to the rows.
+
+**Two decisions in this phase were to build nothing, and both are load-bearing:**
+
+- **There is no escalation editor.** The Configuration Center's "Escalation rules" tile lands on the
+  workflow group of the settings page, because what happens when an approval sits too long is a
+  setting plus the per-stage deadlines. A third place to configure it would be the beginning of a
+  second approval path (§78).
+- **There is no cached KPI or report total anywhere.** `kpi_snapshots` is specified in the ERD and
+  deliberately not built yet; see Phase 8.
+
+**One class of defect found by reading rather than by failing tests**, in each case with no symptom
+until it mattered: a KPI definition reached by key rather than by listing would count another
+company's records under this company's letterhead (§75, fixed in part 5); a saved view whose fields
+the register had stopped offering would silently run unfiltered, showing somebody the whole company
+under a heading that said "Civil only" (fixed in part 6); and three Blade templates compiled to
+syntax errors that `view:cache` accepted happily, one of which had been printing a stray
+`the promised date@endif.` to users for several commits. `ViewsCompileTest` now sweeps all 473
+templates for all three shapes in six seconds.
+
+**Phase totals at close:** 973 tests, 6,573 assertions, green.
 
 ## PHASE 8 — Executive intelligence ⬜
 
 Executive command center · department dashboards · project command center · drill-down navigation ·
 daily executive report (scheduled, per-recipient visibility) · KPI reports · exports · global
 search.
+
+**Carried in from Phase 7, deliberately deferred rather than forgotten:**
+
+| Item | Why it was not built in Phase 7 |
+|------|---------------------------------|
+| **Excel export (PhpSpreadsheet)** | The dependency is not installed. Phase 7 shipped CSV and PDF, which are the two formats a report screen needs to be useful, and CSV opens in Excel. True `.xlsx` — typed cells, frozen header, autofilter, per docs/11 §3 — is a formatting job, and formatting a workbook in memory is exactly the shape that hits the cPanel `memory_limit` on a large report. It belongs with the queued export path, not before it. **Install `phpoffice/phpspreadsheet` at the start of this phase.** |
+| **Queued exports with signed, expiring links** | docs/11 §3 requires exports over a row threshold to be queued and delivered as a notification. Phase 7's exports are synchronous and stream, which is correct for the row counts a builder screen produces and wrong as the only path. |
+| **DOCX export of reports** | `phpoffice/phpword` is installed and already used for documents; wiring it to the report renderer waits for the same export pass. |
+| **`kpi_snapshots`** | Specified in docs/03 §D, not created. A snapshot is a number counted for somebody, and storing one raises the question this platform has so far answered by never caching: whose visibility was it counted through? Dashboards are where that question has to be answered, so the table lands with them. |
 
 **Exit criteria:** the §89 drill-down path works end to end and search returns exactly the index-page
 result set.
@@ -417,6 +488,12 @@ Security review · full authorization test matrix (IDOR, scope escape, notificat
 leakage, file access) · N+1 and query-count budgets · load sanity check · error handling and
 friendly error pages · backup and restore drill · deployment runbook · demo seed data · user
 documentation.
+
+**Carried in from Phase 7:** the two walkthroughs named in that phase's exit criteria are proven
+surface by surface but never as one continuous act. This phase owes two spanning tests — §73,
+configuring a new company from an empty tenant to a routed, numbered, reportable register entirely
+through the screens; and §74, reorganizing a department tree and re-checking every reach that
+depended on it afterwards.
 
 **Exit criteria:** the authorization test matrix is green; a restore drill is documented with a
 measured RTO.
