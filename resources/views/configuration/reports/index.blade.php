@@ -20,6 +20,11 @@
                     <x-icon name="plus" class="h-3.5 w-3.5"/> New report
                 </a>
             @endif
+            {{-- Reachable from here as well as from the menu, because this is where somebody is
+                 standing when they are told a file is being prepared. --}}
+            <a href="{{ route('exports.index') }}" class="btn btn-secondary btn-sm">
+                <x-icon name="download" class="h-3.5 w-3.5"/> My exports
+            </a>
             <a href="{{ route('configuration.index') }}" class="btn btn-secondary btn-sm">
                 <x-icon name="chevron-left" class="h-3.5 w-3.5"/> Configuration
             </a>

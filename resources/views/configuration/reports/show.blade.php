@@ -22,16 +22,21 @@
                     // silently return the unfiltered report — the same rows, minus the narrowing
                     // the person just applied, with nothing to say so.
                     $exportQuery = request()->has('filters') ? ['filters' => request()->input('filters')] : [];
+
+                    // Short names on the buttons and the full sentence in the tooltip. The constant's
+                    // labels say "CSV (spreadsheet)" and "Excel workbook" because they are read in a
+                    // settings list; four of those side by side in a page header is a wrapped row of
+                    // prose where four file types should be.
+                    $exportButtons = ['csv' => 'CSV', 'xlsx' => 'Excel', 'docx' => 'Word', 'pdf' => 'PDF'];
                 @endphp
 
-                <a href="{{ route('configuration.reports.export', ['report' => $report, 'format' => 'csv'] + $exportQuery) }}"
-                   class="btn btn-secondary btn-sm">
-                    <x-icon name="download" class="h-3.5 w-3.5"/> CSV
-                </a>
-                <a href="{{ route('configuration.reports.export', ['report' => $report, 'format' => 'pdf'] + $exportQuery) }}"
-                   class="btn btn-secondary btn-sm">
-                    <x-icon name="download" class="h-3.5 w-3.5"/> PDF
-                </a>
+                @foreach (\App\Models\ReportDefinition::FORMATS as $exportFormat => $exportLabel)
+                    <a href="{{ route('configuration.reports.export', ['report' => $report, 'format' => $exportFormat] + $exportQuery) }}"
+                       title="{{ $exportLabel }}"
+                       class="btn btn-secondary btn-sm">
+                        <x-icon name="download" class="h-3.5 w-3.5"/> {{ $exportButtons[$exportFormat] ?? \Illuminate\Support\Str::upper($exportFormat) }}
+                    </a>
+                @endforeach
             @endif
 
             @if ($canEdit)

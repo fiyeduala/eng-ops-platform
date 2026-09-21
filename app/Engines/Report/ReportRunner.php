@@ -101,6 +101,67 @@ class ReportRunner
         return $this->collect($report, $query, $columns, $viewerId, $ranAt ?? Carbon::now());
     }
 
+    /**
+     * How many rows this reader would get, without building any of them.
+     *
+     * ADDED FOR THE EXPORT THRESHOLD (Phase 8, docs/11 §3), and bounded on purpose. The question an
+     * export asks is not "how many rows are there" but "is this more than N" — so the count stops at
+     * N+1 and never scans the whole register. On a company with sixty thousand purchase orders the
+     * difference between those two questions is the difference between a decision and a timeout,
+     * which would be an absurd way to fail while deciding whether something might time out.
+     *
+     * IT IS THE SAME QUERY `run()` COUNTS, through the same `baseQuery()`, so a threshold decision
+     * and the file it leads to can never be about different row sets. Null means the report cannot
+     * be run at all — the caller then calls `run()` and gets the proper unavailable result with its
+     * reason, rather than this method inventing a second wording for the same refusal.
+     *
+     * @param  array<int,array{field:string,operator:string,value:mixed}>  $extraFilters
+     */
+    public function countUpTo(
+        ReportDefinition $report,
+        ?User $viewer,
+        int $ceiling,
+        array $extraFilters = [],
+    ): ?int {
+        if ($viewer === null || (int) $report->organization_id !== (int) $viewer->organization_id) {
+            return null;
+        }
+
+        if (! $report->is_active) {
+            return null;
+        }
+
+        $class = ReportCatalogue::modelFor($report->entity_type);
+
+        if ($class === null || ! ReportCatalogue::listable($report->entity_type)) {
+            return null;
+        }
+
+        $query = $this->baseQuery($report, $class, $viewer, $extraFilters);
+
+        if ($query === null) {
+            return null;
+        }
+
+        $model = $query->getModel();
+
+        // The ordering and the eager loads baseQuery() applied are work a count does not need.
+        // Cleared rather than avoided, because the alternative is a second query builder beside the
+        // one the export will actually run, which is how a threshold comes to be decided about a
+        // different set of rows than the file contains.
+        $inner = $query->setEagerLoads([])
+            ->reorder()
+            ->select($model->qualifyColumn($model->getKeyName()))
+            ->limit(max(1, $ceiling) + 1)
+            ->toBase();
+
+        // COUNTED THROUGH A SUBQUERY, and this is the only way the ceiling actually applies.
+        // `->limit(n)->count()` does NOT stop at n: the LIMIT lands on the aggregate's single result
+        // row, the COUNT still scans everything, and the method would look bounded while doing the
+        // exact full-register scan it exists to avoid.
+        return (int) $model->getConnection()->query()->fromSub($inner, 'bounded')->count();
+    }
+
     // ================================================================== the query
 
     /**

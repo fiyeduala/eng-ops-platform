@@ -364,7 +364,10 @@ final class ReportExportTest extends TestCase
     {
         $report = $this->report();
 
-        foreach (['xlsx', 'html', 'php', '../../config/app'] as $format) {
+        // `xlsx` used to be on this list and is now a real format (Phase 8, part 5). The list is
+        // deliberately not a list of dangerous strings — it is a list of plausible ones, because the
+        // check that matters is that the format is looked up in FORMATS rather than believed.
+        foreach (['ods', 'html', 'php', '../../config/app'] as $format) {
             $this->actingFresh($this->tunde)
                 ->get(route('configuration.reports.export', ['report' => $report, 'format' => $format]))
                 ->assertNotFound();

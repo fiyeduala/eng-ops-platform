@@ -41,14 +41,28 @@ class ReportDefinition extends Model
     /**
      * How a report can be taken away from the screen.
      *
-     * Deliberately short. Excel and Word are named in docs/11 §3 and are not here, because a format
-     * this cannot render is worse than a format it does not offer: a greyed-out button that fails on
-     * click teaches people the report itself is unreliable.
+     * Still deliberately short, and still on the same rule it was short for: a format this cannot
+     * render is worse than a format it does not offer, because a button that fails on click teaches
+     * people the report itself is unreliable. Excel and Word are here now only because Phase 8 built
+     * ExcelRenderer and WordRenderer — they were named in docs/11 §3 and withheld until then.
+     *
+     * WHY FOUR AND NOT ONE. CSV is the one every other system will accept and the one Excel will
+     * quietly corrupt — it has no types, so `03-0450` becomes a date and a document number is
+     * destroyed on open. XLSX carries the types, which is why a number in it can be summed and a
+     * reference in it survives. PDF is the copy that is meant not to be edited. DOCX is the copy
+     * that is meant to be: the draft somebody writes their commentary into before it goes upstairs.
+     * Those are four different jobs, not one job with four buttons.
+     *
+     * The keys are matched against Export::MIME_TYPES and ExportManager's renderer switch. A key
+     * added here and nowhere else produces a queued export that fails with "that export format is no
+     * longer offered", which is the safe direction to fail in but is still a bug.
      *
      * @var array<string,string>
      */
     public const FORMATS = [
         'csv' => 'CSV (spreadsheet)',
+        'xlsx' => 'Excel workbook',
+        'docx' => 'Word document',
         'pdf' => 'PDF (print)',
     ];
 
@@ -66,11 +80,17 @@ class ReportDefinition extends Model
     /**
      * The most rows one run will return.
      *
-     * A HARD CEILING AND NOT A PAGE SIZE. docs/11 §3 sends anything larger down a queued path with
-     * a signed expiring link, and that path is Phase 8. Until it exists, a report that would return
-     * a hundred thousand rows must say so and stop rather than take the server down proving it
-     * could (§95) — and a truncated export that did not announce itself would be worse than either,
-     * because somebody would reconcile against it.
+     * A HARD CEILING AND NOT A PAGE SIZE, and it survived the queued path rather than being replaced
+     * by it. Phase 8 built what docs/11 §3 described — anything above the company's threshold is
+     * prepared in the background behind a signed expiring link — but the background is a different
+     * place to do the work, not a licence to do more of it. A report that would return a hundred
+     * thousand rows must still say so and stop rather than take the server down proving it could
+     * (§95), and a truncated export that did not announce itself would be worse than either, because
+     * somebody would reconcile against it.
+     *
+     * So the two limits stack and mean different things: this one is the most rows that will ever be
+     * returned, and `report.export_queue_threshold` is the most that will be built inside a web
+     * request. ExportManager clamps the second to the first for exactly that reason.
      */
     public const MAX_ROWS = 5000;
 

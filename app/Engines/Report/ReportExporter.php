@@ -14,12 +14,18 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 /**
  * A report, taken off the screen (docs/11 §3, §59, §67).
  *
- * NOTHING IS WRITTEN TO DISK, AND THAT IS THE SECURITY DECISION HERE. §67 requires stored files to
- * live on private storage behind an authorized, validated download route. The strongest way to
- * satisfy a rule about stored files is not to store one: both formats below are generated inside
- * the authenticated request that asked for them and streamed straight back. There is no artefact on
- * the disk to be found by path-guessing, no orphan to sweep up, no window between writing and
- * deleting, and no second route that has to re-derive who may read it.
+ * NOTHING THIS CLASS PRODUCES IS WRITTEN TO DISK, AND THAT IS THE SECURITY DECISION HERE. §67
+ * requires stored files to live on private storage behind an authorized, validated download route.
+ * The strongest way to satisfy a rule about stored files is not to store one: both formats below are
+ * generated inside the authenticated request that asked for them and streamed straight back. There
+ * is no artefact on the disk to be found by path-guessing, no orphan to sweep up, no window between
+ * writing and deleting, and no second route that has to re-derive who may read it.
+ *
+ * THAT REMAINS THE PREFERRED PATH AND IS STILL THE ONE MOST EXPORTS TAKE. Phase 8 added a second,
+ * for the exports that cannot finish inside a request: ExportManager stores those on the private
+ * disk behind ExportPolicy, with a retention date and a sweep. The threshold between the two is a
+ * company setting, and it is deliberately set so that the stored path is the exception — every file
+ * that path produces is a copy of one person's visibility that somebody has to remember to delete.
  *
  * THE ROWS ARE ALREADY THE VIEWER'S. This class never queries anything. It is handed a ReportResult
  * that ReportRunner produced through one person's `visibleTo()`, and it formats it. That division is
@@ -32,10 +38,11 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  * of those is what makes an old export reconcilable: a spreadsheet found in an email two years later
  * is only evidence if the trail can say what it contained.
  *
- * LARGE EXPORTS ARE REFUSED RATHER THAN QUEUED, for now. docs/11 §3 routes anything over a row
- * threshold through a queued job and a signed expiring link. That path is Phase 8. Until it exists,
- * ReportDefinition::MAX_ROWS stops the request and the notice travels with the file — a truncated
- * export that did not announce itself is worse than a refused one, because somebody totals it.
+ * LARGE EXPORTS GO THROUGH ExportManager, which counts the rows before building any of them and
+ * hands anything over the company's threshold to a job. What has NOT changed is the truncation
+ * notice: ReportDefinition::MAX_ROWS still caps the list, and the notice still travels with the
+ * file in every format, because a truncated export that did not announce itself is worse than a
+ * refused one — somebody totals it.
  */
 class ReportExporter
 {
@@ -65,55 +72,7 @@ class ReportExporter
         return new StreamedResponse(function () use ($report, $result, $actor) {
             $handle = fopen('php://output', 'wb');
 
-            // A BOM, because the overwhelming majority of these are opened in Excel on Windows,
-            // and without it Excel reads UTF-8 as the system codepage — which turns every accented
-            // name in the company into mojibake and makes the export look broken rather than the
-            // spreadsheet look misconfigured.
-            fwrite($handle, "\xEF\xBB\xBF");
-
-            fputcsv($handle, [$report->name]);
-
-            if ($report->description) {
-                fputcsv($handle, [$report->description]);
-            }
-
-            fputcsv($handle, ['Run '.($result->ranAt?->format('j M Y, H:i') ?? '')]);
-
-            // WHOSE VIEW THIS IS, in the file, in the same words the PDF footer uses. The rows
-            // below are one person's — a department manager's export of a company report is a
-            // department's worth of rows — and the file is read by people with no way to ask.
-            // Without this line, two colleagues comparing two exports of one report conclude the
-            // platform miscounts rather than that they have different reach (§61).
-            fputcsv($handle, ['Shows only what '.$actor->name.' is permitted to see.']);
-
-            // The notice goes at the TOP of the file, not the bottom. A spreadsheet is read from
-            // row one and totalled from the bottom, so a warning after the last row is a warning
-            // under the sum nobody scrolled past.
-            if ($result->truncationNotice() !== null) {
-                fputcsv($handle, [$result->truncationNotice()]);
-            }
-
-            fputcsv($handle, []);
-
-            $grouped = $result->isGrouped();
-            $headings = array_values($result->columns);
-
-            fputcsv($handle, $grouped ? array_merge(['Group'], $headings) : $headings);
-
-            foreach ($result->groups as $group) {
-                foreach ($group['rows'] as $row) {
-                    $cells = [];
-
-                    foreach (array_keys($result->columns) as $column) {
-                        $cells[] = $this->safeCell((string) ($row[$column] ?? ''));
-                    }
-
-                    // The group on every row rather than as a heading: a CSV is sorted and
-                    // filtered by whoever opens it, and a heading row becomes a stray line of
-                    // text in the middle of the data the first time somebody sorts by column B.
-                    fputcsv($handle, $grouped ? array_merge([$group['label'] ?? ''], $cells) : $cells);
-                }
-            }
+            $this->writeCsv($handle, $report, $result, $actor);
 
             fclose($handle);
         }, Response::HTTP_OK, [
@@ -125,6 +84,70 @@ class ReportExporter
             'Cache-Control' => 'no-store, no-cache, must-revalidate',
             'Pragma' => 'no-cache',
         ]);
+    }
+
+    /**
+     * The body of a CSV, written to any handle.
+     *
+     * PUBLIC AND SEPARATE FROM THE RESPONSE SINCE PHASE 8, because a large export is prepared in the
+     * background and written to a file rather than streamed to a browser. Both paths call this, so
+     * there is exactly one place that decides what a CSV of a report contains — a second
+     * implementation for the queued path would be a file that disagreed with the one the same report
+     * downloads directly, which is the failure docs/11 §1 is about.
+     *
+     * @param  resource  $handle
+     */
+    public function writeCsv($handle, ReportDefinition $report, ReportResult $result, User $actor): void
+    {
+        // A BOM, because the overwhelming majority of these are opened in Excel on Windows,
+        // and without it Excel reads UTF-8 as the system codepage — which turns every accented
+        // name in the company into mojibake and makes the export look broken rather than the
+        // spreadsheet look misconfigured.
+        fwrite($handle, "\xEF\xBB\xBF");
+
+        fputcsv($handle, [$report->name]);
+
+        if ($report->description) {
+            fputcsv($handle, [$report->description]);
+        }
+
+        fputcsv($handle, ['Run '.($result->ranAt?->format('j M Y, H:i') ?? '')]);
+
+        // WHOSE VIEW THIS IS, in the file, in the same words the PDF footer uses. The rows
+        // below are one person's — a department manager's export of a company report is a
+        // department's worth of rows — and the file is read by people with no way to ask.
+        // Without this line, two colleagues comparing two exports of one report conclude the
+        // platform miscounts rather than that they have different reach (§61).
+        fputcsv($handle, ['Shows only what '.$actor->name.' is permitted to see.']);
+
+        // The notice goes at the TOP of the file, not the bottom. A spreadsheet is read from
+        // row one and totalled from the bottom, so a warning after the last row is a warning
+        // under the sum nobody scrolled past.
+        if ($result->truncationNotice() !== null) {
+            fputcsv($handle, [$result->truncationNotice()]);
+        }
+
+        fputcsv($handle, []);
+
+        $grouped = $result->isGrouped();
+        $headings = array_values($result->columns);
+
+        fputcsv($handle, $grouped ? array_merge(['Group'], $headings) : $headings);
+
+        foreach ($result->groups as $group) {
+            foreach ($group['rows'] as $row) {
+                $cells = [];
+
+                foreach (array_keys($result->columns) as $column) {
+                    $cells[] = $this->safeCell((string) ($row[$column] ?? ''));
+                }
+
+                // The group on every row rather than as a heading: a CSV is sorted and
+                // filtered by whoever opens it, and a heading row becomes a stray line of
+                // text in the middle of the data the first time somebody sorts by column B.
+                fputcsv($handle, $grouped ? array_merge([$group['label'] ?? ''], $cells) : $cells);
+            }
+        }
     }
 
     /**
@@ -144,19 +167,59 @@ class ReportExporter
     ): Response {
         $this->audit($report, $result, $actor, 'pdf', $extraFilters);
 
-        $body = $this->pdf->renderHtml(
-            title: $report->name,
-            bodyHtml: $this->html($report, $result, $actor),
-            footerHtml: e($report->name).' &nbsp;|&nbsp; Printed '.now()->format('j M Y, H:i')
-                .' &nbsp;|&nbsp; Shows only what '.e($actor->name).' is permitted to see.',
-        );
-
-        return new Response($body, Response::HTTP_OK, [
+        return new Response($this->pdfBytes($report, $result, $actor), Response::HTTP_OK, [
             'Content-Type' => 'application/pdf',
             'Content-Disposition' => 'attachment; filename="'.$this->filename($report, 'pdf').'"',
             'Cache-Control' => 'no-store, no-cache, must-revalidate',
             'Pragma' => 'no-cache',
         ]);
+    }
+
+    /**
+     * The PDF itself, as bytes.
+     *
+     * Split out for the same reason writeCsv() was: the background path stores a file and the
+     * direct path streams a response, and both must produce the identical document. One method,
+     * two callers, no chance of the queued copy carrying a different footer from the direct one.
+     */
+    public function pdfBytes(ReportDefinition $report, ReportResult $result, User $actor): string
+    {
+        return $this->pdf->renderHtml(
+            title: $report->name,
+            bodyHtml: $this->html($report, $result, $actor),
+            footerHtml: e($report->name).' &nbsp;|&nbsp; Printed '.now()->format('j M Y, H:i')
+                .' &nbsp;|&nbsp; Shows only what '.e($actor->name).' is permitted to see.',
+        );
+    }
+
+    /**
+     * The name this report's file is saved under, in a given format.
+     *
+     * Public since Phase 8 so a queued export stores the same stem the direct download would have
+     * offered. See the private implementation for why it is stripped rather than escaped (§84).
+     */
+    public function filenameFor(ReportDefinition $report, string $extension): string
+    {
+        return $this->filename($report, $extension);
+    }
+
+    /**
+     * §59 for an export that was prepared in the background.
+     *
+     * The same entry the direct path writes, at the moment the file actually exists — which is the
+     * only moment the row count is known. A queued export that never ran therefore has no audit
+     * entry, and correctly so: nothing left the building. The `exports` row carries the attempt.
+     *
+     * @param  array<int,array{field:string,operator:string,value:mixed}>  $extraFilters
+     */
+    public function recordPreparedExport(
+        ReportDefinition $report,
+        ReportResult $result,
+        User $actor,
+        string $format,
+        array $extraFilters = [],
+    ): void {
+        $this->audit($report, $result, $actor, $format, $extraFilters);
     }
 
     // ================================================================== the page

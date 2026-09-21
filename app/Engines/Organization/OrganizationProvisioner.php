@@ -328,6 +328,16 @@ class OrganizationProvisioner
             'report.daily_executive_hour' => 7,
             'report.daily_executive_enabled' => true,
 
+            // 500 rows, which is well under what a cPanel PHP process will render synchronously in
+            // any of the four formats, and well above what a person reads on screen before
+            // exporting. A company whose hosting is slower lowers it; one on a VPS raises it.
+            'report.export_queue_threshold' => 500,
+
+            // Twelve hours: long enough that a file prepared overnight is still there in the
+            // morning, short enough that nobody treats this as a document store. See the exports
+            // migration for why the ceiling matters more than the convenience.
+            'report.export_retention_hours' => 12,
+
             // --- security ----------------------------------------------------------------
             'security.password_min_length' => 12,
             'security.password_expiry_days' => 0,           // 0 = never; forced rotation is

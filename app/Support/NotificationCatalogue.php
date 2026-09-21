@@ -376,6 +376,25 @@ final class NotificationCatalogue
             'A payment needs approving, or has been approved and is waiting to be released.',
             'high', true, [true, true, false],
         ],
+
+        // ------------------------------------------------------------------ reporting
+        // MANDATORY, and it is the only export notice there is. A person who asked for a file and
+        // was never told it was ready waits for an afternoon and then exports it again, which on a
+        // shared host is how one large report becomes four. Switching this off cannot be allowed to
+        // produce that, so it is not switchable.
+        //
+        // Email is ON by default even though the notice carries no data, because the whole point is
+        // that the person walked away from the screen while it was being prepared.
+        'export.ready' => [
+            'report', 'Reporting', 'An export you asked for is ready',
+            'A report you exported was too large to download straight away and has finished preparing.',
+            'normal', true, [true, true, false],
+        ],
+        'export.failed' => [
+            'report', 'Reporting', 'An export you asked for could not be produced',
+            'Something went wrong while preparing a file you asked for.',
+            'normal', true, [true, true, false],
+        ],
     ];
 
     /**

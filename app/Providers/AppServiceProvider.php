@@ -138,6 +138,7 @@ use App\Models\EmployeePayComponent;
 use App\Models\EmployeeSalary;
 use App\Models\Expense;
 use App\Models\ExpiryWatch;
+use App\Models\Export;
 use App\Models\Follower;
 use App\Models\Form;
 use App\Models\FormAnswer;
@@ -286,6 +287,7 @@ use App\Policies\EmployeePolicy;
 use App\Policies\EmployeeSalaryPolicy;
 use App\Policies\ExpensePolicy;
 use App\Policies\ExpiryWatchPolicy;
+use App\Policies\ExportPolicy;
 use App\Policies\FollowerPolicy;
 use App\Policies\FormPolicy;
 use App\Policies\FormSubmissionPolicy;
@@ -519,6 +521,12 @@ class AppServiceProvider extends ServiceProvider
             // figure is not audited, not followed and not attached to; it is a reading, and the
             // thing worth auditing is the DEFINITION that decided what was being read.
             'dashboard_widget' => DashboardWidget::class,
+            // Phase 8, part 5. Here because it is a NOTIFICATION SUBJECT, not because anyone audits
+            // it: the dispatcher records what a notice is about and then asks the Gate whether the
+            // recipient may see that subject (§68), and with the morph map enforced an unmapped
+            // class throws rather than degrading quietly. What the export CONTAINED is audited
+            // against the report definition it came from, which is the alias above.
+            'export' => Export::class,
 
             'project' => Project::class,
             'project_type' => ProjectType::class,
@@ -1014,6 +1022,13 @@ class AppServiceProvider extends ServiceProvider
             ReportDefinition::class => ReportDefinitionPolicy::class,
             SavedFilter::class => SavedFilterPolicy::class,
             DashboardWidget::class => DashboardWidgetPolicy::class,
+            // Phase 8, part 5. Registered like every other policy, and unlike every other policy it
+            // reads no permission — a prepared export is one person's property, not one company's
+            // record, and ExportPolicy argues that at length. It has to be here all the same:
+            // NotificationDispatcher asks the Gate whether the recipient may view the subject before
+            // it will send anything (§68), so an unregistered policy would not make the "your file
+            // is ready" notice insecure, it would make it silently reach nobody.
+            Export::class => ExportPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {

@@ -40,6 +40,7 @@ use App\Http\Controllers\EmployeeMovementController;
 use App\Http\Controllers\EmployeePayController;
 use App\Http\Controllers\ExpenseController;
 use App\Http\Controllers\ExpiryWatchController;
+use App\Http\Controllers\ExportController;
 use App\Http\Controllers\FormController;
 use App\Http\Controllers\FormFieldController;
 use App\Http\Controllers\FormSectionController;
@@ -217,6 +218,28 @@ Route::middleware(['auth', 'password.current'])->group(function () {
      * shortcut away from the people who most need it (§6, §96).
      */
     Route::get('search', [SearchController::class, 'index'])->name('search');
+
+    /**
+     * Files you asked for, waiting to be collected (docs/11 §3, §67).
+     *
+     * NO PERMISSION MIDDLEWARE, FOR A DIFFERENT REASON THAN SEARCH ABOVE. Searching is a shortcut
+     * to pages somebody already holds; this is a person's own property. `report.export` governs
+     * whether a file may be MADE, and ReportDefinitionController asks it with the report in hand.
+     * Re-asking it here would mean a revoked grant stranded somebody's file behind a 403 while its
+     * "ready" notification still sat in their bell — and, far worse, would let anybody who still
+     * held the grant collect somebody else's. Ownership collects; the grant creates.
+     *
+     * `signed` ON THE DOWNLOAD AND NOT ON THE LIST. The link travels in a notification and must stop
+     * working on its own; the list is reached from the menu by somebody already signed in, and
+     * signing it would break the first bookmark anybody made. Note that `signed` sits BESIDE `auth`
+     * and ExportPolicy rather than instead of them — see ExportController for why all four gates
+     * are needed and which two do the protecting (§84).
+     */
+    Route::get('exports', [ExportController::class, 'index'])->name('exports.index');
+    Route::get('exports/{export}/download', [ExportController::class, 'download'])
+        ->middleware('signed')->whereNumber('export')->name('exports.download');
+    Route::delete('exports/{export}', [ExportController::class, 'destroy'])
+        ->whereNumber('export')->name('exports.destroy');
 
     // Your own record. No permission middleware on purpose — everyone may see and maintain their
     // own profile, and the controller only ever addresses $request->user().

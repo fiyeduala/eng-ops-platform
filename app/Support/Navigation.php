@@ -471,6 +471,18 @@ class Navigation
                             'dashboard.view_department', 'dashboard.manage'],
                         'active' => 'configuration.widgets.*'],
 
+                    // THE ONE ITEM ON THIS MENU WHOSE PERMISSION IS NOT AN AUTHORIZATION. The
+                    // exports page has no permission at all — it lists a person's own files and the
+                    // policy behind it reads ownership, not `report.export` — so this key is doing a
+                    // different job: it answers "could this person ever have an export", and for
+                    // most of a company the answer is no. A menu line that is empty for everybody
+                    // who has never exported anything is the sort of thing §96 exists to prevent.
+                    // The corollary is the part worth remembering: someone whose export permission
+                    // is withdrawn loses this link and keeps the files, which is correct — the grant
+                    // creates, ownership collects.
+                    ['label' => 'My exports', 'route' => 'exports.index', 'icon' => 'download',
+                        'permission' => 'report.export', 'active' => 'exports.*'],
+
                     // Listed under Administration rather than beside the registers, because what
                     // you reach here is the BUILDER — the questions, the versions, the publish
                     // button. Filling a form in is a different act with a different permission,

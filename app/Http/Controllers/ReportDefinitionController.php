@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
-use App\Engines\Report\ReportExporter;
+use App\Engines\Report\ExportManager;
 use App\Engines\Report\ReportRunner;
+use App\Models\Export;
 use App\Models\KpiDefinition;
 use App\Models\ReportDefinition;
 use App\Models\SavedFilter;
@@ -46,7 +47,7 @@ class ReportDefinitionController extends Controller
     public function __construct(
         private readonly ReportDefinitionService $service,
         private readonly ReportRunner $runner,
-        private readonly ReportExporter $exporter,
+        private readonly ExportManager $exports,
     ) {}
 
     /**
@@ -129,6 +130,13 @@ class ReportDefinitionController extends Controller
      * withdrawn between opening the page and pressing Export gets the narrower answer — not the
      * one that was on their screen. Passing the rendered rows through the session would have been
      * less work and would have made a stale view exportable.
+     *
+     * TWO ENDINGS, ONE PERMISSION. Above the company's threshold the file is prepared in the
+     * background and this returns a redirect saying so; below it, the download starts. Which ending
+     * a click gets is ExportManager's decision and is about the host, not about the person — the
+     * authorization happened once, here, before either path was chosen. A second permission for
+     * "may export a large one" would be a second answer to a question already settled (§78's rule,
+     * applied to a smaller thing).
      */
     public function export(Request $request, ReportDefinition $report, string $format): Response
     {
@@ -141,17 +149,30 @@ class ReportDefinitionController extends Controller
         $user = $request->user();
         $adHoc = $this->adHocFilters($request, $report);
 
-        $result = $this->runner->run($report, $user, $adHoc);
+        $outcome = $this->exports->offer($report, $user, $format, $adHoc);
 
-        if (! $result->available) {
+        // Null means the report itself cannot run — a deleted register, a withdrawn permission, an
+        // entity type no longer listed. Re-run it to get the proper wording rather than invent one
+        // here; there is exactly one sentence for "this report cannot run" and it lives on the
+        // result, which is also what the screen shows.
+        if ($outcome === null) {
             return redirect()
                 ->route('configuration.reports.show', $report)
-                ->withErrors(['export' => $result->reason ?? 'This report could not be run.']);
+                ->withErrors([
+                    'export' => $this->runner->run($report, $user, $adHoc)->reason
+                        ?? 'This report could not be run.',
+                ]);
         }
 
-        return $format === 'csv'
-            ? $this->exporter->csv($report, $result, $user, $adHoc)
-            : $this->exporter->pdf($report, $result, $user, $adHoc);
+        if ($outcome instanceof Export) {
+            return redirect()
+                ->route('configuration.reports.show', $report)
+                ->with('status', 'This report is too large to download straight away, so it is being '
+                    .'prepared in the background. You will be notified when the '
+                    .mb_strtolower(ReportDefinition::FORMATS[$format]).' is ready to collect.');
+        }
+
+        return $outcome;
     }
 
     public function create(Request $request): View

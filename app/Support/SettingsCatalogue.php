@@ -430,6 +430,8 @@ final class SettingsCatalogue
                 'settings' => [
                     'report.daily_executive_enabled' => ['label' => 'Send the daily executive report', 'type' => 'boolean'],
                     'report.daily_executive_hour' => ['label' => 'Send it at', 'type' => 'hour'],
+                    'report.export_queue_threshold' => ['label' => 'Prepare exports in the background above', 'type' => 'integer', 'rules' => ['required', 'integer', 'between:50,5000'], 'help' => 'Rows. Smaller exports download immediately; larger ones are prepared in the background and you are told when they are ready. Lower this if exports time out on your hosting.'],
+                    'report.export_retention_hours' => ['label' => 'Keep prepared export files for', 'type' => 'integer', 'rules' => ['required', 'integer', 'between:1,168'], 'help' => 'Hours. After this the file is deleted and the link stops working — the record of what was exported is kept. Shorter is safer: an export is a copy of one person’s view that nobody is managing.'],
                 ],
             ],
 

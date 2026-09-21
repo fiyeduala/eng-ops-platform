@@ -114,3 +114,53 @@ Schedule::command('kpi:snapshot')
     ->withoutOverlapping(30)
     ->runInBackground()
     ->description('Record the day’s figure for every measure each company watches');
+
+/*
+ * The queue, run from the same one cron entry as everything else (§1).
+ *
+ * THIS IS NOT A DAEMON AND MUST NOT BECOME ONE. `--stop-when-empty` is what keeps the promise the
+ * whole platform is built on: the worker starts, drains whatever is waiting, and exits. No
+ * Supervisor, no systemd unit, no `nohup`, nothing for a company to notice is dead six weeks later.
+ * A cPanel account that installed the single `schedule:run` line gets background work; one that did
+ * not gets a platform where large exports sit at "Waiting" on a page that says so, which is a
+ * missing feature rather than a broken system.
+ *
+ * `--max-time=55` is the important number. Every minute the scheduler fires this, so a worker that
+ * outlives its minute is a worker overlapping the next one; 55 seconds leaves it dead before the
+ * next fires, and `withoutOverlapping(2)` catches the case where it is not. Between them, at most
+ * one worker per minute — which on shared hosting is the difference between a queue and a process
+ * count complaint from the host.
+ *
+ * `--tries=1` here as well as on the job, because the queue's default of retrying forever is
+ * precisely wrong for work that failed because it was too big: the retry is the same expensive
+ * thing again, and the person has already been told it failed.
+ *
+ * WHAT IS ON THIS QUEUE IS EXPORTS AND NOTHING ELSE, today. Notifications are still sent inline,
+ * deliberately — a notice that arrives when the cron feels like it is worse than one that costs the
+ * request a few milliseconds, and it is the one thing that must work on an account with no cron at
+ * all.
+ */
+Schedule::command('queue:work --stop-when-empty --max-time=55 --tries=1 --quiet')
+    ->everyMinute()
+    ->withoutOverlapping(2)
+    ->runInBackground()
+    ->description('Drain any background work that is waiting');
+
+/*
+ * Delete prepared export files once the company's retention has passed (§67).
+ *
+ * Hourly rather than daily because retention is set in HOURS — a company that asked for two and got
+ * up to twenty-six would not have been given the setting it thought it was. Running hourly makes the
+ * worst case an hour, which is honest against a control measured in hours.
+ *
+ * Unlike every other sweep on this list, the consequence of a missing cron here is a security one
+ * rather than a lost convenience: an export is a frozen copy of one person's visibility, readable
+ * long after the access that produced it is gone. SweepExports says more about why that is the one
+ * thing on disk nobody is managing. The row survives the file either way, so the audit trail of what
+ * was exported does not depend on this line running (§59).
+ */
+Schedule::command('exports:sweep')
+    ->hourly()
+    ->withoutOverlapping(10)
+    ->runInBackground()
+    ->description('Delete prepared export files whose retention has passed');
