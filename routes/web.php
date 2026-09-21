@@ -32,6 +32,7 @@ use App\Http\Controllers\DocumentCategoryController;
 use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\DocumentVersionController;
 use App\Http\Controllers\DrawingController;
+use App\Http\Controllers\DrilldownController;
 use App\Http\Controllers\EmployeeChecklistController;
 use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\EmployeeExitController;
@@ -190,6 +191,20 @@ Route::middleware(['auth', 'password.current'])->group(function () {
             ->name('department');
     });
 
+    /*
+     * The step underneath a figure (§89).
+     *
+     * Behind the four board-reading permissions because a drill-down is a board reading — it is
+     * reached from a tile and nowhere else. THAT IS NOT THE CHECK THAT MATTERS, though: the
+     * controller asks for the REGISTER'S read permission as well, because a dashboard grant opens a
+     * board and never the registers the board counts. The scope in the query string is re-proven
+     * there too, against the reader's own visibility, since a URL id is a suggestion (§84, §94).
+     */
+    Route::get('measures/{kpiDefinition}/records', [DrilldownController::class, 'measure'])
+        ->middleware('permission:dashboard.view,dashboard.view_executive,dashboard.view_department,dashboard.manage')
+        ->whereNumber('kpiDefinition')
+        ->name('drilldown.measure');
+
     // Your own record. No permission middleware on purpose — everyone may see and maintain their
     // own profile, and the controller only ever addresses $request->user().
     Route::get('profile', [ProfileController::class, 'show'])->name('profile.show');
@@ -338,6 +353,15 @@ Route::middleware(['auth', 'password.current'])->group(function () {
         // committed to a job changes who can staff it.
         Route::get('projects/{project}/departments', [ProjectDepartmentController::class, 'index'])
             ->middleware('permission:project.view')->name('projects.departments');
+        // The department rung of the drill-down path (§89). Read-only and behind `project.view`,
+        // not `project.manage`: looking at what Engineering has on this job is not reshaping who is
+        // committed to it. The scoped binding above means a department id belonging to another
+        // project is a 404 before the controller runs.
+        Route::get('projects/{project}/departments/{department}', [ProjectDepartmentController::class, 'show'])
+            ->middleware('permission:project.view')
+            ->whereNumber('department')
+            ->name('projects.departments.show');
+
         Route::post('projects/{project}/departments', [ProjectDepartmentController::class, 'store'])
             ->middleware('permission:project.manage')->name('projects.departments.store');
         Route::put('projects/{project}/departments/{department}', [ProjectDepartmentController::class, 'update'])

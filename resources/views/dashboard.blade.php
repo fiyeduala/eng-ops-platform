@@ -118,14 +118,14 @@
     {{-- ---------------------------------------------------------------- timeline --}}
     <div class="card mt-6">
         <div class="card-header">
-            <h3 class="card-title">Your recent activity</h3>
+            <h3 class="card-title">Recent activity</h3>
         </div>
 
         @if ($activity->isEmpty())
             <x-empty-state
                 icon="clock"
                 title="Nothing yet"
-                description="Actions you take are recorded here as you work."/>
+                description="Work you can see is recorded here as it happens."/>
         @else
             <ul class="p-5">
                 @foreach ($activity as $entry)

@@ -123,9 +123,15 @@
         <p class="mt-2 text-xs text-[var(--text-muted)]">{{ $tile->footnote }}</p>
     @endif
 
+    {{--
+        The drill-down (§89). A figure leads to the records it counted; a list tile leads to the
+        report it is the top of. Worded differently because they are different promises, and a
+        reader who clicks "Open" on a number and lands on a report builder has been misled.
+    --}}
     @if ($tile->href)
         <a href="{{ $tile->href }}" class="mt-3 inline-flex items-center gap-1 text-xs font-medium text-[var(--text-strong)] hover:underline">
-            Open <x-icon name="chevron-right" class="h-3 w-3"/>
+            {{ $tile->isFigure() ? 'See the records' : 'Open the report' }}
+            <x-icon name="chevron-right" class="h-3 w-3"/>
         </a>
     @endif
 

@@ -195,7 +195,31 @@ class WidgetComposer
             shared: false,
             footnote: $this->ownFigureNote($widget, $viewer, $permission, $scopeType, $scopeId),
             target: $this->targetNote($source),
+            href: $this->drilldown($source, $scopeType, $scopeId),
         );
+    }
+
+    /**
+     * Where this figure's records are listed (§89).
+     *
+     * THE SCOPE TRAVELS IN THE URL, which docs/05 §8 requires and which is the only part of this
+     * that needs care: the id is re-proven against the reader's own visibility on arrival, so the
+     * link carries context rather than authority. A tile on the Civil board links to Civil's
+     * records; somebody who edits the id to Piping is refused there, not here.
+     *
+     * Null for the personal board. There is no scope to carry, and an unscoped link from a personal
+     * tile would list the reader's own figure under a page that looks company-wide.
+     */
+    private function drilldown(KpiDefinition $kpi, ?string $scopeType, ?int $scopeId): ?string
+    {
+        if ($scopeType === null) {
+            return null;
+        }
+
+        return route('drilldown.measure', array_filter([
+            'kpiDefinition' => $kpi->getKey(),
+            'scope' => $kpi->scope === 'organization' ? null : $scopeId,
+        ]));
     }
 
     /**
@@ -244,6 +268,12 @@ class WidgetComposer
             footnote: 'The whole '.$this->scopeWord($scopeType).', as read on '
                 .$point->computed_at?->format('j M').'.',
             target: $this->targetNote($kpi),
+            // Worth naming: a stored tile links to a LIVE list, so the figure above and the rows
+            // below can legitimately differ by a day's work. The footnote already says when the
+            // figure was read, which is what makes that difference legible rather than alarming —
+            // the alternative, storing the row ids behind a snapshot, would be storing one person's
+            // records for another person to open (§61).
+            href: $this->drilldown($kpi, $scopeType, $scopeId),
         );
     }
 

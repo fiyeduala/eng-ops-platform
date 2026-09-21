@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Engines\Access\ScopeCompiler;
+use App\Engines\Audit\ActivityVisibility;
 use App\Engines\Dashboard\WidgetComposer;
 use App\Models\ActivityLog;
 use App\Models\Employee;
@@ -33,6 +34,7 @@ class DashboardController extends Controller
     public function __construct(
         private readonly ScopeCompiler $compiler,
         private readonly WidgetComposer $composer,
+        private readonly ActivityVisibility $visibility,
     ) {}
 
     public function index(Request $request): View
@@ -81,19 +83,28 @@ class DashboardController extends Controller
     }
 
     /**
-     * The timeline, filtered to records the viewer may actually open.
+     * The timeline, filtered to records the viewer may actually open (§60).
      *
-     * Activity rows describe other records, so they inherit those records' visibility. Until the
-     * per-subject filter of §60 lands with the modules that write these rows, this shows only
-     * activity the viewer caused — which is trivially safe and never empty for the wrong reason.
+     * UNTIL PHASE 8 THIS SHOWED ONLY WHAT THE VIEWER HAD DONE THEMSELVES — trivially safe, and a
+     * placeholder, because "your recent activity" on a landing page is meant to be the company's
+     * recent activity as far as you can see it. ActivityVisibility now answers that properly: rows
+     * inherit the visibility of their subject, so a department head sees their department's work
+     * appear here and the department next door's not appear.
+     *
+     * FETCHED WIDE AND TRIMMED AFTER, which is the part that is easy to get wrong. Filtering a
+     * query already limited to eight rows would leave somebody with three, and a timeline that
+     * thins out as permissions narrow reads as "nothing is happening" rather than "you cannot see
+     * it". Forty is a bounded read on an indexed column, and the trim happens once the rows are
+     * known to be showable.
      */
     private function recentActivity(Request $request)
     {
-        return ActivityLog::query()
+        $entries = ActivityLog::query()
             ->where('organization_id', $request->user()->organization_id)
-            ->where('causer_id', $request->user()->id)
             ->latest('created_at')
-            ->limit(8)
+            ->limit(40)
             ->get();
+
+        return $this->visibility->filter($entries, $request->user())->take(8);
     }
 }

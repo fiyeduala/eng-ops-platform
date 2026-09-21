@@ -7,6 +7,7 @@ namespace App\Engines\Report;
 use App\Engines\Query\FilterCompiler;
 use App\Models\ReportDefinition;
 use App\Models\User;
+use App\Support\RecordPresenter;
 use App\Support\ReportCatalogue;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
@@ -291,86 +292,13 @@ class ReportRunner
     /**
      * One cell, as a reader should see it.
      *
-     * EVERYTHING COMES BACK AS A STRING, already resolved. Renderers do not get raw models: the
-     * screen, the CSV and the PDF must show identical contents, and three templates each deciding
-     * how to print a date is how a PDF and a spreadsheet come to disagree about the same row.
+     * Delegated to RecordPresenter since Phase 8, when the drill-down list needed to print the
+     * records behind a figure exactly as the report beside it prints them. Two formatters would
+     * have drifted within a phase; this way "the report and the drill-down disagree" is not a
+     * failure that can occur (docs/11 §1).
      */
     private function cell(ReportDefinition $report, Model $record, string $column): string
     {
-        // A foreign key is printed as the thing it points at. "Civil" rather than "4" — a report
-        // full of row ids is a report somebody has to join by hand.
-        $relation = ReportCatalogue::relationFor($report->entity_type, $column);
-
-        if ($relation !== null) {
-            return $this->describe($record->getRelationValue($relation));
-        }
-
-        $value = $record->getAttribute($column);
-
-        return $this->stringify($value);
-    }
-
-    private function describe(mixed $related): string
-    {
-        if (! $related instanceof Model) {
-            return '';
-        }
-
-        if (method_exists($related, 'displayName')) {
-            return (string) $related->displayName();
-        }
-
-        // The naming ladder the rest of the platform uses, in the order a record is most likely to
-        // carry one. A bare key at the end rather than an empty cell: "#12" at least tells the
-        // reader something is there that this could not name.
-        foreach (['name', 'title', 'label', 'code', 'subject'] as $attribute) {
-            $value = $related->getAttribute($attribute);
-
-            if (is_string($value) && $value !== '') {
-                return $value;
-            }
-        }
-
-        return '#'.$related->getKey();
-    }
-
-    private function stringify(mixed $value): string
-    {
-        if ($value === null || $value === '') {
-            return '';
-        }
-
-        if (is_bool($value)) {
-            return $value ? 'Yes' : 'No';
-        }
-
-        if ($value instanceof CarbonInterface) {
-            // Midnight means the column is a date rather than a moment, and printing "00:00" on
-            // every due date is noise that makes a report look machine-generated.
-            return $value->format($value->format('H:i:s') === '00:00:00' ? 'j M Y' : 'j M Y H:i');
-        }
-
-        if ($value instanceof \BackedEnum) {
-            return method_exists($value, 'label')
-                ? (string) $value->label()
-                : Str::headline((string) $value->value);
-        }
-
-        if ($value instanceof \UnitEnum) {
-            return Str::headline($value->name);
-        }
-
-        // An array or object in a cell is a JSON column. Printing the encoding would be unreadable
-        // and, for a custom-field bag, would spill every field including ones this report did not
-        // ask for — so it is summarised rather than dumped.
-        if (is_array($value)) {
-            return count($value).' '.Str::plural('item', count($value));
-        }
-
-        if (is_object($value)) {
-            return method_exists($value, '__toString') ? (string) $value : '';
-        }
-
-        return (string) $value;
+        return RecordPresenter::cell($report->entity_type, $record, $column);
     }
 }

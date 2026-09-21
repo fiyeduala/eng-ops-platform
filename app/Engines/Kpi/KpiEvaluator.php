@@ -103,6 +103,52 @@ class KpiEvaluator
     }
 
     /**
+     * The records that figure was counted over, as a query somebody can list (§89).
+     *
+     * THE DRILL-DOWN'S WHOLE CLAIM RESTS ON THIS BEING THE SAME BUILDER `evaluate()` COUNTS. It is
+     * not "a query that should match" — it is `baseQuery()`, the identical call with the identical
+     * arguments, so a tile reading 41 and a drill-down listing 41 rows cannot come apart. Deriving
+     * the list separately, from the same definition, would have been the obvious way to write this
+     * and the way that goes wrong six months later when one of the two learns about a new filter.
+     *
+     * WHICH MEANS IT INHERITS THE VISIBILITY, and that is the point rather than a side effect. The
+     * first thing `baseQuery()` does is `visibleTo($viewer, …)`, so a drill-down can never list a
+     * record its reader could not have opened from the register's own index page — the figure and
+     * the list are narrow for the same person in the same way (§61, docs/11 §1).
+     *
+     * Null where the measure cannot be answered at all, in exactly the cases `evaluate()` returns
+     * an unavailable result. Callers run both and print that result's reason, so the page explains
+     * itself rather than showing an empty table that reads like "there are none".
+     *
+     * NOT ORDERED HERE. Ordering is a listing decision and this method has no opinion about it; the
+     * caller applies its own, which is what lets a drill-down show newest-first without the count
+     * paying for a sort it never needed.
+     *
+     * @return Builder<Model>|null
+     */
+    public function population(
+        KpiDefinition $kpi,
+        ?User $viewer,
+        ?CarbonInterface $asOf = null,
+        ?int $scopeId = null,
+    ): ?Builder {
+        if ($viewer === null || $kpi->organization_id !== $viewer->organization_id) {
+            return null;
+        }
+
+        if ($this->unusable($kpi, $viewer->getKey()) !== null) {
+            return null;
+        }
+
+        /** @var class-string<Model> $class */
+        $class = KpiCatalogue::modelFor($kpi->entity_type);
+
+        [$windowStart, $windowEnd] = $this->window($kpi, $asOf === null ? Carbon::now() : Carbon::parse($asOf));
+
+        return $this->baseQuery($kpi, $class, $viewer, $windowStart, $windowEnd, $scopeId);
+    }
+
+    /**
      * Count every active KPI at one altitude, for one person.
      *
      * @return array<int,array{kpi:KpiDefinition,result:KpiResult}>

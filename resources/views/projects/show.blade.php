@@ -64,6 +64,23 @@
         </div>
     @endif
 
+    {{--
+        The project command center (§52, docs/05 §8).
+
+        Above the structural panels for the same reason the personal board sits above the landing
+        page's cards: the panels below describe what this project IS, and change on the day somebody
+        edits the record. These tiles describe how it is GOING. Each was already decided for this
+        reader by WidgetComposer — a tile whose register they cannot read never arrived — and each
+        figure links down to the records it counted, which is the middle step of the drill-down path.
+    --}}
+    @if ($tiles !== [])
+        <div class="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-12">
+            @foreach ($tiles as $tile)
+                <x-widget :tile="$tile"/>
+            @endforeach
+        </div>
+    @endif
+
     <div class="grid gap-6 lg:grid-cols-3">
 
         {{-- ------------------------------------------------------------ summary --}}
@@ -365,8 +382,12 @@
                     <ul class="divide-y divide-[var(--surface-border)]">
                         @foreach ($departments as $department)
                             <li class="flex items-center justify-between gap-3 px-5 py-3">
+                                {{-- The department rung of the drill-down path (§89). --}}
                                 <div class="min-w-0">
-                                    <p class="truncate text-sm font-medium text-[var(--text-strong)]">{{ $department->orgUnit?->name ?? 'Unknown unit' }}</p>
+                                    <a href="{{ route('projects.departments.show', [$project, $department]) }}"
+                                       class="block truncate text-sm font-medium text-[var(--text-strong)] hover:text-brand-600">
+                                        {{ $department->orgUnit?->name ?? 'Unknown unit' }}
+                                    </a>
                                     <p class="truncate text-xs text-[var(--text-muted)]">
                                         {{ $department->lead ? 'Led by '.$department->lead->fullName() : 'No lead named' }}
                                     </p>

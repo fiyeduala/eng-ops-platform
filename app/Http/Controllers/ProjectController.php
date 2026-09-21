@@ -6,8 +6,10 @@ namespace App\Http\Controllers;
 
 use App\Engines\Access\ScopeCompiler;
 use App\Engines\Audit\ActivityRecorder;
+use App\Engines\Audit\ActivityVisibility;
 use App\Engines\Configuration\NumberGenerator;
 use App\Engines\Configuration\StatusMachine;
+use App\Engines\Dashboard\WidgetComposer;
 use App\Http\Requests\ProjectRequest;
 use App\Models\Location;
 use App\Models\OrgUnit;
@@ -48,6 +50,8 @@ class ProjectController extends Controller
         private readonly StatusMachine $statuses,
         private readonly ProjectService $projects,
         private readonly NumberGenerator $numbers,
+        private readonly WidgetComposer $composer,
+        private readonly ActivityVisibility $visibility,
     ) {}
 
     public function index(Request $request): View
@@ -148,7 +152,18 @@ class ProjectController extends Controller
             'members' => $members,
             'memberCount' => $project->members()->where('is_active', true)->count(),
             'departments' => $departments,
-            'timeline' => $this->activity->timelineForProject((int) $project->getKey())->limit(25)->get(),
+            // The project command center (§52's middle altitude, docs/05 §8). Composed for whoever
+            // is looking, with the project carried as the scope — the same arrangement serves the
+            // project manager and the division head and gives each of them their own figures.
+            'tiles' => $this->composer->compose('project', $user, (int) $project->getKey()),
+            // Fetched wide and filtered to subjects this person may open (§60). A project timeline
+            // is the one place every module's activity meets, so it is also the place where an
+            // unfiltered feed would hand a procurement clerk the HSE incidents raised on their
+            // project — in sentences, with references.
+            'timeline' => $this->visibility->filter(
+                $this->activity->timelineForProject((int) $project->getKey())->limit(80)->get(),
+                $user,
+            )->take(25),
             'transitions' => $this->statuses->available('project', $project->status_id, $user),
             'canEdit' => $user->can('update', $project),
             'canManage' => $user->can('manage', $project),
