@@ -480,8 +480,14 @@ class Navigation
                     // The corollary is the part worth remembering: someone whose export permission
                     // is withdrawn loses this link and keeps the files, which is correct — the grant
                     // creates, ownership collects.
+                    //
+                    // `dashboard.view_executive` joined it in part 6 for the same reason and by the
+                    // same logic: the daily report arrives as a file on this page whether or not its
+                    // recipient ever exported anything, and a director following the link in a
+                    // notice and then looking for the previous one would have found no way back.
                     ['label' => 'My exports', 'route' => 'exports.index', 'icon' => 'download',
-                        'permission' => 'report.export', 'active' => 'exports.*'],
+                        'permission' => ['report.export', 'dashboard.view_executive'],
+                        'active' => 'exports.*'],
 
                     // Listed under Administration rather than beside the registers, because what
                     // you reach here is the BUILDER — the questions, the versions, the publish

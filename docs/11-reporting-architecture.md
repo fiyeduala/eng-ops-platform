@@ -184,15 +184,103 @@ correct even after underlying records change.
 
 ## 6. Daily Executive Report (§55)
 
-Scheduler job at a configurable time per organization. Sections: **People** (attendance, absence,
-leave) · **Projects** (progress, delays, milestones, risks, issues) · **Engineering**
-(deliverables, reviews, pending approvals) · **HSE** (incidents, inspections, corrective actions) ·
-**Procurement** (requests, POs) · **Finance** (income, expenses, payments) · **Inventory** (stock
-movement, low stock) · **Fleet** (usage, maintenance).
+**Built in Phase 8, part 6.** `ExecutiveBriefing` · `report:daily-executive` ·
+`resources/views/reports/daily-executive.blade.php`.
 
-Rendered as a branded PDF and emailed to configured recipients. **Each recipient's copy is
-generated under their own visibility** — a Finance Manager and an HSE Manager receive different
-documents from the same schedule. Reports are archived as documents so they remain auditable.
+### The report is the executive board, printed
+
+The sections are **not** a fixed list in code. `ExecutiveBriefing::briefingFor()` calls
+`WidgetComposer::compose('executive', $recipient, null, $asOf)` — so what a company receives every
+morning is exactly what that company arranged on its executive board, through the screens, with no
+code (§73). A section is added by adding a tile.
+
+This replaces the earlier plan of eight hand-written sections (People · Projects · Engineering ·
+HSE · Procurement · Finance · Inventory · Fleet). Those remain the *expected* content, but as tiles
+a company places rather than queries a developer writes. Eight bespoke queries would have counted
+the same things the KPI engine already counts, in a second place, drifting from it within a release
+— §78's argument about there being one workflow engine, applied to figures.
+
+### Each copy is one person's
+
+The requirement §55 actually turns on, and why the report cannot be rendered once and mailed to a
+list. `WidgetComposer` re-checks the board permission with no middleware in front of it, counts
+every figure through that reader's own reach, and refuses a stored snapshot to anybody whose reach
+does not contain the scope it was counted over. A Finance Manager and an HSE Manager receive
+different documents from one schedule, correctly, and neither is shown a number derived from rows
+they could not open.
+
+The PDF says so on its own face, above the figures, and every branch of the template that prints a
+value also prints the tile's footnote. A PDF is forwarded; a figure that arrives without its
+footnote becomes *the company's* number in somebody else's inbox.
+
+Nobody with an empty board is sent anything. A blank PDF at seven every morning is how a scheduled
+report teaches its recipients to filter it.
+
+### The recipient list
+
+Everybody in the tenant holding `dashboard.view_executive`, on an active role, with an active
+account — read off the permission rather than a role name, because §5 makes the names the company's
+to choose. `ExecutiveBriefing::MAX_RECIPIENTS` (40) is a ceiling on what one cron minute may cost:
+above it the run sends **nothing** and warns, rather than truncating at an alphabetical cut-off
+nobody can see.
+
+### Archived as an export row, not as a document
+
+The one instruction in the original plan that is deliberately **not** followed. A document lives in
+a register that organization-wide `document.view` can read, so archiving eighteen personalised
+copies as documents would publish to the whole company exactly the per-recipient figures the
+paragraph above exists to keep apart. It would defeat §55 in the name of §55.
+
+The `exports` table already means the right thing: one person's file, on the private disk, behind
+an ownership policy (`ExportPolicy` consults no permission — an administrator gets a 403 on a
+colleague's briefing), reachable only through a signed short-lived link. And **the row outlives the
+file**, which is the audit. After retention the row stays as `expired`, a permanent record that
+this person was sent this briefing on this date; the figures themselves are reproducible from a
+board that is configuration.
+
+Briefing rows carry `entity_type = 'executive_briefing'` and no `report_definition_id`, which is
+what `Export::isBriefing()` reads — not "has no report definition", because a report deleted after
+its export was prepared also leaves that column null and those two rows mean opposite things. The
+exports page gives them their own vocabulary ("Sent to you automatically · N sections"), and
+`dashboard.view_executive` opens the **My exports** menu item so a director who never exported
+anything still has a way back to yesterday's copy.
+
+### Hourly cron, per-company hour
+
+§1 allows one cron entry. `report:daily-executive` is scheduled **hourly**; it converts the moment
+to each company's `general.timezone` and compares against that company's
+`report.daily_executive_hour`. A daily cron would have given every tenant on the host the same send
+time and made the setting a control that does nothing, which is worse than not offering it.
+
+Idempotent per recipient per day, like §7's engines: each briefing is keyed by
+`entity_type` + `requested_by` + the day-stamped name, so a cPanel cron catching up by running
+twice, a replayed migration, or an administrator running it by hand sends nothing a second time.
+`--force` replaces the day's copy and ignores the hour.
+
+One tenant's failure is logged (organization id, exception class, message — never contents, §68)
+and counted; the loop continues, and the command still exits `SUCCESS`, because a non-zero exit
+from an hourly cron mails the host administrator about somebody else's misconfigured board every
+hour until it is fixed.
+
+### Settings
+
+| key | default | meaning |
+| --- | --- | --- |
+| `report.daily_executive_enabled` | `true` | whether this company is sent one at all |
+| `report.daily_executive_hour` | `7` | the hour, in the company's own timezone |
+| `report.daily_executive_retention_days` | `14` | how long each copy is kept |
+
+Retention is in days rather than the prepared export's hours because this file arrives unasked and
+is read the next morning — but it is still one person's copy of their own figures, so it is not
+kept forever. `exports:sweep` deletes the file and leaves the record.
+
+### Notification
+
+`report.daily_executive` — switchable, unlike `export.ready` and `export.failed`. A scheduled
+report that cannot be turned off individually gets turned off by a mail rule, which is worse for
+everybody. The notice carries the date and a signed link valid for exactly as long as the file
+exists, and **no figures** (§68): no two copies hold the same numbers, so a notice quoting one
+would be wrong for everybody it was forwarded to.
 
 ## 7. Escalation & Expiry engines (§57, §58)
 

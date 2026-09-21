@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Engines\Access\Concerns\BelongsToOrganization;
+use App\Engines\Report\ExecutiveBriefing;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -187,5 +188,21 @@ class Export extends Model
     public function displayName(): string
     {
         return $this->name;
+    }
+
+    /**
+     * Whether this file is the scheduled daily report rather than something somebody asked for.
+     *
+     * The distinction is not cosmetic. A briefing arrived unasked, counts SECTIONS rather than rows
+     * in the `rows` column, and is kept for days rather than hours — so a page that describes every
+     * row here in the vocabulary of an export tells a director they exported five rows of something
+     * at seven this morning, which they did not.
+     *
+     * Read off `entity_type` rather than "has no report definition", because a report deleted after
+     * its export was prepared also leaves that column null, and those two rows mean opposite things.
+     */
+    public function isBriefing(): bool
+    {
+        return $this->entity_type === ExecutiveBriefing::ENTITY_TYPE;
     }
 }

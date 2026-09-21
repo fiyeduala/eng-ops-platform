@@ -164,3 +164,23 @@ Schedule::command('exports:sweep')
     ->withoutOverlapping(10)
     ->runInBackground()
     ->description('Delete prepared export files whose retention has passed');
+
+/*
+ * The daily executive report, offered to every company at the hour that company chose (§55).
+ *
+ * HOURLY, NOT DAILY, AND THAT IS THE WHOLE TRICK. `report.daily_executive_hour` is a per-company
+ * setting, and a single daily cron would have to pick one time for every tenant on the host — which
+ * would leave the setting on the screen doing nothing, the worst kind of configuration. Fired every
+ * hour, the command asks each company whether this is its hour IN ITS OWN TIMEZONE and almost always
+ * answers no. Twenty-three cheap passes buy one honest setting, and §1 still has its one cron entry.
+ *
+ * The command is idempotent per company per day, so the catch-up run a missed hour produces sends
+ * nothing twice. `withoutOverlapping(20)` is generous because a run that is genuinely working is
+ * composing a board and rendering a PDF per recipient; the lock is there to stop a slow hour being
+ * joined by the next one, not to bound the work.
+ */
+Schedule::command('report:daily-executive')
+    ->hourly()
+    ->withoutOverlapping(20)
+    ->runInBackground()
+    ->description('Send each company’s daily executive report at its configured hour');

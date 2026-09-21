@@ -395,6 +395,20 @@ final class NotificationCatalogue
             'Something went wrong while preparing a file you asked for.',
             'normal', true, [true, true, false],
         ],
+        // SWITCHABLE, unlike the two above, and that is the difference between a file somebody
+        // asked for and one that arrives every morning whether or not they wanted it. A scheduled
+        // report that cannot be turned off individually gets turned off by a mail rule, which is
+        // worse for everybody: the platform goes on producing eighteen PDFs a day for an audience
+        // of twelve and has no way of knowing.
+        //
+        // Email on by default, because the point of a seven-in-the-morning report is that it is
+        // waiting before anybody signs in. The notice itself carries no figures (§68) — it cannot,
+        // since no two recipients' copies hold the same ones.
+        'report.daily_executive' => [
+            'report', 'Reporting', 'The daily executive report',
+            'A summary of the executive board each morning, counted through your own access.',
+            'normal', false, [true, true, false],
+        ],
     ];
 
     /**

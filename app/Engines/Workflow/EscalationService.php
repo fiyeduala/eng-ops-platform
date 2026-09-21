@@ -230,7 +230,10 @@ class EscalationService
     {
         return Role::query()
             ->active()
-            ->whereHas('permissions', fn ($q) => $q->where('name', $permission))
+            // `permissions.key`, qualified. The catalogue column is `key`; an unqualified `name`
+            // here resolves to `roles.name` in the correlated subquery, compares a role's title
+            // with a permission string, and escalates to nobody without erroring (§25).
+            ->whereHas('permissions', fn ($q) => $q->where('permissions.key', $permission))
             ->with('users:id')
             ->get()
             ->flatMap(fn (Role $role) => $role->users->pluck('id'))

@@ -78,7 +78,9 @@ class NotifyWorkflowStalled
     {
         return Role::query()
             ->active()
-            ->whereHas('permissions', fn ($q) => $q->where('name', $permission))
+            // `permissions.key`, qualified — see EscalationService::holdersOf(). An unqualified
+            // `name` resolves to `roles.name` here and notifies nobody without erroring.
+            ->whereHas('permissions', fn ($q) => $q->where('permissions.key', $permission))
             ->with('users:id')
             ->get()
             ->flatMap(fn (Role $role) => $role->users->pluck('id'))

@@ -328,6 +328,13 @@ class OrganizationProvisioner
             'report.daily_executive_hour' => 7,
             'report.daily_executive_enabled' => true,
 
+            // Fourteen days, because the daily report is read against the last one — "is that
+            // number moving" is the question it exists to answer, and a fortnight is roughly how
+            // far back somebody looks before they go to the dashboard instead. Longer than a
+            // prepared export's hours, for the reason the setting's help text gives: this file
+            // arrives unasked and is opened the next morning, not the same minute.
+            'report.daily_executive_retention_days' => 14,
+
             // 500 rows, which is well under what a cPanel PHP process will render synchronously in
             // any of the four formats, and well above what a person reads on screen before
             // exporting. A company whose hosting is slower lowers it; one on a VPS raises it.

@@ -48,7 +48,7 @@
             <x-empty-state
                 icon="download"
                 title="You have not asked for any files"
-                description="Most exports download straight away and are never listed here. A report too large to build while you wait is prepared in the background instead, and appears on this page when it is ready."/>
+                description="Most exports download straight away and are never listed here. A report too large to build while you wait is prepared in the background instead, and appears on this page when it is ready — as does the daily executive report, if you are sent one."/>
         </div>
     @else
         <div class="card overflow-x-auto">
@@ -71,7 +71,16 @@
                                      file answers is the question as it was asked. --}}
                                 <span class="font-medium text-[var(--text-strong)]">{{ $export->name }}</span>
 
-                                @if ($export->rows !== null)
+                                @if ($export->isBriefing())
+                                    {{-- A different vocabulary, because it is a different thing. This
+                                         one arrived unasked, and its `rows` column counts sections of
+                                         the board rather than records of a register. --}}
+                                    <p class="help mt-0.5">
+                                        Sent to you automatically ·
+                                        {{ number_format((int) $export->rows) }}
+                                        {{ \Illuminate\Support\Str::plural('section', (int) $export->rows) }}
+                                    </p>
+                                @elseif ($export->rows !== null)
                                     <p class="help mt-0.5">
                                         {{ number_format($export->rows) }}
                                         {{ \Illuminate\Support\Str::plural('row', $export->rows) }}@if ($export->truncated),

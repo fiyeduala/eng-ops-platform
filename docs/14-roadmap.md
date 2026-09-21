@@ -464,23 +464,73 @@ templates for all three shapes in six seconds.
 
 **Phase totals at close:** 973 tests, 6,573 assertions, green.
 
-## PHASE 8 — Executive intelligence ⬜
+## PHASE 8 — Executive intelligence ✅
 
 Executive command center · department dashboards · project command center · drill-down navigation ·
 daily executive report (scheduled, per-recipient visibility) · KPI reports · exports · global
 search.
 
-**Carried in from Phase 7, deliberately deferred rather than forgotten:**
+**Everything carried in from Phase 7 was built.** `phpoffice/phpspreadsheet` is installed and
+`.xlsx` is a real format with typed cells, a frozen header and an autofilter; DOCX is wired to the
+same renderer path; exports over a row threshold are queued and delivered as a signed, expiring
+link; `kpi_snapshots` exists, and the question it raised — *whose visibility was that number counted
+through?* — is answered in part 1 and enforced everywhere a stored figure is served.
 
-| Item | Why it was not built in Phase 7 |
-|------|---------------------------------|
-| **Excel export (PhpSpreadsheet)** | The dependency is not installed. Phase 7 shipped CSV and PDF, which are the two formats a report screen needs to be useful, and CSV opens in Excel. True `.xlsx` — typed cells, frozen header, autofilter, per docs/11 §3 — is a formatting job, and formatting a workbook in memory is exactly the shape that hits the cPanel `memory_limit` on a large report. It belongs with the queued export path, not before it. **Install `phpoffice/phpspreadsheet` at the start of this phase.** |
-| **Queued exports with signed, expiring links** | docs/11 §3 requires exports over a row threshold to be queued and delivered as a notification. Phase 7's exports are synchronous and stream, which is correct for the row counts a builder screen produces and wrong as the only path. |
-| **DOCX export of reports** | `phpoffice/phpword` is installed and already used for documents; wiring it to the report renderer waits for the same export pass. |
-| **`kpi_snapshots`** | Specified in docs/03 §D, not created. A snapshot is a number counted for somebody, and storing one raises the question this platform has so far answered by never caching: whose visibility was it counted through? Dashboards are where that question has to be answered, so the table lands with them. |
+- **Part 1 — stored figures and the rule that makes storing them safe** (`9933f5a`): `kpi_snapshots`
+  plus `KpiEvaluator` and the nightly `kpi:snapshot` sweep. A snapshot records the scope it was
+  counted over, and `ReachInspector` decides per reader whether that scope is contained in their
+  reach. Everybody else falls back to a live count through their own visibility, carrying a sentence
+  that says the figure is theirs rather than the company's — so the fast path exists exactly where
+  it is safe and the slow path is correct everywhere.
+- **Part 2 — the three boards, and who each one lets in** (`a1d3371`): executive, department,
+  project and personal boards composed by `WidgetComposer` from one arrangement per company. Opening
+  a board and being able to read what is on it are two separate questions; a tile whose register the
+  reader cannot open is never built, so it cannot appear in the page source, in a print view or over
+  somebody's shoulder (§6). Which department a board is about is never settled by the URL.
+- **Part 3 — the step underneath a figure, and who it lets through** (`06b726c`): the §89 drill-down.
+  A tile links to the records behind it, the scope travels in the URL as context rather than
+  authority, and the id is re-proven against the reader's own visibility on arrival.
+- **Part 4 — one box, and the registers it is not allowed to mention** (`547affb`): global search
+  across every register, each result re-checked through `visibleTo()` so the result set is exactly
+  what the index pages would have shown. A search box that confirms the existence of a record by
+  finding nothing slower is an oracle (§61).
+- **Part 5 — two more shapes for a report, and the size at which it stops being handed over**
+  (`819aa30`): `.xlsx` and `.docx` renderers, the queued export path, `exports` rows with signed
+  short-lived links, and `exports:sweep`. The file goes at retention and the row stays, because what
+  left the platform and who took it outlives anybody's need for the file (§59, §67).
+- **Part 6 — the report that arrives unasked, and why no two copies of it match**: the daily
+  executive report (§55). It is the executive board printed, composed per recipient, delivered as an
+  export row rather than as a document — see docs/11 §6 for both decisions and the reasoning behind
+  each.
 
-**Exit criteria:** the §89 drill-down path works end to end and search returns exactly the index-page
-result set.
+**Three decisions in this phase were to build something narrower than the plan, and each is
+load-bearing:**
+
+- **The daily report has no bespoke sections.** docs/11 §6 named eight; building them would have
+  counted, in a second place, what the KPI engine already counts, and would have made the report the
+  one thing on this platform a company cannot change without a developer (§73, §78, §90).
+- **Briefings are not archived as documents**, although docs/11 §6 said they should be. A document
+  register that organization-wide `document.view` can read is the wrong home for eighteen
+  personalised copies of one morning's figures; archiving them there would defeat §55 in the name of
+  §55. The `exports` row already means "one person's file", and the row outlives the file.
+- **The daily cron is hourly.** §1 allows one entry, so the entry fires every hour and each company's
+  configured hour is compared in that company's own timezone. A daily cron would have given every
+  tenant on the host the same send time and made `report.daily_executive_hour` a control that does
+  nothing.
+
+**Two defects found by writing a test that round-trips real output rather than asserting on
+intent.** `ExcelRenderer::parse()` brought down the entire `.xlsx` export of any report with a
+populated date column, because Carbon's `createFromFormat` *throws* where native PHP returns `false`
+and the first of two formats tried escaped instead of falling through (found in part 5 by loading
+the workbook back through PhpSpreadsheet's own reader). And three call sites — the daily report's
+recipient list, `EscalationService::holdersOf()` and `NotifyWorkflowStalled` — looked roles up by
+`permissions.name`, a column that does not exist; inside the correlated subquery the unqualified
+`name` resolved to `roles.name`, compared a role's title against a permission string, and matched
+nobody without ever erroring. That is §25 escalation and the stalled-workflow notice silently
+reaching zero people since Phase 7. All three are now qualified as `permissions.key`.
+
+**Exit criteria: met.** The §89 drill-down path works end to end (`DrilldownTest`,
+`ProjectCommandCenterTest`) and search returns exactly the index-page result set (`GlobalSearchTest`).
 
 ## PHASE 9 — Hardening ⬜
 
