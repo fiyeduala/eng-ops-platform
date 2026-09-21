@@ -148,6 +148,28 @@ class OrgUnit extends Model
         return $this->id !== $other->id && str_starts_with((string) $this->path, (string) $other->path);
     }
 
+    /**
+     * Name and code, which is what the org chart's own index page matches (§61).
+     *
+     * Extracted from OrgUnitController so the chart and the global search box cannot drift into
+     * two different answers to the same question.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeSearch(Builder $query, ?string $term): Builder
+    {
+        if (blank($term)) {
+            return $query;
+        }
+
+        $like = '%'.trim($term).'%';
+
+        return $query->where(fn (Builder $q) => $q
+            ->where($this->qualifyColumn('name'), 'like', $like)
+            ->orWhere($this->qualifyColumn('code'), 'like', $like));
+    }
+
     /** Path segment used for display: "Engineering › Mechanical". */
     public function breadcrumbLabel(string $separator = ' › '): string
     {

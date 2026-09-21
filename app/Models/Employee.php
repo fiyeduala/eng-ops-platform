@@ -111,6 +111,35 @@ class Employee extends Model
         return $query->where('is_active', true)->where('employment_status', '!=', 'exited');
     }
 
+    /**
+     * The personnel register's own idea of what a search term matches.
+     *
+     * Lives here rather than in EmployeeController so that the index page and the global search
+     * box run one rule instead of two that agree today (§61). Names, the employee number and the
+     * work email — the five things somebody types when they are looking for a person. Personal
+     * contact details, addresses and next of kin are deliberately absent: a search box that
+     * matched a home address would answer, one query at a time, questions the employee's own
+     * record is guarded against answering.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeSearch(Builder $query, ?string $term): Builder
+    {
+        if (blank($term)) {
+            return $query;
+        }
+
+        $like = '%'.trim($term).'%';
+
+        return $query->where(fn (Builder $q) => $q
+            ->where($this->qualifyColumn('first_name'), 'like', $like)
+            ->orWhere($this->qualifyColumn('last_name'), 'like', $like)
+            ->orWhere($this->qualifyColumn('display_name'), 'like', $like)
+            ->orWhere($this->qualifyColumn('employee_no'), 'like', $like)
+            ->orWhere($this->qualifyColumn('work_email'), 'like', $like));
+    }
+
     public function fullName(): string
     {
         return $this->display_name

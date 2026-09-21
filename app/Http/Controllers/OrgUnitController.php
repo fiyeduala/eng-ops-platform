@@ -49,12 +49,8 @@ class OrgUnitController extends Controller
         $query = $this->compiler->apply(OrgUnit::query(), $user, 'org_unit.view')
             ->with('head:id,first_name,last_name,display_name');
 
-        if ($term = trim((string) $request->query('q', ''))) {
-            $query->where(function ($q) use ($term) {
-                $q->where('name', 'like', '%'.$term.'%')
-                    ->orWhere('code', 'like', '%'.$term.'%');
-            });
-        }
+        // On the model, for the reason the employee register gives: one rule, two screens (§61).
+        $query->search((string) $request->query('q', ''));
 
         if ($type = $request->query('type')) {
             if (OrgUnitType::tryFrom((string) $type) !== null) {

@@ -68,9 +68,7 @@ class ReviewCycleController extends RegisterController
         // Not `applyCommonFilters()`: a cycle is not a project record and has no discipline, so the
         // register-wide filter set would compile columns this table does not have the moment somebody
         // types `?project=3` onto the URL (§84). A cycle is found by its name and its status.
-        if ($term = trim((string) $request->query('q', ''))) {
-            $query->where(fn ($q) => $q->where('name', 'like', '%'.$term.'%')->orWhere('description', 'like', '%'.$term.'%'));
-        }
+        $query->search((string) $request->query('q', ''));
 
         if ($statusId = (int) $request->query('status', 0)) {
             $query->where('status_id', $statusId);

@@ -131,6 +131,29 @@ class ReviewCycle extends Model
         return $query->whereHas('status', fn (Builder $q) => $q->where('key', 'open'));
     }
 
+    /**
+     * Name and description, which is what this register's index page matches (§61).
+     *
+     * The description is in scope here and is not in scope for, say, a document: a review cycle's
+     * description is a line of administration ("mid-year, engineering only"), not the contents of
+     * a record somebody is kept out of.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeSearch(Builder $query, ?string $term): Builder
+    {
+        if (blank($term)) {
+            return $query;
+        }
+
+        $like = '%'.trim($term).'%';
+
+        return $query->where(fn (Builder $q) => $q
+            ->where($this->qualifyColumn('name'), 'like', $like)
+            ->orWhere($this->qualifyColumn('description'), 'like', $like));
+    }
+
     public function displayName(): string
     {
         return (string) $this->name;

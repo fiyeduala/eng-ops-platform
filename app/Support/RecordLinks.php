@@ -39,21 +39,92 @@ final class RecordLinks
      * so an entry for a module that has not been written yet is inert rather than a fatal
      * class-not-found.
      *
+     * WRITTEN OUT RATHER THAN DERIVED, and the reason is in the list itself: `hse_incident` lives
+     * at `incidents.show`, `hse_risk` at `risk-assessments.show`, `leave_request` at `leave.show`.
+     * A convention that pluralised the alias would be right about sixty of these and silently
+     * wrong about the rest, and "silently wrong" for a link means a 500 on somebody's approval
+     * inbox. Every entry is checked against `Route::has()` before it is used, so a name that goes
+     * stale degrades to plain text rather than to an exception.
+     *
+     * The registers a person SEARCHES are drawn from this map (SearchCatalogue), because a result
+     * nobody can open is not a result. A new module joins both by adding one line here.
+     *
      * @var array<string,string>
      */
     private const ROUTES = [
+        // Work
         'project' => 'projects.show',
         'task' => 'tasks.show',
+        'deliverable' => 'deliverables.show',
+        'drawing' => 'drawings.show',
+        'rfi' => 'rfis.show',
+        'submittal' => 'submittals.show',
+        'change_request' => 'change-requests.show',
+        'transmittal' => 'transmittals.show',
+
+        // Correspondence
         'memo' => 'memos.show',
         'announcement' => 'announcements.show',
         'meeting' => 'meetings.show',
         'document' => 'documents.show',
-        'transmittal' => 'transmittals.show',
+        'form' => 'forms.show',
+        'form_submission' => 'form-submissions.show',
+        'workflow' => 'workflows.show',
+
+        // People
         'employee' => 'employees.show',
         'user' => 'users.show',
         'org_unit' => 'org-units.show',
-        'form' => 'forms.show',
-        'form_submission' => 'form-submissions.show',
+        'employee_checklist' => 'employee-checklists.show',
+        'employee_exit' => 'employee-exits.show',
+        'employee_movement' => 'employee-movements.show',
+        'disciplinary_case' => 'disciplinary-cases.show',
+        'performance_review' => 'performance-reviews.show',
+        'review_cycle' => 'review-cycles.show',
+        'leave_request' => 'leave.show',
+        'overtime_request' => 'overtime.show',
+        'timesheet' => 'timesheets.show',
+        'payroll_run' => 'payroll-runs.show',
+        'payslip' => 'payslips.show',
+        'applicant' => 'applicants.show',
+        'vacancy' => 'vacancies.show',
+        'hse_training' => 'training-records.show',
+
+        // HSE and quality
+        'hse_incident' => 'incidents.show',
+        'investigation' => 'investigations.show',
+        'corrective_action' => 'corrective-actions.show',
+        'hse_observation' => 'hse-observations.show',
+        'hse_risk' => 'risk-assessments.show',
+        'hse_inspection' => 'hse-inspections.show',
+        'toolbox_talk' => 'toolbox-talks.show',
+        'permit' => 'permits.show',
+        'ncr' => 'ncrs.show',
+        'quality_inspection' => 'quality-inspections.show',
+
+        // Commercial and money
+        'client' => 'clients.show',
+        'contract' => 'contracts.show',
+        'vendor' => 'vendors.show',
+        'quotation' => 'quotations.show',
+        'rfq' => 'rfqs.show',
+        'purchase_request' => 'purchase-requests.show',
+        'purchase_order' => 'purchase-orders.show',
+        'goods_receipt' => 'goods-receipts.show',
+        'material_request' => 'material-requests.show',
+        'budget' => 'budgets.show',
+        'cost_center' => 'cost-centers.show',
+        'expense' => 'expenses.show',
+        'income' => 'incomes.show',
+        'payment' => 'payments.show',
+        'petty_cash_account' => 'petty-cash.show',
+
+        // Assets and stores
+        'asset' => 'assets.show',
+        'asset_maintenance' => 'asset-maintenances.show',
+        'stock_item' => 'stock-items.show',
+        'warehouse' => 'warehouses.show',
+        'visitor' => 'visitors.show',
     ];
 
     /**
@@ -90,6 +161,20 @@ final class RecordLinks
         }
 
         return ucfirst(str_replace('_', ' ', self::alias($record)));
+    }
+
+    /**
+     * The route name for a morph alias, or null if that register has no page of its own.
+     *
+     * Exists so a caller holding an alias — a search catalogue, a report, an audit row — can ask
+     * the same question a caller holding a record asks, without having to build a prototype of the
+     * model first just to be told there is nowhere to send anybody.
+     */
+    public static function routeFor(string $alias): ?string
+    {
+        $route = self::ROUTES[$alias] ?? null;
+
+        return $route !== null && Route::has($route) ? $route : null;
     }
 
     /** The morph alias, falling back to the class name for anything unmapped. */

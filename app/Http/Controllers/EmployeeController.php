@@ -46,16 +46,9 @@ class EmployeeController extends Controller
         $query = $this->compiler->apply(Employee::query(), $user, 'employee.view')
             ->with(['position:id,title', 'orgUnit:id,name', 'location:id,name']);
 
-        if ($term = trim((string) $request->query('q', ''))) {
-            $query->where(function ($q) use ($term) {
-                $like = '%'.$term.'%';
-                $q->where('first_name', 'like', $like)
-                    ->orWhere('last_name', 'like', $like)
-                    ->orWhere('display_name', 'like', $like)
-                    ->orWhere('employee_no', 'like', $like)
-                    ->orWhere('work_email', 'like', $like);
-            });
-        }
+        // The rule lives on the model, so this page and the global search box ask one question
+        // rather than two that happen to agree (§61).
+        $query->search((string) $request->query('q', ''));
 
         // Filtering by a unit means "this unit and everything under it" — asking for Engineering
         // and getting only the people filed directly against the division, not the departments

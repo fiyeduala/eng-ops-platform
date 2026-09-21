@@ -90,6 +90,7 @@ use App\Http\Controllers\RfqController;
 use App\Http\Controllers\RiskAssessmentController;
 use App\Http\Controllers\RoleController;
 use App\Http\Controllers\SavedFilterController;
+use App\Http\Controllers\SearchController;
 use App\Http\Controllers\SettingController;
 use App\Http\Controllers\StatusConfigController;
 use App\Http\Controllers\StockController;
@@ -204,6 +205,18 @@ Route::middleware(['auth', 'password.current'])->group(function () {
         ->middleware('permission:dashboard.view,dashboard.view_executive,dashboard.view_department,dashboard.manage')
         ->whereNumber('kpiDefinition')
         ->name('drilldown.measure');
+
+    /**
+     * One box across every register (§61).
+     *
+     * NO PERMISSION MIDDLEWARE, AND THAT IS NOT AN OVERSIGHT. There is no `search.view` grant to
+     * hold, because searching is not a thing somebody is entitled to do — it is a shortcut to the
+     * index pages they are already entitled to open. Every register in the sweep is skipped unless
+     * the reader holds its own view permission, and every row inside the ones that remain goes
+     * through `visibleTo()`. A grant here would therefore protect nothing and would take the
+     * shortcut away from the people who most need it (§6, §96).
+     */
+    Route::get('search', [SearchController::class, 'index'])->name('search');
 
     // Your own record. No permission middleware on purpose — everyone may see and maintain their
     // own profile, and the controller only ever addresses $request->user().

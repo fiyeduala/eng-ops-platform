@@ -20,6 +20,32 @@
         @endisset
     </div>
 
+    {{--
+        One box, on every page (§61).
+
+        No permission around it, and none needed: a register the reader cannot open is skipped
+        before it is queried, so this is a shortcut to the index pages they already have rather
+        than a way into ones they do not. It collapses to an icon on a phone, where a search field
+        in a 14-rem header is a field nobody can type in.
+    --}}
+    <form method="GET" action="{{ route('search') }}" class="hidden sm:block">
+        <label for="topbar-search" class="sr-only">Search</label>
+        <div class="relative">
+            <x-icon name="search" class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--text-muted)]"/>
+            <input
+                id="topbar-search"
+                type="search"
+                name="q"
+                value="{{ request()->routeIs('search') ? request()->query('q') : '' }}"
+                placeholder="Search"
+                class="input h-8 w-40 pl-8 text-xs lg:w-56">
+        </div>
+    </form>
+
+    <a href="{{ route('search') }}" class="btn btn-ghost px-2 sm:hidden" aria-label="Search">
+        <x-icon name="search" class="h-4 w-4"/>
+    </a>
+
     <a href="{{ route('notifications.index') }}" class="btn btn-ghost relative px-2"
        aria-label="{{ $unread === 0 ? 'Notifications' : $unread.' unread notifications' }}">
         <x-icon name="bell" class="h-4 w-4"/>
