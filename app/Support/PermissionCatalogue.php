@@ -253,7 +253,11 @@ final class PermissionCatalogue
             // ------------------------------------------------------------- intelligence
             'report' => ['Intelligence', 'Reports', ['view', 'create', 'edit', 'delete', 'export', 'schedule']],
             'kpi' => ['Intelligence', 'KPIs', ['view', 'manage', 'export']],
-            'dashboard' => ['Intelligence', 'Dashboards', ['view', 'view_executive', 'view_department']],
+            // `manage` arranges the boards; the three view abilities decide who opens which one.
+            // Separate because arranging a board and reading one are different jobs in every
+            // company that has more than one person — and because the arrangement decides what
+            // everybody else's screen says, while a view permission decides only your own.
+            'dashboard' => ['Intelligence', 'Dashboards', ['view', 'view_executive', 'view_department', 'manage']],
         ];
     }
 

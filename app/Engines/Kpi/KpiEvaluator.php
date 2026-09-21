@@ -7,6 +7,7 @@ namespace App\Engines\Kpi;
 use App\Engines\Access\ActorProfile;
 use App\Engines\Query\FilterCompiler;
 use App\Models\KpiDefinition;
+use App\Models\KpiSnapshot;
 use App\Models\User;
 use App\Support\KpiCatalogue;
 use Carbon\Carbon;
@@ -80,27 +81,12 @@ class KpiEvaluator
             return KpiResult::unavailable('This measure belongs to another company.', $viewerId);
         }
 
-        if (! $kpi->is_active) {
-            return KpiResult::unavailable('This measure has been switched off.', $viewerId);
+        if ($unusable = $this->unusable($kpi, $viewerId)) {
+            return $unusable;
         }
 
+        /** @var class-string<Model> $class */
         $class = KpiCatalogue::modelFor($kpi->entity_type);
-
-        if ($class === null) {
-            return KpiResult::unavailable(
-                'This measure counts a register the platform no longer offers.', $viewerId,
-            );
-        }
-
-        if (! array_key_exists($kpi->aggregate, KpiDefinition::AGGREGATES)) {
-            return KpiResult::unavailable('This measure asks for a calculation the platform does not do.', $viewerId);
-        }
-
-        if ($kpi->needsMeasure() && ! KpiCatalogue::offersMeasure($kpi->entity_type, (string) $kpi->measure_field)) {
-            return KpiResult::unavailable(
-                'This measure adds up a figure that register no longer offers.', $viewerId,
-            );
-        }
 
         $asOf = $asOf === null ? Carbon::now() : Carbon::parse($asOf);
         [$windowStart, $windowEnd] = $this->window($kpi, $asOf);
@@ -146,7 +132,97 @@ class KpiEvaluator
         return $rows;
     }
 
+    /**
+     * Count this measure over a WHOLE SCOPE, through nobody's visibility.
+     *
+     * THE ONLY PLACE IN THE PLATFORM THAT COUNTS WITHOUT A VIEWER, and it exists for exactly one
+     * caller: the nightly sweep that writes `kpi_snapshots`. A trend line has to be the company's
+     * line — if each point were counted through whoever happened to trigger the sweep, the series
+     * would step up and down with staff changes rather than with the business, and it could never
+     * be shown to a second person at all.
+     *
+     * WHAT MAKES THIS SAFE IS NOT HERE. It is at the read end: `ReachInspector` hands a stored
+     * figure to somebody only when their reach contains the whole scope it was counted over. This
+     * method's output must therefore never be returned to a request directly. `countedFor` comes
+     * back null, which is the marker for "nobody's figure" — a screen that prints a KpiResult with
+     * a null `countedFor` without a reach verdict is the bug this whole design is defending against.
+     *
+     * Tenancy is NOT waived. `BelongsToOrganization` puts its global scope on the query as usual,
+     * so this counts one company's rows within whatever organization context the caller has set.
+     *
+     * @param  string  $scopeType  organization | department | project
+     */
+    public function countWholeScope(
+        KpiDefinition $kpi,
+        string $scopeType,
+        ?int $scopeId = null,
+        ?CarbonInterface $asOf = null,
+    ): KpiResult {
+        if ($unusable = $this->unusable($kpi, null)) {
+            return $unusable;
+        }
+
+        if (! array_key_exists($scopeType, KpiSnapshot::SCOPE_TYPES)) {
+            return KpiResult::unavailable('That is not an altitude a figure can be stored at.');
+        }
+
+        if ($kpi->scope !== $scopeType) {
+            return KpiResult::unavailable('This measure is not about that kind of scope.');
+        }
+
+        if ($scopeType !== 'organization' && $scopeId === null) {
+            return KpiResult::unavailable('This measure needs to be told which one it is about.');
+        }
+
+        /** @var class-string<Model> $class */
+        $class = KpiCatalogue::modelFor($kpi->entity_type);
+
+        $asOf = $asOf === null ? Carbon::now() : Carbon::parse($asOf);
+        [$windowStart, $windowEnd] = $this->window($kpi, $asOf);
+
+        // No `visibleTo`. Compare with `baseQuery()` one method below: the difference between the
+        // company's figure and a person's figure is this single missing call, and it is left
+        // visible rather than hidden behind a flag for that reason.
+        $base = $this->narrow($class::query(), $kpi, $windowStart, $windowEnd, $scopeId);
+
+        if ($base === null) {
+            return KpiResult::unavailable('This measure filters on something that register no longer offers.');
+        }
+
+        return $this->aggregate($kpi, $base, null, $windowStart, $windowEnd);
+    }
+
     // ================================================================== the query
+
+    /**
+     * The checks that make a definition answerable at all, independent of who is asking.
+     *
+     * Returns the result to hand back, or null when the definition is sound.
+     */
+    private function unusable(KpiDefinition $kpi, ?int $viewerId): ?KpiResult
+    {
+        if (! $kpi->is_active) {
+            return KpiResult::unavailable('This measure has been switched off.', $viewerId);
+        }
+
+        if (KpiCatalogue::modelFor($kpi->entity_type) === null) {
+            return KpiResult::unavailable(
+                'This measure counts a register the platform no longer offers.', $viewerId,
+            );
+        }
+
+        if (! array_key_exists($kpi->aggregate, KpiDefinition::AGGREGATES)) {
+            return KpiResult::unavailable('This measure asks for a calculation the platform does not do.', $viewerId);
+        }
+
+        if ($kpi->needsMeasure() && ! KpiCatalogue::offersMeasure($kpi->entity_type, (string) $kpi->measure_field)) {
+            return KpiResult::unavailable(
+                'This measure adds up a figure that register no longer offers.', $viewerId,
+            );
+        }
+
+        return null;
+    }
 
     /**
      * The population every aggregate starts from, or null where the definition cannot be honoured.
@@ -166,6 +242,26 @@ class KpiEvaluator
         // here is what makes the rest of this method unable to widen the answer past the viewer.
         $query = $class::query()->visibleTo($viewer, $kpi->viewPermissionFor($class));
 
+        return $this->narrow($query, $kpi, $windowStart, $windowEnd, $scopeId);
+    }
+
+    /**
+     * Everything the definition says, applied to a population somebody else chose.
+     *
+     * Every step in here only ever REMOVES rows, which is the property that lets one method serve
+     * both a viewer-filtered count and a whole-scope one without the second being able to widen
+     * past the first's starting point.
+     *
+     * @param  Builder<Model>  $query
+     * @return Builder<Model>|null
+     */
+    private function narrow(
+        Builder $query,
+        KpiDefinition $kpi,
+        ?CarbonInterface $windowStart,
+        ?CarbonInterface $windowEnd,
+        ?int $scopeId,
+    ): ?Builder {
         if (! $this->filters->apply($query, $kpi->entity_type, $kpi->baseFilters())) {
             return null;
         }

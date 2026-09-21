@@ -24,6 +24,7 @@ use App\Http\Controllers\CorrectiveActionController;
 use App\Http\Controllers\CostCenterController;
 use App\Http\Controllers\CustomFieldController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DashboardWidgetController;
 use App\Http\Controllers\DeliverableController;
 use App\Http\Controllers\DisciplinaryCaseController;
 use App\Http\Controllers\DocumentCategoryController;
@@ -3252,6 +3253,48 @@ Route::middleware(['auth', 'password.current'])->group(function () {
                 Route::delete('{report}/views/{savedFilter}', [SavedFilterController::class, 'destroy'])
                     ->name('views.destroy');
             });
+    });
+
+    /*
+     * The board builder (§51, §52, §53, §73).
+     *
+     * ARRANGING IS `dashboard.manage`; OPENING A BOARD IS NOT. The index sits behind the view
+     * abilities as well, because somebody who may open the executive board has a legitimate reason
+     * to see how it is put together — "why does this tile say eleven" is not answerable otherwise —
+     * and seeing the arrangement discloses nothing, since every figure on it is counted through the
+     * reader's own visibility regardless of who placed the tile.
+     *
+     * NO ROUTE ACCEPTS A PERMISSION FOR A TILE, at any verb. A tile's required permission is derived
+     * from the register its measure counts, so there is no field to post and nothing to tamper with.
+     * That is not an oversight to be tidied up later: a settable permission on a dashboard is a way
+     * to publish a figure under a permission its own register never agreed to (§6, §84).
+     *
+     * REORDER IS A PUT ON THE COLLECTION rather than one request per tile. Dragging a board into
+     * shape is one decision and one audit entry; eleven requests each saying a tile moved one place
+     * is the trail that buries the decision it was recording.
+     *
+     * `order` IS DECLARED BEFORE `{widget}` and the bound routes carry `whereNumber`. Both guards
+     * are kept for the reason the report group gives: the ordering is what a reader checks first,
+     * and the constraint is what actually holds.
+     */
+    Route::prefix('configuration/widgets')->name('configuration.widgets.')->group(function () {
+        Route::get('/', [DashboardWidgetController::class, 'index'])
+            ->middleware('permission:dashboard.view,dashboard.view_executive,dashboard.view_department,dashboard.manage')
+            ->name('index');
+
+        Route::middleware('permission:dashboard.manage')->group(function () {
+            Route::get('new', [DashboardWidgetController::class, 'create'])->name('create');
+            Route::post('/', [DashboardWidgetController::class, 'store'])->name('store');
+            Route::put('order', [DashboardWidgetController::class, 'reorder'])->name('reorder');
+            Route::get('{widget}/edit', [DashboardWidgetController::class, 'edit'])
+                ->whereNumber('widget')->name('edit');
+            Route::put('{widget}', [DashboardWidgetController::class, 'update'])
+                ->whereNumber('widget')->name('update');
+            Route::put('{widget}/active', [DashboardWidgetController::class, 'toggle'])
+                ->whereNumber('widget')->name('toggle');
+            Route::delete('{widget}', [DashboardWidgetController::class, 'destroy'])
+                ->whereNumber('widget')->name('destroy');
+        });
     });
 
     /*

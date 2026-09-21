@@ -93,3 +93,24 @@ Schedule::command('visitors:close-out')
     ->withoutOverlapping(15)
     ->runInBackground()
     ->description('Sign out visitors still shown on site at the end of the day');
+
+/*
+ * Take the day's reading of every measure a company watches.
+ *
+ * 01:00, deliberately BEFORE the expiry sweep and after the movements one. A department's figures
+ * should be counted against the organogram the day actually starts with, so a promotion effective
+ * this morning has already landed when the measures are taken; and taking the reading before the
+ * working day begins is what makes "yesterday's figure" mean a whole day rather than a partial one.
+ *
+ * Like expiry:sweep, this writes nothing but its own table (see SnapshotSweeper). A missing cron
+ * costs trend points and leaves every live figure, list and badge exactly as correct as it was —
+ * which is why it is safe to run unattended, and why it is not the thing dashboards depend on for
+ * their current numbers.
+ *
+ * Still no second cron entry: `schedule:run` is the one line a company installs (§1).
+ */
+Schedule::command('kpi:snapshot')
+    ->dailyAt('01:00')
+    ->withoutOverlapping(30)
+    ->runInBackground()
+    ->description('Record the day’s figure for every measure each company watches');

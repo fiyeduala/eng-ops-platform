@@ -19,6 +19,13 @@ use Carbon\CarbonInterface;
  * THE VALUE IS THE VIEWER'S. Every result was counted through one person's visibility, which is why
  * `countedFor` is carried alongside it — a figure cached or passed around without that label is a
  * figure somebody will eventually show to the wrong person (§61).
+ *
+ * EXCEPT WHEN `countedFor` IS NULL, WHICH IS THE DANGEROUS CASE. Null does not mean "viewer
+ * unknown"; it means the figure was counted through NOBODY's visibility — the whole scope, by
+ * `KpiEvaluator::countWholeScope()`, for storage as a snapshot. That result is the company's number
+ * and not any person's, and it must not reach a screen until `ReachInspector` has confirmed that
+ * this particular viewer's reach contains the entire scope it was counted over. A null `countedFor`
+ * rendered without that check is precisely the leak the snapshot design exists to prevent.
  */
 final readonly class KpiResult
 {

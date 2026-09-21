@@ -455,6 +455,13 @@ class Navigation
                     ['label' => 'Measures', 'route' => 'configuration.kpis.index', 'icon' => 'activity',
                         'permission' => ['kpi.view', 'kpi.manage'], 'active' => 'configuration.kpis.*'],
 
+                    // The ARRANGEMENT, for the same reason. Which tiles sit on the executive
+                    // board is configuration; the board itself is opened from where people work.
+                    ['label' => 'Boards', 'route' => 'configuration.widgets.index', 'icon' => 'grid',
+                        'permission' => ['dashboard.view', 'dashboard.view_executive',
+                            'dashboard.view_department', 'dashboard.manage'],
+                        'active' => 'configuration.widgets.*'],
+
                     // Listed under Administration rather than beside the registers, because what
                     // you reach here is the BUILDER — the questions, the versions, the publish
                     // button. Filling a form in is a different act with a different permission,

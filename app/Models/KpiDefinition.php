@@ -7,6 +7,7 @@ namespace App\Models;
 use App\Engines\Access\Concerns\BelongsToOrganization;
 use App\Engines\Access\Concerns\Scopeable;
 use App\Engines\Audit\Concerns\Auditable;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 
@@ -282,6 +283,31 @@ class KpiDefinition extends Model
     public function higherIsBetter(): bool
     {
         return $this->direction !== 'lower_better';
+    }
+
+    /**
+     * Which point on the trend line a figure counted on this date belongs to.
+     *
+     * The label a stored figure is filed under, in this definition's OWN period vocabulary. A
+     * monthly measure recomputed on three different mornings overwrites one September point rather
+     * than drawing three, which is what makes the nightly sweep idempotent — and why the unique key
+     * on `kpi_snapshots` is built from this string.
+     *
+     * `all_time` files by date, because a running total taken on Monday and again on Friday really
+     * is two different facts; there is no period to collapse them into.
+     */
+    public function periodKeyFor(\DateTimeInterface $asOf): string
+    {
+        $moment = Carbon::parse($asOf);
+
+        return match ($this->period) {
+            'day' => $moment->format('Y-m-d'),
+            'week' => $moment->format('o-\WW'),
+            'month' => $moment->format('Y-m'),
+            'quarter' => $moment->format('Y').'-Q'.$moment->quarter,
+            'year' => $moment->format('Y'),
+            default => $moment->format('Y-m-d'),
+        };
     }
 
     /** The permission a total is counted under. Never anything wider than reading the register. */

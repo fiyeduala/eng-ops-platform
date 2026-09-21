@@ -193,6 +193,13 @@ class ConfigurationController extends Controller
                         'blurb' => 'The figures this company watches, each one counted over the records the person looking may see.',
                     ],
                     [
+                        'label' => 'Boards',
+                        'route' => 'configuration.widgets.index',
+                        'icon' => 'grid',
+                        'permission' => ['dashboard.view', 'dashboard.view_executive', 'dashboard.view_department', 'dashboard.manage'],
+                        'blurb' => 'Which tiles sit on each board. One arrangement, and everybody sees the tiles they may see with figures counted for them.',
+                    ],
+                    [
                         'label' => 'Reports',
                         'route' => 'configuration.reports.index',
                         'icon' => 'clipboard',

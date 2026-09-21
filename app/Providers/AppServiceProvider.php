@@ -121,6 +121,7 @@ use App\Models\CorrectiveAction;
 use App\Models\CostCenter;
 use App\Models\CustomField;
 use App\Models\CustomFieldValue;
+use App\Models\DashboardWidget;
 use App\Models\Deliverable;
 use App\Models\DisciplinaryCase;
 use App\Models\Document;
@@ -271,6 +272,7 @@ use App\Policies\ContractPolicy;
 use App\Policies\CorrectiveActionPolicy;
 use App\Policies\CostCenterPolicy;
 use App\Policies\CustomFieldPolicy;
+use App\Policies\DashboardWidgetPolicy;
 use App\Policies\DeliverablePolicy;
 use App\Policies\DisciplinaryCasePolicy;
 use App\Policies\DocumentCategoryPolicy;
@@ -510,6 +512,13 @@ class AppServiceProvider extends ServiceProvider
             // `entity_type` COLUMN on the table holds the register the filter asks about, which is
             // a different thing entirely and never this string.
             'saved_filter' => SavedFilter::class,
+            // Phase 8, part 1. A tile grants nothing and moving one moves no record, so it is here
+            // for the audit trail alone: "why did the safety figure come off the executive board in
+            // March" is a question asked in the week after it mattered, and a board with no history
+            // cannot answer it. Note there is deliberately no alias for `kpi_snapshot` — a stored
+            // figure is not audited, not followed and not attached to; it is a reading, and the
+            // thing worth auditing is the DEFINITION that decided what was being read.
+            'dashboard_widget' => DashboardWidget::class,
 
             'project' => Project::class,
             'project_type' => ProjectType::class,
@@ -1004,6 +1013,7 @@ class AppServiceProvider extends ServiceProvider
             KpiDefinition::class => KpiDefinitionPolicy::class,
             ReportDefinition::class => ReportDefinitionPolicy::class,
             SavedFilter::class => SavedFilterPolicy::class,
+            DashboardWidget::class => DashboardWidgetPolicy::class,
         ];
 
         foreach ($policies as $model => $policy) {
