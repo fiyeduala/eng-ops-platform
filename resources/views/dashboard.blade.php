@@ -12,6 +12,21 @@
             ? $me->position->title.($me->orgUnit ? ' · '.$me->orgUnit->name : '')
             : 'Welcome back.'"/>
 
+    {{--
+        The personal board, above the structural cards.
+
+        Whatever the company has decided everybody should notice goes first, because it is the part
+        that changes. Each tile was already decided for this reader by WidgetComposer — a tile
+        whose register they cannot read never arrived — so there is nothing to check here.
+    --}}
+    @if ($tiles !== [])
+        <div class="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-12">
+            @foreach ($tiles as $tile)
+                <x-widget :tile="$tile"/>
+            @endforeach
+        </div>
+    @endif
+
     @if ($cards)
         <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             @foreach ($cards as $card)

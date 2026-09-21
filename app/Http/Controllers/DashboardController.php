@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Engines\Access\ScopeCompiler;
+use App\Engines\Dashboard\WidgetComposer;
 use App\Models\ActivityLog;
 use App\Models\Employee;
 use App\Models\OrgUnit;
@@ -20,13 +21,18 @@ use Illuminate\View\View;
  * wrong or leaks the size of the organization they cannot see (§61 applies the same rule to
  * search — a count is a query result too).
  *
- * Phase 1 shows the structural picture. The executive command center of §51 replaces this in
- * Phase 8; the contract that every figure is scope-filtered is what stays.
+ * PHASE 8 ADDED THE PERSONAL BOARD TO THE TOP OF IT rather than a fourth page to visit. The §52
+ * and §53 command centers are their own screens because they are about the company and about a
+ * department; what a company wants EVERYBODY to notice belongs where everybody already lands. The
+ * cards below it stayed: they are the structural picture, they cost three scoped counts, and a
+ * company that has arranged no tiles yet still gets a landing page with something on it (§90 —
+ * modules that know about each other, not a set of unconnected screens).
  */
 class DashboardController extends Controller
 {
     public function __construct(
         private readonly ScopeCompiler $compiler,
+        private readonly WidgetComposer $composer,
     ) {}
 
     public function index(Request $request): View
@@ -64,6 +70,10 @@ class DashboardController extends Controller
 
         return view('dashboard', [
             'cards' => $cards,
+            // Composed, not counted here. `dashboard.view` is checked inside the composer, so a
+            // company that has granted nobody the boards gets an empty array and the landing page
+            // it has always had.
+            'tiles' => $this->composer->compose('personal', $user),
             'me' => $user->employee?->loadMissing(['position', 'orgUnit', 'supervisor', 'location']),
             'activity' => $this->recentActivity($request),
             'roles' => $user->activeRoles()->get(),

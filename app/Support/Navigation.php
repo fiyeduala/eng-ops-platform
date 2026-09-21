@@ -93,6 +93,15 @@ class Navigation
                 'label' => '',
                 'items' => [
                     ['label' => 'Dashboard', 'route' => 'dashboard', 'icon' => 'home'],
+
+                    // The boards sit at the top with the landing page rather than under a heading
+                    // of their own. They are where somebody starts the day, not a module they go
+                    // looking for, and each is listed only for the people whose permission says
+                    // they may open it — which for most of the company is neither.
+                    ['label' => 'Executive board', 'route' => 'boards.executive', 'icon' => 'target',
+                        'permission' => 'dashboard.view_executive'],
+                    ['label' => 'Department board', 'route' => 'boards.department', 'icon' => 'building',
+                        'permission' => 'dashboard.view_department', 'active' => 'boards.department'],
                 ],
             ],
             [

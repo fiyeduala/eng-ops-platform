@@ -12,6 +12,7 @@ use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\PasswordController;
 use App\Http\Controllers\Auth\PasswordResetController;
+use App\Http\Controllers\BoardController;
 use App\Http\Controllers\BudgetController;
 use App\Http\Controllers\CalendarController;
 use App\Http\Controllers\ChangeRequestController;
@@ -165,6 +166,29 @@ Route::middleware('auth')->group(function () {
 Route::middleware(['auth', 'password.current'])->group(function () {
 
     Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
+
+    /*
+     * The boards (§52, §53).
+     *
+     * Each behind its OWN permission rather than a shared `dashboard.view`, because opening the
+     * executive board and opening the board for the department you run are different decisions a
+     * company makes about different people. The tiles on them are filtered again per figure, so
+     * the permission here is about the page and never about the numbers.
+     *
+     * `{orgUnit?}` is optional so that §96 can put a working link in the sidebar without knowing
+     * which department to name; a bare visit lands somebody on their own. Which unit the id may
+     * address is re-asked in the controller — the binding proves tenancy, not entitlement (§84).
+     */
+    Route::prefix('boards')->name('boards.')->group(function () {
+        Route::get('executive', [BoardController::class, 'executive'])
+            ->middleware('permission:dashboard.view_executive')
+            ->name('executive');
+
+        Route::get('department/{orgUnit?}', [BoardController::class, 'department'])
+            ->middleware('permission:dashboard.view_department')
+            ->whereNumber('orgUnit')
+            ->name('department');
+    });
 
     // Your own record. No permission middleware on purpose — everyone may see and maintain their
     // own profile, and the controller only ever addresses $request->user().
