@@ -100,26 +100,52 @@ class WorkflowInstance extends Model
     // ------------------------------------------------------------------ access hooks
 
     /**
-     * An instance has no unit, no project and no owner of its own.
+     * Where the subject lived when the route last moved, copied onto the instance.
      *
-     * Reach comes from the SUBJECT, which is the only correct answer: a person who may see the
-     * document may see its approval history, and a person who may not, may not. The controllers
-     * only ever load an instance through an already-authorized subject, and ApprovalPolicy asks the
-     * subject's policy rather than inventing a second opinion.
+     * REACH STILL COMES FROM THE SUBJECT — that is the only correct answer, since a person who may
+     * see the document may see its approval history and a person who may not, may not. What changed
+     * is how the compiler is told. These used to return null, and because a subject hangs off a
+     * polymorphic pair that `whereHas()` cannot walk, "no column and no parent" meant ScopeCompiler
+     * fell through to `1 = 0`: every unit- or project-scoped `approval.*` grant in the system
+     * reached nothing at all, silently. WorkflowEngine now writes the subject's own unit and project
+     * here on start and on every advance, so the question has an indexed answer and a record that
+     * moves department mid-route takes its approval with it (§74).
+     *
+     * Null is a legitimate value: a subject with no unit — organization-level reference data — has
+     * an approval that no unit scope selects, which is the truthful answer rather than a guess.
      */
     public function accessOrgUnitColumn(): ?string
     {
-        return null;
+        return 'org_unit_id';
     }
 
     public function accessProjectColumn(): ?string
     {
-        return null;
+        return 'project_id';
     }
 
     public function accessOwnerColumns(): array
     {
         return ['started_by'];
+    }
+
+    /**
+     * An instance is "assigned to me" when one of its stages is, or was.
+     *
+     * Without this the trait's default looks for an `assignee_id` column that this table does not
+     * have. That matters more than it sounds: declaring a parent relation on WorkflowStageInstance
+     * switches on `applyParentProtection`, which re-asks `approval.view` against THIS model for
+     * every stage the inbox lists — so a reviewer whose only grant is `approval.view` at `assigned`
+     * (which is what BASELINE gives everybody) would be filtered out of their own inbox by a
+     * predicate about a table column. Past tense is deliberate: `assignedTo` is not restricted to
+     * pending stages, because somebody who approved something last month must still be able to open
+     * what they approved.
+     *
+     * @param  Builder<static>  $query
+     */
+    public function applyAssignedScope(Builder $query, User $user): void
+    {
+        $query->orWhereHas('stageInstances', fn (Builder $stage) => $stage->assignedTo($user));
     }
 
     public static function permissionModule(): string

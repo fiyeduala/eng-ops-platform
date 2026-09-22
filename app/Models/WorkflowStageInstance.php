@@ -87,6 +87,28 @@ class WorkflowStageInstance extends Model
 
     // ------------------------------------------------------------------ access hooks
 
+    /**
+     * A stage borrows its unit and project from the instance it belongs to.
+     *
+     * The stage table carries neither, and nothing about a stage would make it meaningful to: a
+     * stage is a question asked about a record, and where the question lives is where the record
+     * lives. Declaring the parent is what lets `ScopeCompiler` resolve a department- or
+     * project-scoped `approval.*` grant at all — without it the compiler has no column and no
+     * relation to recurse through, and its last branch is `1 = 0`. That was not a theoretical hole:
+     * six shipped role templates grant approval authority at one of those scopes, and every one of
+     * them could be assigned a stage, be notified about it, SEE IT IN THEIR INBOX, and be refused
+     * when they pressed approve. The inbox was the reason it stayed hidden — it filters each row by
+     * the subject's own policy (`document.view`), never by `approval.act` — so the symptom was not
+     * an empty list somebody would report but a button that did nothing.
+     *
+     * The relation is also load-bearing for confidentiality: `applyParentProtection` now re-checks
+     * the instance, so a stage cannot be reached by somebody the instance itself excludes.
+     */
+    public function accessParentRelation(): ?string
+    {
+        return 'instance';
+    }
+
     public function accessOrgUnitColumn(): ?string
     {
         return null;

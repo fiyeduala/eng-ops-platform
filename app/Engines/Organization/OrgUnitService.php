@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Engines\Organization;
 
 use App\Engines\Access\AccessResolver;
+use App\Engines\Access\ActorProfile;
 use App\Models\OrgUnit;
 use App\Support\Enums\OrgUnitType;
 use Illuminate\Support\Collection;
@@ -30,6 +31,7 @@ class OrgUnitService
 {
     public function __construct(
         private readonly AccessResolver $resolver,
+        private readonly ActorProfile $profile,
     ) {}
 
     /**
@@ -212,10 +214,29 @@ class OrgUnitService
     /**
      * Structure changes change who can see what, so every cached permission set for the tenant
      * must be considered stale.
+     *
+     * THERE ARE TWO CACHES AND THEY FAIL DIFFERENTLY. The permissions version crosses requests and
+     * is checked on read, so bumping it is enough for anything that starts after this call.
+     * `ActorProfile` is the other one: a plain in-memory map of "which units is this person under",
+     * memoized for the life of the process and never version-checked, because within one HTTP
+     * request the org chart cannot move underneath you.
+     *
+     * In a process that handles more than one request it can. A queue worker is started from cron
+     * and runs until `--max-time` (§81, §82), so one container serves every job in that window —
+     * escalation notices, the daily executive report, digest mail. Without this line a
+     * reorganization would be invisible to all of them until the worker happened to exit, and they
+     * would address a department to the division it used to sit under. That is not a stale screen;
+     * it is a notification about a record delivered to the wrong division's manager (§68).
+     *
+     * Every other service that changes somebody's reach already flushes here — `ProjectService`,
+     * `ProjectTeamService`, `MeetingService` and their neighbours. The one that reshapes the whole
+     * tree was the only one that did not.
      */
     private function bumpPermissions(OrgUnit $unit): void
     {
         $unit->organization?->bumpPermissionsVersion();
+
+        $this->profile->flush();
     }
 
     /**

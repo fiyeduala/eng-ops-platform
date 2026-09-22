@@ -33,6 +33,46 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
 trait HasWorkflow
 {
     /**
+     * A record that moves takes its in-flight approvals with it (§74).
+     *
+     * WHAT WOULD OTHERWISE GO STALE. `workflow_instances` carries a copy of the subject's unit and
+     * project, because that is how a unit- or project-scoped `approval.*` grant reaches a stage at
+     * all — a subject hangs off a polymorphic pair the access compiler cannot walk. WorkflowEngine
+     * refreshes the copy at every stage transition, which covers a long route but not the case §74
+     * is actually about: a department is reorganized, or a record is moved into another one, while
+     * a single-stage approval sits open and waiting. Nothing advances, so nothing would refresh,
+     * and the approval would stay addressed to the department that no longer holds the record —
+     * reachable by people with no further interest in it and invisible to the ones who now own it.
+     *
+     * ONLY THE COPY IS TOUCHED, never the decision. Assignees stay frozen, because who was asked is
+     * a fact about the past, and a move is not a reason to un-ask them. What changes is who else
+     * can see the stage and who may reassign it — which is the reach question, and the one that
+     * should follow the record.
+     *
+     * `saved` rather than `updated`, and guarded on the columns actually changing, so the common
+     * case is one in-memory comparison and no query at all.
+     */
+    protected static function bootHasWorkflow(): void
+    {
+        static::saved(function (self $subject): void {
+            if (! $subject->wasChanged(['org_unit_id', 'project_id'])) {
+                return;
+            }
+
+            $instance = $subject->currentWorkflowInstance();
+
+            if ($instance === null) {
+                return;
+            }
+
+            $instance->forceFill([
+                'org_unit_id' => $subject->workflowOrgUnitId(),
+                'project_id' => $subject->workflowProjectId(),
+            ])->save();
+        });
+    }
+
+    /**
      * Every route this record has ever travelled, newest first.
      *
      * All of them, not just the live one: "we sent this round twice and it came back the first

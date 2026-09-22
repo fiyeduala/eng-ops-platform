@@ -84,6 +84,11 @@ class WorkflowEngine
                 'workflow_id' => $workflow->getKey(),
                 'subject_type' => $subject->getMorphClass(),
                 'subject_id' => $subject->getKey(),
+                // Where the subject lives, so a unit- or project-scoped approver can reach the
+                // stages this instance will open. See syncReach() for why it is copied rather
+                // than followed.
+                'org_unit_id' => $subject->workflowOrgUnitId(),
+                'project_id' => $subject->workflowProjectId(),
                 'status' => WorkflowInstance::STATUS_RUNNING,
                 'attempt' => 1,
                 'started_by' => $actor->getKey(),
@@ -473,6 +478,11 @@ class WorkflowEngine
                 return;
             }
 
+            // Before the stage is opened, not after: the assignee list and the reach that decides
+            // who may act on it are settled in the same breath, and an opened stage that is briefly
+            // unreachable is a race the inbox can observe.
+            $this->syncReach($instance, $subject);
+
             $stageInstance = $this->openStage($instance, $stage, $resolution);
 
             $this->autoActions->runOnEntry($stage, $subject, $stageInstance, $actor);
@@ -741,6 +751,44 @@ class WorkflowEngine
         return method_exists($subject, 'currentWorkflowInstance')
             && method_exists($subject, 'workflowEntityType')
             && method_exists($subject, 'requiresWorkflow');
+    }
+
+    /**
+     * Copy the subject's current unit and project onto the instance, if either has moved.
+     *
+     * The values come from `workflowOrgUnitId()` / `workflowProjectId()`, which are the hooks a
+     * routable model already overrides to answer "what does a stage mean by the owning department
+     * on me" — so stage resolution and approval reach read the same number, and a model with an
+     * unusual shape states it once. `assertRoutable()` has already proved the trait is present.
+     *
+     * WHY COPIED AND NOT FOLLOWED. A subject hangs off `subject_type`/`subject_id`, and the access
+     * compiler resolves a missing unit column by `whereHas()` on a parent relation — which cannot
+     * walk a morphTo. Teaching it to would mean `whereHasMorph()` and a UNION per subject type on
+     * the approvals inbox, the hottest authorized query in the application. Two columns refreshed
+     * at each transition answer the same question against an index.
+     *
+     * WHY REFRESHED RATHER THAN FROZEN. Assignees are frozen at stage entry on purpose — who was
+     * asked is a fact about the past. Reach is not: it is the answer to "who may act on this now",
+     * and when a document moves department mid-route the people who may act on it are the ones in
+     * the department it moved to (§74). Freezing it would leave an in-flight approval addressed to
+     * a department that no longer holds the record.
+     *
+     * Saved only when something actually changed, so a route that advances through six stages does
+     * not write six identical rows into the audit trail (§59).
+     */
+    private function syncReach(WorkflowInstance $instance, Model $subject): void
+    {
+        $orgUnitId = $subject->workflowOrgUnitId();
+        $projectId = $subject->workflowProjectId();
+
+        if ((int) $instance->org_unit_id === (int) $orgUnitId && (int) $instance->project_id === (int) $projectId) {
+            return;
+        }
+
+        $instance->forceFill([
+            'org_unit_id' => $orgUnitId,
+            'project_id' => $projectId,
+        ])->save();
     }
 
     private function assertRoutable(Model $subject): void

@@ -152,6 +152,12 @@ final class RoleTemplates
                     'numbering.*' => 'organization',
                     'status.*' => 'organization',
                     'escalation.*' => 'organization',
+                    // The register's own furniture. A category decides which route a document enters and
+                    // which numbering format it takes, so categories belong beside numbering and status
+                    // rather than with the documents themselves — and an expiry watch is a scheduled
+                    // reminder configured once, which is the same family of act as an escalation rule.
+                    'document_category.*' => 'organization',
+                    'expiry_watch.*' => 'organization',
                     'workflow.*' => 'organization',
                     'form.*' => 'organization',
                     'audit_log.*' => 'organization',
@@ -187,9 +193,23 @@ final class RoleTemplates
                     'contract.manage' => 'organization',
                     'hse_incident.view_confidential' => 'organization',
                     'dashboard.view_executive' => 'organization',
+                    'dashboard.manage' => 'organization',
                     'kpi.view' => 'organization',
-                    'report.create' => 'organization',
+                    'kpi.manage' => 'organization',
+                    // `report.*` rather than `report.create`: a saved report that cannot be edited,
+                    // deleted or put on a schedule is a report written once and then abandoned, and the
+                    // daily executive summary is a scheduled report like any other.
+                    'report.*' => 'organization',
                     'approval.act' => 'organization',
+                    // Two different authorities, and the difference is who is choosing. `delegate` is
+                    // participatory — handing on a decision that was asked of you, which is what happens
+                    // when somebody goes away for a fortnight. `reassign` is administrative: taking a
+                    // stuck stage off an approver who has left, and deliberately not available to the
+                    // people standing on it. EscalationService sends its third and last warning to
+                    // holders of `reassign`, so a company where nobody holds it has an escalation ladder
+                    // whose top rung reaches an empty room.
+                    'approval.delegate' => 'organization',
+                    'approval.reassign' => 'organization',
                     // `create` and `edit` travel together, here and in every template below that
                     // grants either. A memo's distribution list is part of the document, so
                     // MemoPolicy::address() asks `memo.edit` — and a memo cannot be issued with
@@ -221,6 +241,7 @@ final class RoleTemplates
                     '*.view' => 'organization',
                     'report.export' => 'organization',
                     'dashboard.view_executive' => 'organization',
+                    'dashboard.manage' => 'organization',
                     'kpi.view' => 'organization',
                     'project.manage' => 'organization',
                     'project.view_financials' => 'organization',
@@ -231,6 +252,8 @@ final class RoleTemplates
                     'change_request.approve' => 'organization',
                     'contract.approve' => 'organization',
                     'approval.act' => 'organization',
+                    'approval.delegate' => 'organization',
+                    'approval.reassign' => 'organization',
                 ],
             ],
 
@@ -271,7 +294,12 @@ final class RoleTemplates
                     'dashboard.view' => 'organization',
                     'report.view' => 'organization',
                     'kpi.view' => 'organization',
+                    // The person who maintains what the company measures, which is an operational act
+                    // rather than an executive one: the directors read the board, this role builds it.
+                    'kpi.manage' => 'organization',
                     'approval.act' => 'organization',
+                    'approval.delegate' => 'organization',
+                    'approval.reassign' => 'organization',
                 ],
             ],
 
@@ -293,6 +321,7 @@ final class RoleTemplates
                     'deliverable.approve' => 'project',
                     'drawing.approve' => 'project',
                     'change_request.approve' => 'project',
+                    'change_request.delete' => 'project',
                     'purchase_request.approve' => 'project',
                     // `edit` is what invites people (MeetingPolicy::invite) — see managing-director.
                     'meeting.create' => 'project',
@@ -304,6 +333,7 @@ final class RoleTemplates
                     'daily_report.view' => 'project',
                     'report.view' => 'project',
                     'approval.act' => 'project',
+                    'approval.delegate' => 'project',
                 ],
             ],
 
@@ -345,6 +375,10 @@ final class RoleTemplates
                     'drawing.view' => 'project',
                     'rfi.*' => 'project',
                     'submittal.review' => 'project',
+                    // `submit` without `create` and `edit` is a button with nothing behind it: somebody
+                    // has to raise the variation and write it up before it can be sent anywhere.
+                    'change_request.create' => 'project',
+                    'change_request.edit' => 'project',
                     'change_request.submit' => 'project',
                     'meeting.create' => 'project',
                     'meeting.edit' => 'project',
@@ -373,6 +407,7 @@ final class RoleTemplates
                     'ncr.view' => 'project',
                     'report.view' => 'project',
                     'approval.act' => 'project',
+                    'approval.delegate' => 'project',
                 ],
             ],
 
@@ -404,8 +439,14 @@ final class RoleTemplates
                     'employee_movement.submit' => 'department',
                     'report.export' => 'department',
                     'dashboard.view_department' => 'department',
+                    'dashboard.manage' => 'department',
                     'kpi.view' => 'department',
                     'approval.act' => 'department',
+                    // Reassignment at department scope, so a stage stuck on somebody in this department
+                    // can be unstuck by the person who actually notices. Without it every stalled
+                    // approval in the company has to reach an executive before anything moves.
+                    'approval.delegate' => 'department',
+                    'approval.reassign' => 'department',
                 ],
             ],
 
@@ -426,6 +467,8 @@ final class RoleTemplates
                     // most of the companies the department actually writes to.
                     'client.view' => 'organization',
                     'vendor.view' => 'organization',
+                    'change_request.create' => 'department',
+                    'change_request.edit' => 'department',
                     'change_request.review' => 'department',
                     'document.approve' => 'department',
                     'document.view' => 'department',
@@ -446,6 +489,7 @@ final class RoleTemplates
                     'report.view' => 'department',
                     'dashboard.view_department' => 'department',
                     'approval.act' => 'department',
+                    'approval.delegate' => 'department',
                 ],
             ],
 
@@ -477,6 +521,7 @@ final class RoleTemplates
                     'meeting.record_minutes' => 'team',
                     'daily_report.view' => 'team',
                     'approval.act' => 'department',
+                    'approval.delegate' => 'department',
                 ],
             ],
 
@@ -548,6 +593,7 @@ final class RoleTemplates
                     'kpi.view' => 'organization',
                     'dashboard.view_department' => 'organization',
                     'approval.act' => 'organization',
+                    'approval.delegate' => 'organization',
                 ],
             ],
 
@@ -601,6 +647,7 @@ final class RoleTemplates
                     'report.export' => 'organization',
                     'kpi.view' => 'organization',
                     'approval.act' => 'organization',
+                    'approval.delegate' => 'organization',
                 ],
             ],
 
@@ -641,6 +688,12 @@ final class RoleTemplates
                     'client.view' => 'organization',
                     'vendor.view' => 'organization',
                     'numbering.*' => 'organization',
+                    // Categories and expiry watches alongside numbering, because this is the role that
+                    // lives inside the register: a new drawing class or a certificate that needs chasing
+                    // should not wait on an administrator. Configuring the register is not approving
+                    // anything in it, which is the line this template is drawn along.
+                    'document_category.*' => 'organization',
+                    'expiry_watch.*' => 'organization',
                     'template.manage' => 'organization',
                     'template.view' => 'organization',
                     'drawing.view' => 'organization',
@@ -662,6 +715,9 @@ final class RoleTemplates
                 'grants' => [
                     'employee.*' => 'organization',
                     'attendance.*' => 'organization',
+                    // Overtime travels with attendance: the same person checks the hours and authorises
+                    // the rate they are paid at.
+                    'overtime.*' => 'organization',
                     'timesheet.*' => 'organization',
                     'leave.*' => 'organization',
                     'recruitment.*' => 'organization',
@@ -689,6 +745,7 @@ final class RoleTemplates
                     'report.export' => 'organization',
                     'dashboard.view_department' => 'organization',
                     'approval.act' => 'organization',
+                    'approval.delegate' => 'organization',
                 ],
             ],
 
@@ -763,6 +820,9 @@ final class RoleTemplates
                     'contract.view' => 'organization',
                     'contract.view_confidential' => 'organization',
                     'contract.export' => 'organization',
+                    // Deletion is confined to the roles that already hold `contract.manage`, and exists
+                    // for the draft raised against the wrong client — never for one anybody has signed.
+                    'contract.delete' => 'organization',
                     // The account number is a payment instrument, not a contact detail, and it
                     // is masked for everybody without this. The people who pay suppliers are
                     // the people who need to read it (§67).
@@ -778,6 +838,7 @@ final class RoleTemplates
                     'kpi.view' => 'organization',
                     'dashboard.view_department' => 'organization',
                     'approval.act' => 'organization',
+                    'approval.delegate' => 'organization',
                 ],
             ],
 
@@ -831,6 +892,7 @@ final class RoleTemplates
                     'contract.manage' => 'organization',
                     'contract.view' => 'organization',
                     'contract.view_confidential' => 'organization',
+                    'contract.delete' => 'organization',
                     'client.view' => 'organization',
                     'material_request.view' => 'organization',
                     'stock_item.view' => 'organization',
@@ -838,6 +900,7 @@ final class RoleTemplates
                     'project.view' => 'organization',
                     'report.export' => 'organization',
                     'approval.act' => 'organization',
+                    'approval.delegate' => 'organization',
                 ],
             ],
 
@@ -907,6 +970,7 @@ final class RoleTemplates
                     'vendor.view' => 'organization',
                     'report.export' => 'organization',
                     'approval.act' => 'organization',
+                    'approval.delegate' => 'organization',
                 ],
             ],
 
@@ -954,6 +1018,7 @@ final class RoleTemplates
                     'project.view' => 'organization',
                     'report.export' => 'organization',
                     'approval.act' => 'organization',
+                    'approval.delegate' => 'organization',
                 ],
             ],
 
