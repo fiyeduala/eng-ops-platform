@@ -542,14 +542,57 @@ leakage, file access) · N+1 and query-count budgets · load sanity check · err
 friendly error pages · backup and restore drill · deployment runbook · demo seed data · user
 documentation.
 
-**Carried in from Phase 7:** the two walkthroughs named in that phase's exit criteria are proven
-surface by surface but never as one continuous act. This phase owes two spanning tests — §73,
-configuring a new company from an empty tenant to a routed, numbered, reportable register entirely
-through the screens; and §74, reorganizing a department tree and re-checking every reach that
-depended on it afterwards.
+**What this phase is actually for.** Every previous phase proved its own surface. Nothing so far has
+tried to prove that a *reader* cannot get somewhere, systematically, across all of them at once —
+and the Phase 8 close showed exactly why that gap matters. Three call sites asked for a permission
+holder by a column that does not exist, matched nobody, and passed every suite in the codebase for
+two phases, because no test ever asserted that the query returned somebody. A test that only
+exercises the happy path cannot distinguish "correctly denied" from "silently broken", and this
+phase is the one that has to.
 
-**Exit criteria:** the authorization test matrix is green; a restore drill is documented with a
-measured RTO.
+- **Part 1 — the authorization matrix.** One test per register, driven from a table rather than
+  written out by hand: for each of {owner, same department, other department, other organization,
+  no role}, every one of {index, show, create, update, delete, export, download, drill-down} answers
+  200 or 403/404, and the expected answer is written down before the test runs. §84 and §94: URL ids
+  are re-proven, hidden fields are ignored, client-supplied status values are refused, and Org A
+  never reaches Org B (§75). **Every case must assert a positive somewhere** — a matrix whose rows
+  are all denials is a matrix that would stay green if the whole application stopped working.
+- **Part 2 — the silences.** The failure shape Phase 8 found, generalised. A permission holder
+  lookup that returns nobody, a notification whose audience resolves to zero, a search that finds
+  nothing, an escalation that escalates to no one: each of these is *indistinguishable from working*
+  unless something asserts the non-empty case. Regression tests owed specifically for
+  `EscalationService::holdersOf()`, `NotifyWorkflowStalled`, `ExecutiveBriefing::recipients()` and
+  every `Audience` resolution — plus keeping the static detector written during Phase 8 as a
+  repository check, since `whereHas` closures silently resolving against the outer table is a defect
+  class, not one bug.
+- **Part 3 — query budgets.** §89. A ceiling per page, asserted, not eyeballed: the executive board,
+  the project command center, every index with a status filter, and the drill-down path. The daily
+  report gets its own budget because it composes a board per recipient on a cron-timed minute.
+- **Part 4 — the two spanning walkthroughs, carried in from Phase 7.** Proven surface by surface but
+  never as one continuous act. §73: an empty tenant to a routed, numbered, reportable register
+  entirely through the screens, by somebody with no database access. §74: reorganizing a department
+  tree and re-checking every reach that depended on it afterwards — the test is what happens to
+  dashboards, saved filters and in-flight approvals when a department moves under a different
+  division mid-approval.
+- **Part 5 — deployment truth.** The Phase 8 pre-deploy read of `docs/12` found a documented
+  `ProductionSeeder` that does not exist, a second queue cron that would have doubled the workers,
+  a `PRIVATE_DISK` setting read by nothing, and a backup engine described in the present tense that
+  was never built. Those are corrected in the doc; this part owes the rest. A real first-run path
+  for a production install; a decision on whether a backup **record** belongs in the application at
+  all (a platform that claims to be watching a backup it does not run is worse than one that says
+  nothing); friendly 403/404/419/500/503 pages that do not leak whether a record exists; and the
+  restore drill actually performed against a scratch database, with the RTO measured rather than
+  estimated.
+- **Part 6 — demo seed data and user documentation.** `DemoSeeder` exists and is good; what it lacks
+  is a safe gate. It is currently skipped in production unless `--force` is passed — but `--force` is
+  the flag an operator **must** pass to seed anything in production at all, so the guard inverts
+  under exactly the conditions it exists for. That is a fix, not a feature. Then the walkthrough
+  documentation a non-developer administrator actually needs, which is §73's other half.
+
+**Exit criteria:** the authorization matrix is green and contains positive cases; no query budget is
+exceeded; both spanning walkthroughs pass end to end; a restore drill is documented with a measured
+RTO; and a production install can be completed from `docs/12` alone, by somebody who has not read
+this repository.
 
 ---
 
