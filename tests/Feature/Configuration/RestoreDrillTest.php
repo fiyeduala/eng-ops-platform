@@ -185,6 +185,115 @@ final class RestoreDrillTest extends TestCase
         $this->assertStringContainsString('no active administrator', $this->output);
     }
 
+    #[Test]
+    public function a_company_administered_by_a_role_and_no_owner_passes(): void
+    {
+        // THE SHAPE THIS CHECK ORIGINALLY REFUSED, and it is the shape the platform ships in.
+        // Both seeded companies are administered by somebody holding `system-administrator` and
+        // neither has an `is_super_admin` user anywhere, so the first database anybody points the
+        // verifier at failed a check that was asking the wrong question. §10 asks for exactly this
+        // arrangement — administrators bounded by a role rather than by a flag — and the
+        // `managing-director` template is explicit that whole-company visibility is not it.
+        $this->adaeze->is_super_admin = false;
+        $this->adaeze->save();
+
+        $this->adaeze->assignRole($this->makeRole($this->org, 'System Administrator', [
+            'setting.manage' => 'organization',
+        ]));
+
+        $this->assertSame(self::SUCCESS, $this->verify(), $this->output);
+
+        $this->assertStringContainsString('This restore is usable', $this->output);
+    }
+
+    #[Test]
+    public function reading_the_settings_screens_is_not_administering_the_company(): void
+    {
+        $this->adaeze->is_super_admin = false;
+        $this->adaeze->save();
+
+        // `setting.view` opens every configuration screen and changes nothing on any of them. A
+        // restore whose only survivor holds it is a restore nobody can configure, which is the
+        // whole reason the check names `manage` — and the reason the catalogue marks that key
+        // sensitive and this one not.
+        $this->adaeze->assignRole($this->makeRole($this->org, 'Settings Reader', [
+            'setting.view' => 'organization',
+        ]));
+
+        $this->assertSame(self::FAILURE, $this->verify());
+
+        $this->assertStringContainsString('no active administrator', $this->output);
+    }
+
+    #[Test]
+    public function an_administrator_whose_assignment_has_expired_does_not_count(): void
+    {
+        $this->adaeze->is_super_admin = false;
+        $this->adaeze->save();
+
+        $role = $this->makeRole($this->org, 'System Administrator', ['setting.manage' => 'organization']);
+        $this->adaeze->assignRole($role);
+
+        // A covering assignment that ran out — somebody standing in while the administrator was
+        // away. `AccessResolver` stops honouring it the day it ends, so a count that read the join
+        // table without reading the dates would report an administrator who is refused at every
+        // screen they were restored to run.
+        DB::table('role_user')
+            ->where('user_id', $this->adaeze->id)
+            ->where('role_id', $role->id)
+            ->update(['ends_at' => now()->subDay()->toDateString()]);
+
+        $this->assertSame(self::FAILURE, $this->verify());
+
+        $this->assertStringContainsString('no active administrator', $this->output);
+    }
+
+    #[Test]
+    public function an_administrator_pinned_to_one_department_cannot_administer_the_company(): void
+    {
+        $this->adaeze->is_super_admin = false;
+        $this->adaeze->save();
+
+        $role = $this->makeRole($this->org, 'System Administrator', ['setting.manage' => 'organization']);
+        $this->adaeze->assignRole($role);
+
+        // The grant says `organization` and the ASSIGNMENT says one department, and the assignment
+        // is the narrower of the two. This is how a department administrator is built, so it is a
+        // shape that occurs in every real tenant — and counting it would mean reporting a company
+        // as administrable on the strength of somebody who cannot touch a company-wide setting.
+        DB::table('role_user')
+            ->where('user_id', $this->adaeze->id)
+            ->where('role_id', $role->id)
+            ->update([
+                'scope_type' => 'org_unit',
+                'scope_id' => DB::table('org_units')->where('organization_id', $this->org->id)->value('id'),
+            ]);
+
+        $this->assertSame(self::FAILURE, $this->verify());
+
+        $this->assertStringContainsString('no active administrator', $this->output);
+    }
+
+    #[Test]
+    public function a_role_that_was_switched_off_takes_its_administrators_with_it(): void
+    {
+        $this->adaeze->is_super_admin = false;
+        $this->adaeze->save();
+
+        $role = $this->makeRole($this->org, 'System Administrator', ['setting.manage' => 'organization']);
+        $this->adaeze->assignRole($role);
+
+        // Deactivating a role is the quiet way a company loses its administrators: the assignments
+        // all survive, every name still appears against the role, and the resolver returns nothing
+        // for any of them.
+        $role->is_active = false;
+        $role->save();
+
+        $this->assertSame(self::FAILURE, $this->verify());
+
+        $this->assertStringContainsString('no active administrator', $this->output);
+    }
+
     private function verify(array $options = []): int
     {
         $code = Artisan::call('engops:verify-restore', array_merge(['--no-interaction' => true], $options));

@@ -76,6 +76,11 @@ past. The command is the only supported way to make one, it can only be run from
 the account it creates is held on the change-password screen until the printed password is
 replaced (§92).
 
+Hand that administrator [docs/17](17-new-company-setup.md) and stop there. Everything after the
+first sign-in — the org chart, the statuses, the numbering, the registers, the approval routes — is
+theirs to do on screens, and it is written for somebody who does not have a shell and should not
+need one (§73).
+
 Assets are built in CI or locally (`npm run build`) and the `public/build` output is deployed —
 **no Node runtime is required on the server**.
 

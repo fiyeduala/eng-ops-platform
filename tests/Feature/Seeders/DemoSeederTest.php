@@ -43,7 +43,9 @@ use Database\Seeders\DemoSeeder;
 use Database\Seeders\PermissionSeeder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\Attributes\Test;
@@ -1250,6 +1252,48 @@ final class DemoSeederTest extends TestCase
     private function account(Organization $organization, string $email): User
     {
         return $this->within($organization, fn () => User::where('email', $email)->firstOrFail());
+    }
+
+    #[Test]
+    public function the_seeded_database_passes_the_restore_verifier(): void
+    {
+        // The two commands meeting, which is where the Phase 9 review found them disagreeing.
+        // `engops:verify-restore` refused both of these companies, because it counted
+        // administrators as `is_super_admin` and neither company has one: Meridian is administered
+        // by t.renner and Kestrel by r.calder, both through `system-administrator`, which is what
+        // §10 asks for and what the `managing-director` template goes out of its way to say is not
+        // the same as whole-company visibility.
+        //
+        // A freshly seeded demo is the first database anybody points the verifier at. If it fails
+        // there, it gets read as broken and switched off — so this is the case that has to pass
+        // before any of the failure cases in RestoreDrillTest mean anything.
+        $code = Artisan::call('engops:verify-restore', ['--no-interaction' => true]);
+        $output = Artisan::output();
+
+        $this->assertSame(0, $code, $output);
+        $this->assertStringContainsString('2 company(ies), each with an administrator', $output);
+    }
+
+    #[Test]
+    public function no_demo_account_shares_a_password_with_anything_that_ships(): void
+    {
+        // §92, checked against the rows rather than against the docblock that claims it. The
+        // seeder generates one random password per run and prints it once; the risk is not that
+        // somebody typed "password" into it today, it is that a future convenience — a fixed value
+        // for a CI run, a helpful default — becomes the credential on a demo instance somebody
+        // left reachable.
+        $hashes = User::query()->withoutGlobalScopes()->pluck('password');
+
+        $this->assertGreaterThan(0, $hashes->count());
+
+        foreach (['password', 'password123', 'secret', 'demo', 'admin', 'Password1!', 'changeme'] as $guess) {
+            foreach ($hashes as $hash) {
+                $this->assertFalse(
+                    Hash::check($guess, (string) $hash),
+                    'A demo account can be signed into with "'.$guess.'".',
+                );
+            }
+        }
     }
 
     private function meridianTask(string $title): Task

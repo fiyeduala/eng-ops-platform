@@ -49,6 +49,16 @@ class VerifyRestore extends Command
     protected $description = 'Check whether the database this is pointed at is a usable restore';
 
     /**
+     * What "can administer this company" means, in one place.
+     *
+     * `setting.manage` and not `setting.view`: reading the configuration screens is not the same as
+     * being able to change anything on them, and a restore whose only survivor can read settings is
+     * a restore nobody can configure. PermissionCatalogue marks this key sensitive for the same
+     * reason (PermissionCatalogue.php:332).
+     */
+    private const ADMINISTRATION = 'setting.manage';
+
+    /**
      * Tables holding a path to something that exists nowhere else.
      *
      * NOT `exports.path` and not `users.avatar_path`. An export is a rendering of rows that are
@@ -187,14 +197,7 @@ class VerifyRestore extends Command
         $stranded = [];
 
         foreach ($organizations as $organization) {
-            $administrators = DB::table('users')
-                ->where('organization_id', $organization->id)
-                ->where('is_super_admin', true)
-                ->where('is_active', true)
-                ->whereNull('deleted_at')
-                ->count();
-
-            if ($administrators === 0) {
+            if ($this->administratorCount((int) $organization->id) === 0) {
                 $stranded[] = $organization->name;
             }
         }
@@ -206,13 +209,65 @@ class VerifyRestore extends Command
                 $this->line('        '.$name);
             }
 
-            $this->line('        Nobody can configure these. Restore a dump that includes their account,');
-            $this->line('        or reactivate it directly before handing this over.');
+            $this->line('        Nobody can configure these — no owner, and nobody holding '.self::ADMINISTRATION.'');
+            $this->line('        company-wide. Restore a dump that includes the account, reactivate it');
+            $this->line('        directly, or grant an active person a role carrying that permission.');
 
             return;
         }
 
         $this->pass('companies', $organizations->count().' company(ies), each with an administrator');
+    }
+
+    /**
+     * Who can configure this company — asked as a PERMISSION, not as a flag.
+     *
+     * This counted `is_super_admin` alone until the demo tenants were reviewed, and it was wrong in
+     * the direction that matters: it failed a healthy database. Administration in this system is
+     * `setting.manage`, and §10 is explicit that administrators are bounded — the `managing-director`
+     * template says so in as many words ("the absence of setting.manage … visibility is not the same
+     * as administration"), and both seeded companies are administered by somebody holding
+     * `system-administrator` with no owner flag anywhere. A check reading the flag therefore refused
+     * the first database anybody points it at, and would refuse any real company that had delegated
+     * administration and then retired the founder's account — which is not a broken restore, it is
+     * the arrangement §10 asks for.
+     *
+     * The owner flag still counts, because `AccessResolver` grants it everything
+     * (AccessResolver.php:127). It is one of the two ways in, not the definition.
+     *
+     * The dating and the activity conditions mirror the resolver deliberately: a role assignment
+     * that has expired, or hangs off a deactivated or soft-deleted role, resolves to nothing at
+     * sign-in, and a verifier that counted it would be reporting an administrator who cannot
+     * administer. A PINNED assignment is excluded for the same reason — a role narrowed to one
+     * department is not company-wide administration, however sweeping the role's own grants read.
+     */
+    private function administratorCount(int $organizationId): int
+    {
+        $today = now()->toDateString();
+
+        return DB::table('users')
+            ->where('users.organization_id', $organizationId)
+            ->where('users.is_active', true)
+            ->whereNull('users.deleted_at')
+            ->where(function ($who) use ($organizationId, $today) {
+                $who->where('users.is_super_admin', true)
+                    ->orWhereExists(function ($grant) use ($organizationId, $today) {
+                        $grant->from('role_user')
+                            ->join('roles', 'roles.id', '=', 'role_user.role_id')
+                            ->join('permission_role', 'permission_role.role_id', '=', 'roles.id')
+                            ->join('permissions', 'permissions.id', '=', 'permission_role.permission_id')
+                            ->whereColumn('role_user.user_id', 'users.id')
+                            ->where('roles.organization_id', $organizationId)
+                            ->where('roles.is_active', true)
+                            ->whereNull('roles.deleted_at')
+                            ->where('permissions.key', self::ADMINISTRATION)
+                            ->where('permission_role.scope', 'organization')
+                            ->whereNull('role_user.scope_type')
+                            ->where(fn ($q) => $q->whereNull('role_user.starts_at')->orWhere('role_user.starts_at', '<=', $today))
+                            ->where(fn ($q) => $q->whereNull('role_user.ends_at')->orWhere('role_user.ends_at', '>=', $today));
+                    });
+            })
+            ->count();
     }
 
     /**
