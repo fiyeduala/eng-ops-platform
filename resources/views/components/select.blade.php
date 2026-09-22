@@ -14,7 +14,18 @@
         <option value="">{{ $placeholder }}</option>
     @endif
 
-    @php $current = old($name, $selected); @endphp
+    @php
+        $current = old($name, $selected);
+
+        // A backed enum is unwrapped here rather than at the call site, because the call site is
+        // where it gets forgotten. Five of the six confidentiality selects wrote `?->value` and one
+        // did not, and the one that did not was a 500 on an edit screen — an uncaught
+        // "Object of class … could not be converted to string" from the cast below, not a wrong
+        // selection. There are 465 of these tags; the rule belongs in the one place, not in 465.
+        if ($current instanceof BackedEnum) {
+            $current = $current->value;
+        }
+    @endphp
 
     @foreach ($options as $value => $label)
         <option value="{{ $value }}" @selected((string) $current === (string) $value)>{{ $label }}</option>

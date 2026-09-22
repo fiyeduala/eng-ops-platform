@@ -203,7 +203,7 @@
                     <x-field label="Confidentiality" name="confidentiality" required
                              help="A delivery is normally as open as the order it belongs to.">
                         <x-select name="confidentiality" :options="$confidentialities"
-                                  :selected="$goodsReceipt->confidentiality ?? 'internal'"/>
+                                  :selected="$goodsReceipt->confidentiality?->value ?? 'internal'"/>
                     </x-field>
                 </div>
             </div>
