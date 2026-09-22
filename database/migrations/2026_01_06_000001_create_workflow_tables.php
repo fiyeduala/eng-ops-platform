@@ -177,7 +177,7 @@ return new class extends Migration
             $table->timestamps();
 
             $table->index(['workflow_stage_id', 'sort']);
-            $table->index(['organization_id', 'workflow_stage_id']);
+            $table->index(['organization_id', 'workflow_stage_id'], 'workflow_stage_conditions_org_stage_index');
         });
 
         // ---------------------------------------------------------------------------- runtime
@@ -287,7 +287,7 @@ return new class extends Migration
             // runs on every page load for every user, so the shape of this index is the shape of
             // the feature's performance.
             $table->index(['organization_id', 'status', 'due_at']);
-            $table->index(['workflow_instance_id', 'attempt', 'sequence']);
+            $table->index(['workflow_instance_id', 'attempt', 'sequence'], 'workflow_stage_instances_instance_attempt_seq_index');
         });
 
         /*

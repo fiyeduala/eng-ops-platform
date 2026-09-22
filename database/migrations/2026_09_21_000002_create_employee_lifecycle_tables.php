@@ -56,7 +56,7 @@ return new class extends Migration
             $table->boolean('requires_note')->default(false);
             $table->timestamps();
 
-            $table->index(['organization_id', 'checklist_template_id', 'sequence']);
+            $table->index(['organization_id', 'checklist_template_id', 'sequence'], 'checklist_template_items_org_template_seq_index');
         });
 
         Schema::create('employee_checklists', function (Blueprint $table) {
@@ -97,7 +97,7 @@ return new class extends Migration
             $table->string('note', 500)->nullable();
             $table->timestamps();
 
-            $table->index(['organization_id', 'employee_checklist_id', 'sequence']);
+            $table->index(['organization_id', 'employee_checklist_id', 'sequence'], 'employee_checklist_items_org_checklist_seq_index');
         });
 
         Schema::create('employee_exits', function (Blueprint $table) {

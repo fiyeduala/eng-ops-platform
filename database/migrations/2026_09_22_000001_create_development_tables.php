@@ -124,7 +124,7 @@ return new class extends Migration
 
             $table->timestamps();
 
-            $table->index(['organization_id', 'review_cycle_id', 'sequence']);
+            $table->index(['organization_id', 'review_cycle_id', 'sequence'], 'review_cycle_competencies_org_cycle_seq_index');
         });
 
         Schema::create('performance_reviews', function (Blueprint $table) {
@@ -201,7 +201,7 @@ return new class extends Migration
 
             $table->timestamps();
 
-            $table->index(['organization_id', 'performance_review_id', 'sequence']);
+            $table->index(['organization_id', 'performance_review_id', 'sequence'], 'performance_review_items_org_review_seq_index');
         });
     }
 

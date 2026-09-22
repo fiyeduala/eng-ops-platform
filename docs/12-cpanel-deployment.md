@@ -111,6 +111,38 @@ Extensions** (or MultiPHP INI Editor).
 
 `php -m` on the server, compared against that list, is the whole check.
 
+### 2.2 Before you deploy a schema change
+
+The suite runs on in-memory SQLite (`phpunit.xml`), because speed is what makes a 1216-test suite
+something anybody actually runs. The cost is that SQLite forgives things MySQL refuses, and a green
+suite says nothing about the difference. It let twenty indexes ship with generated names longer than
+MySQL's 64-character identifier limit — which meant `php artisan migrate` at step 5 above could not
+complete at all, on any MySQL host, through nine green phases.
+
+So there is a second configuration that runs the same suite against the database this platform
+actually deploys to:
+
+```bash
+vendor/bin/phpunit -c phpunit.mysql.xml
+```
+
+It needs a local MySQL or MariaDB and a **scratch** database named by `DB_DATABASE` in that file:
+`RefreshDatabase` issues `migrate:fresh`, which drops every table it finds. Credentials come from
+`.env`, so there are none in the file.
+
+Run it before any deploy that carries a migration. It is far slower than the SQLite run, and that is
+the point — it is exercising real InnoDB tables, with the foreign keys and the identifier limits
+production has. What it catches that the SQLite run structurally cannot:
+
+| Difference | SQLite | MySQL / MariaDB |
+|------------|--------|-----------------|
+| Identifier length | unlimited | 64 characters, and `migrate` dies on the first one over |
+| `sql_mode` | no equivalent exists | `ONLY_FULL_GROUP_BY` and `STRICT_TRANS_TABLES` are live |
+| String concatenation | `a \|\| b` | `CONCAT(a, b)` |
+
+That last row is the only driver-specific branch in the application — `OrgUnitService::reparent()`,
+the §74 path rebuild — and under `phpunit.xml` its MySQL half never executes.
+
 ## 3. Cron (§82)
 
 cPanel → Cron Jobs → add **one** entry. Laravel's scheduler dispatches everything else.

@@ -122,7 +122,7 @@ return new class extends Migration
 
             $table->timestamps();
 
-            $table->index(['organization_id', 'quality_inspection_id', 'sort_order']);
+            $table->index(['organization_id', 'quality_inspection_id', 'sort_order'], 'quality_inspection_items_org_inspection_sort_index');
         });
 
         /*

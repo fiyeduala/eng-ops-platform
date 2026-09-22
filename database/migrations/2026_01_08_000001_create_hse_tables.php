@@ -345,7 +345,7 @@ return new class extends Migration
 
             $table->unique(['organization_id', 'number']);
             $table->index(['organization_id', 'project_id', 'status_id']);
-            $table->index(['organization_id', 'observation_type', 'risk_level']);
+            $table->index(['organization_id', 'observation_type', 'risk_level'], 'hse_observations_org_type_risk_index');
             $table->index(['organization_id', 'observed_at']);
         });
 
@@ -437,7 +437,7 @@ return new class extends Migration
 
             $table->timestamps();
 
-            $table->index(['organization_id', 'risk_assessment_id', 'sort_order']);
+            $table->index(['organization_id', 'risk_assessment_id', 'sort_order'], 'risk_assessment_hazards_org_assessment_sort_index');
             $table->index(['organization_id', 'risk_score']);
         });
 
@@ -518,7 +518,7 @@ return new class extends Migration
 
             $table->timestamps();
 
-            $table->index(['organization_id', 'hse_inspection_id', 'sort_order']);
+            $table->index(['organization_id', 'hse_inspection_id', 'sort_order'], 'hse_inspection_items_org_inspection_sort_index');
         });
 
         /*
@@ -799,7 +799,7 @@ return new class extends Migration
             $table->unique(['organization_id', 'number']);
             // "Whose tickets lapse in the next 60 days" — the only report this register is opened for.
             $table->index(['organization_id', 'expires_on']);
-            $table->index(['organization_id', 'user_id', 'training_course_id']);
+            $table->index(['organization_id', 'user_id', 'training_course_id'], 'training_records_org_user_course_index');
         });
     }
 

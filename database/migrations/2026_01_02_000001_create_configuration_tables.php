@@ -90,7 +90,7 @@ return new class extends Migration
             $table->timestamps();
 
             $table->unique(['organization_id', 'entity_type', 'from_status_id', 'to_status_id'], 'status_transitions_unique');
-            $table->index(['organization_id', 'entity_type', 'from_status_id']);
+            $table->index(['organization_id', 'entity_type', 'from_status_id'], 'status_transitions_org_entity_from_index');
         });
 
         // ------------------------------------------------------------------ numbering

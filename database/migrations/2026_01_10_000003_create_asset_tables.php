@@ -180,7 +180,7 @@ return new class extends Migration
             $table->timestamps();
 
             // No soft deletes. A handover is not withdrawn; a wrong one is corrected by another.
-            $table->index(['organization_id', 'asset_id', 'transferred_at']);
+            $table->index(['organization_id', 'asset_id', 'transferred_at'], 'asset_custody_transfers_org_asset_moved_index');
             $table->index(['organization_id', 'to_custodian_id']);
         });
 

@@ -255,8 +255,8 @@ return new class extends Migration
             $table->timestamp('created_at')->nullable();      // no updated_at: nothing updates
 
             $table->unique(['organization_id', 'number']);
-            $table->index(['organization_id', 'warehouse_id', 'stock_item_id', 'id']);
-            $table->index(['organization_id', 'stock_item_id', 'occurred_at']);
+            $table->index(['organization_id', 'warehouse_id', 'stock_item_id', 'id'], 'stock_transactions_org_warehouse_item_id_index');
+            $table->index(['organization_id', 'stock_item_id', 'occurred_at'], 'stock_transactions_org_item_occurred_index');
             $table->index(['organization_id', 'source_type', 'source_id']);
             $table->index(['organization_id', 'transfer_ref']);
             $table->index(['organization_id', 'project_id']);

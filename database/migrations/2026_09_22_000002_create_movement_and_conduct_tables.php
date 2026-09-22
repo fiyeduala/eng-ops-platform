@@ -93,7 +93,7 @@ return new class extends Migration
             $table->softDeletes();
 
             $table->unique(['organization_id', 'number']);
-            $table->index(['organization_id', 'employee_id', 'effective_on']);
+            $table->index(['organization_id', 'employee_id', 'effective_on'], 'employee_movements_org_employee_effective_index');
             // "What is approved and still waiting to take effect" — the one sweep this table needs.
             $table->index(['organization_id', 'status_id', 'effective_on']);
         });

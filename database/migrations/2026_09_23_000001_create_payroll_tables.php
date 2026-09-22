@@ -138,7 +138,7 @@ return new class extends Migration
             $table->decimal('rate', 12, 4)->default(0);          // per cent within this band
             $table->timestamps();
 
-            $table->index(['organization_id', 'pay_component_id', 'sequence']);
+            $table->index(['organization_id', 'pay_component_id', 'sequence'], 'pay_component_bands_org_component_seq_index');
         });
 
         /*
@@ -174,7 +174,7 @@ return new class extends Migration
             $table->timestamps();
             $table->softDeletes();
 
-            $table->index(['organization_id', 'employee_id', 'effective_from']);
+            $table->index(['organization_id', 'employee_id', 'effective_from'], 'employee_salaries_org_employee_effective_index');
         });
 
         /*
@@ -205,7 +205,7 @@ return new class extends Migration
             $table->timestamps();
             $table->softDeletes();
 
-            $table->index(['organization_id', 'employee_id', 'is_active']);
+            $table->index(['organization_id', 'employee_id', 'is_active'], 'employee_pay_components_org_employee_active_index');
         });
 
         /*
@@ -240,7 +240,7 @@ return new class extends Migration
             $table->timestamps();
             $table->softDeletes();
 
-            $table->index(['organization_id', 'employee_id', 'is_active']);
+            $table->index(['organization_id', 'employee_id', 'is_active'], 'employee_bank_accounts_org_employee_active_index');
         });
 
         /*

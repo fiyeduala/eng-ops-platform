@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         colors="true"
+>
+    <!--
+        THE SAME SUITE, AGAINST THE DATABASE THIS PLATFORM ACTUALLY DEPLOYS TO.
+
+        `phpunit.xml` runs on in-memory SQLite because it is fast, and fast is what makes a 1216-test
+        suite something anybody runs. The cost of that choice is that SQLite forgives things MySQL
+        refuses, and a green suite says nothing about either. It let twenty indexes ship with
+        generated names longer than MySQL's 64-character identifier limit, which meant `php artisan
+        migrate` could not complete against MySQL at all — not on a developer's machine and not in
+        the cPanel deployment docs/12 describes. Nine phases were green throughout.
+
+        So this configuration exists to be run before a deployment and after any migration change:
+
+            vendor/bin/phpunit -c phpunit.mysql.xml
+
+        It needs a MySQL or MariaDB server and a database named by DB_DATABASE below, which must NOT
+        be the one holding anything you want to keep — `RefreshDatabase` drops every table in it.
+        Credentials come from `.env`, so there are none in this file.
+
+        It is considerably slower than the SQLite run. That is the point: it is exercising real
+        InnoDB tables with real foreign keys, which is what production has.
+    -->
+    <testsuites>
+        <testsuite name="Unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
+        <testsuite name="Feature">
+            <directory>tests/Feature</directory>
+        </testsuite>
+    </testsuites>
+    <source>
+        <include>
+            <directory>app</directory>
+        </include>
+    </source>
+    <php>
+        <ini name="memory_limit" value="1G"/>
+        <env name="APP_ENV" value="testing"/>
+        <env name="APP_MAINTENANCE_DRIVER" value="file"/>
+        <env name="BCRYPT_ROUNDS" value="4"/>
+        <env name="BROADCAST_CONNECTION" value="null"/>
+        <env name="CACHE_STORE" value="array"/>
+
+        <!--
+            The separate database is not a convenience. `RefreshDatabase` issues `migrate:fresh`,
+            which drops every table it finds; pointed at the working database it would take the
+            development data with it, silently and on the first test.
+        -->
+        <env name="DB_CONNECTION" value="mysql"/>
+        <env name="DB_DATABASE" value="engops_test"/>
+        <env name="DB_URL" value=""/>
+
+        <env name="MAIL_MAILER" value="array"/>
+        <env name="QUEUE_CONNECTION" value="sync"/>
+        <env name="SESSION_DRIVER" value="array"/>
+        <env name="PULSE_ENABLED" value="false"/>
+        <env name="TELESCOPE_ENABLED" value="false"/>
+        <env name="NIGHTWATCH_ENABLED" value="false"/>
+    </php>
+</phpunit>
