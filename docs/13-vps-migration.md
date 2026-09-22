@@ -18,9 +18,10 @@ VPS is therefore a configuration and infrastructure exercise — no module is re
 | Deploy | git pull | atomic releases (Deployer) | none |
 | TLS | cPanel AutoSSL | Caddy / certbot | none |
 
-Because `FILESYSTEM_DISK` and `PRIVATE_DISK` are read from configuration everywhere — and the
-document controller always streams through a policy check rather than exposing a URL — moving files
-to S3 does not weaken the authorization model.
+Because no engine ever names a path or a driver — the private disk is `config/filesystems.php`'s
+`local`, rooted at `storage/app/private`, and every model that stores a file names its disk by
+constant — and because the controllers always stream through a policy check rather than exposing a
+URL, moving files to S3 is a disk-config change and does not weaken the authorization model.
 
 ## 2. Target topology
 

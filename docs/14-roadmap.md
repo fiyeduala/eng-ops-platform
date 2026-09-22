@@ -532,6 +532,9 @@ reaching zero people since Phase 7. All three are now qualified as `permissions.
 **Exit criteria: met.** The §89 drill-down path works end to end (`DrilldownTest`,
 `ProjectCommandCenterTest`) and search returns exactly the index-page result set (`GlobalSearchTest`).
 
+**Phase totals at close: 1109 tests, 7081 assertions, green** — the full suite, no paths named, in
+42m36s. Phase 8 added 85 tests to the 1024 standing at its start.
+
 ## PHASE 9 — Hardening ⬜
 
 Security review · full authorization test matrix (IDOR, scope escape, notification leakage, search
