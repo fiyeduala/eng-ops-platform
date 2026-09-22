@@ -68,7 +68,7 @@ class ApprovalController extends Controller
 
         /** @var LengthAwarePaginator $rows */
         $rows = $query
-            ->with(['stage', 'instance.subject', 'instance.starter:id,name'])
+            ->with(['stage', 'instance.subject', 'instance.starter:id,name', 'instance.workflow:id,name'])
             ->orderByRaw('CASE WHEN due_at IS NULL THEN 1 ELSE 0 END')
             ->orderBy('due_at')
             ->orderByDesc('id')

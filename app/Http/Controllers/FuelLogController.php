@@ -284,8 +284,12 @@ class FuelLogController extends Controller
     /** @return array<int|string,string> */
     private function vehicleOptions(User $user): array
     {
+        // displayName() reads the asset's name, so the asset has to come with the vehicle. Without
+        // this the picker lazy-loads once per vehicle — which §89 forbids outright, and which the
+        // lazy-loading guard turns into a 500 rather than a slow page.
         return $this->compiler
             ->apply(Vehicle::query(), $user, 'vehicle.view')
+            ->with('asset:id,name')
             ->orderBy('registration_number')->limit(500)->get()
             ->mapWithKeys(fn (Vehicle $v) => [$v->id => $v->displayName()])
             ->all();
