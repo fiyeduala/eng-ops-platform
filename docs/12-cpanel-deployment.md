@@ -52,7 +52,29 @@ php artisan storage:link          # if the symlink is disallowed, create it in c
 
 # 7. Caches (re-run after every deploy)
 php artisan config:cache && php artisan route:cache && php artisan view:cache && php artisan event:cache
+
+# 8. THE COMPANY AND THE FIRST ACCOUNT. Nothing above creates either.
+php artisan engops:install \
+    --name="Harmattan Engineering" \
+    --admin-name="Adaeze Okonkwo" \
+    --admin-email=adaeze@harmattan.example \
+    --timezone=Africa/Lagos --currency=NGN
+#    Prints a generated password ONCE. Copy it before you close the terminal.
+#    Run it after step 5, never before: an administrator created ahead of the
+#    permission catalogue holds an empty grant set, and the command refuses.
+
+# 9. Check what you just built.
+php artisan engops:verify-restore
 ```
+
+**Step 8 is not optional and has no UI equivalent.** `OrganizationProvisioner` builds a complete
+company — roles, statuses, numbering schemes, option lists, every workflow — and creates **no
+user**, and `is_super_admin` is deliberately not fillable, so there is no screen, seeder or
+signup route anywhere in the system that can produce the first account. Without this step a
+correct install following every instruction above ends at a sign-in screen that nobody can get
+past. The command is the only supported way to make one, it can only be run from a shell, and
+the account it creates is held on the change-password screen until the printed password is
+replaced (§92).
 
 Assets are built in CI or locally (`npm run build`) and the `public/build` output is deployed —
 **no Node runtime is required on the server**.
@@ -170,6 +192,13 @@ MAIL_FROM_NAME="Your Company Operations"
 LOG_CHANNEL=daily              LOG_LEVEL=warning
 ```
 
+**`APP_DEBUG=false` is a disclosure control, not a tidiness setting.** `.env.example` ships
+`APP_DEBUG=true`, and step 4 copies it — so this is a line an operator has to change, on a file
+that already looks finished. Left true, an unhandled error renders a full stack trace to whoever
+triggered it: file paths, the framework version, the failing query, environment values, and a
+fragment of the row being written. Set false, the same error renders `resources/views/errors/500`,
+which says what happened, gives a timestamp to quote, and discloses nothing (§84).
+
 **There is no `PRIVATE_DISK` setting.** `config/filesystems.php` roots the `local` disk at
 `storage/app/private`, so `local` **is** the private disk — everything an authorization check stands
 between (documents, drawings, exports, daily briefings) is already outside the document root, with
@@ -239,12 +268,17 @@ failed deploy can be rolled back by `git checkout` without a schema restore.
 
 ## 10. Backups (§85)
 
-> **Status: operator procedure, not a platform feature.** There is no `BackupService`, no
-> `backup_runs` table and no backup-age tile in this build. Backups are cPanel's scheduled
-> `mysqldump` plus the host's own account backup, arranged by whoever installs the system. Phase 9
-> owns the decision about whether a backup **record** belongs in the application at all — a platform
-> that claims to be watching a backup it is not actually running is worse than one that says nothing.
-> Until then, treat the table below as the runbook to follow by hand.
+> **Decided (Phase 9): no backup engine, and a restore verifier instead.** There is no
+> `BackupService`, no `backup_runs` table and no backup-age tile, and there will not be one.
+> The dump is written by cPanel's scheduler, the offsite copy is pushed by the host, and the file
+> archive is somebody's rsync — this application starts none of it, observes none of it, and
+> cannot fail when it fails. A `backup_runs` table would record only what somebody remembered to
+> type in, and a tile reading "last backup: 6 hours ago" would carry exactly that much authority
+> while stopping anyone else from checking.
+>
+> What the platform *can* honestly do is the other half of §85 — *an untested backup is not a
+> backup*. Restoring is testable, because the restored copy is right there. That is
+> `engops:verify-restore`, below.
 
 | Asset | Method | Retention |
 |-------|--------|-----------|
@@ -257,6 +291,33 @@ The private files line is the one people skip, and it is the one that cannot be 
 database holds the `documents` and `exports` rows, but every drawing, certificate and signed PDF
 lives in `storage/app/private` and exists nowhere else.
 
-**Recovery drill (documented, quarterly):** restore dump to a scratch DB → point a staging `.env` at
-it → `php artisan migrate:status` → smoke-test login, a project, a document download → record RTO.
-An untested backup is not a backup.
+### Recovery drill (quarterly)
+
+```bash
+# 1. Load the dump into a scratch database, and unpack the file archive beside it.
+mysql -u user_drill -p user_drill < engops-2026-09-21.sql
+tar xzf engops-private-2026-09-21.tar.gz -C /home/user/drill/storage/app/
+
+# 2. Point a staging .env at BOTH. Not the live database — a drill run against the
+#    original proves nothing about the copy.
+
+# 3. Ask the application whether what you have is usable.
+php artisan engops:verify-restore --files=0
+
+# 4. Then do the part no command can do: sign in, open a project, download a document.
+#    Record how long steps 1–4 took. That number is your RTO.
+```
+
+`engops:verify-restore` checks four things, each of which is a way a restore is quietly useless:
+
+| Check | The failure it catches |
+|-------|------------------------|
+| **schema** | The dump and the checkout are at different migration counts. Older dump → the first query touching a newer column fails, *in use*, after somebody has started working. Newer dump → nothing complains at all, and the older code writes rows the newer constraints expect to be populated. |
+| **access** | `permissions` came back empty. `AccessResolver` fails closed, so every account — including the owner's — signs in successfully and reaches nothing. No error anywhere; the system just looks empty. |
+| **companies** | A company with no active, non-deleted `is_super_admin`. Every table intact, every file present, and nobody who can configure it. `engops:install` will not touch an existing company and is right not to, so the only fixes are a different dump or a direct `UPDATE` — and you need to know that *now*, while the other dumps still exist. |
+| **files** | Rows pointing at files the archive does not have. Sampled newest-first by default, because if the two backups are out of step it is the most recent uploads that are missing — a sample from the other end comes back clean on exactly the database where this matters. `--files=0` checks every one. |
+
+**What it cannot tell you, and says so on every run:** whether a backup ran, when it ran, whether
+a copy went offsite, or how old this one is. Nothing inside the application can see any of that.
+Scheduling and offsite retention stay in cPanel, where they actually happen, and verifying them is
+a human looking at cPanel — not a green tile in here.
