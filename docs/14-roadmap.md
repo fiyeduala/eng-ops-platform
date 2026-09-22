@@ -535,64 +535,112 @@ reaching zero people since Phase 7. All three are now qualified as `permissions.
 **Phase totals at close: 1109 tests, 7081 assertions, green** — the full suite, no paths named, in
 42m36s. Phase 8 added 85 tests to the 1024 standing at its start.
 
-## PHASE 9 — Hardening ⬜
+## PHASE 9 — Hardening ✅
 
 Security review · full authorization test matrix (IDOR, scope escape, notification leakage, search
 leakage, file access) · N+1 and query-count budgets · load sanity check · error handling and
 friendly error pages · backup and restore drill · deployment runbook · demo seed data · user
 documentation.
 
-**What this phase is actually for.** Every previous phase proved its own surface. Nothing so far has
-tried to prove that a *reader* cannot get somewhere, systematically, across all of them at once —
-and the Phase 8 close showed exactly why that gap matters. Three call sites asked for a permission
-holder by a column that does not exist, matched nobody, and passed every suite in the codebase for
-two phases, because no test ever asserted that the query returned somebody. A test that only
-exercises the happy path cannot distinguish "correctly denied" from "silently broken", and this
-phase is the one that has to.
+**What this phase was for.** Every previous phase proved its own surface. Nothing had tried to prove
+that a *reader* cannot get somewhere, systematically, across all of them at once — and the Phase 8
+close showed why that gap mattered. Three call sites asked for a permission holder by a column that
+does not exist, matched nobody, and passed every suite in the codebase for two phases, because no
+test ever asserted that the query returned somebody. A test that only exercises the happy path
+cannot distinguish "correctly denied" from "silently broken". Every defect found in this phase is of
+that shape: green suite, correct status codes, nothing to report.
 
-- **Part 1 — the authorization matrix.** One test per register, driven from a table rather than
-  written out by hand: for each of {owner, same department, other department, other organization,
-  no role}, every one of {index, show, create, update, delete, export, download, drill-down} answers
-  200 or 403/404, and the expected answer is written down before the test runs. §84 and §94: URL ids
-  are re-proven, hidden fields are ignored, client-supplied status values are refused, and Org A
-  never reaches Org B (§75). **Every case must assert a positive somewhere** — a matrix whose rows
-  are all denials is a matrix that would stay green if the whole application stopped working.
-- **Part 2 — the silences.** The failure shape Phase 8 found, generalised. A permission holder
-  lookup that returns nobody, a notification whose audience resolves to zero, a search that finds
-  nothing, an escalation that escalates to no one: each of these is *indistinguishable from working*
-  unless something asserts the non-empty case. Regression tests owed specifically for
-  `EscalationService::holdersOf()`, `NotifyWorkflowStalled`, `ExecutiveBriefing::recipients()` and
-  every `Audience` resolution — plus keeping the static detector written during Phase 8 as a
-  repository check, since `whereHas` closures silently resolving against the outer table is a defect
-  class, not one bug.
-- **Part 3 — query budgets.** §89. A ceiling per page, asserted, not eyeballed: the executive board,
-  the project command center, every index with a status filter, and the drill-down path. The daily
-  report gets its own budget because it composes a board per recipient on a cron-timed minute.
-- **Part 4 — the two spanning walkthroughs, carried in from Phase 7.** Proven surface by surface but
-  never as one continuous act. §73: an empty tenant to a routed, numbered, reportable register
-  entirely through the screens, by somebody with no database access. §74: reorganizing a department
-  tree and re-checking every reach that depended on it afterwards — the test is what happens to
-  dashboards, saved filters and in-flight approvals when a department moves under a different
-  division mid-approval.
-- **Part 5 — deployment truth.** The Phase 8 pre-deploy read of `docs/12` found a documented
-  `ProductionSeeder` that does not exist, a second queue cron that would have doubled the workers,
-  a `PRIVATE_DISK` setting read by nothing, and a backup engine described in the present tense that
-  was never built. Those are corrected in the doc; this part owes the rest. A real first-run path
-  for a production install; a decision on whether a backup **record** belongs in the application at
-  all (a platform that claims to be watching a backup it does not run is worse than one that says
-  nothing); friendly 403/404/419/500/503 pages that do not leak whether a record exists; and the
-  restore drill actually performed against a scratch database, with the RTO measured rather than
-  estimated.
-- **Part 6 — demo seed data and user documentation.** `DemoSeeder` exists and is good; what it lacks
-  is a safe gate. It is currently skipped in production unless `--force` is passed — but `--force` is
-  the flag an operator **must** pass to seed anything in production at all, so the guard inverts
-  under exactly the conditions it exists for. That is a fix, not a feature. Then the walkthrough
-  documentation a non-developer administrator actually needs, which is §73's other half.
+**Delivered (completed 2026-09-22):**
 
-**Exit criteria:** the authorization matrix is green and contains positive cases; no query budget is
-exceeded; both spanning walkthroughs pass end to end; a restore drill is documented with a measured
-RTO; and a production install can be completed from `docs/12` alone, by somebody who has not read
-this repository.
+- **Part 1 — every route asked the three questions nobody had asked them** (`20a4d11`): all 957
+  authenticated routes put under a question by three files. `RouteGateTest` names the 18 routes with
+  no `permission:` middleware and the reason each may be open, so a route that forgets its gate
+  joins that list as a failure rather than as a hole. `CrossTenantRouteTest` asks §75 with a full
+  *administrator* of a second company — every permission the catalogue defines — against all 248 of
+  Meridian's record-bound URLs, reads and writes, each one opened by Meridian's own administrator
+  first so that a 404 for a broken page cannot be mistaken for isolation. `NestedRecordRouteTest`
+  asks §84/§94 where the framework refuses nothing: a legitimate administrator, one company, only
+  the *parent* id in the URL wrong. **Found:** `goods-receipts.edit` was a live 500 nothing had ever
+  opened — one confidentiality select missing `?->value` — fixed at the call site and then in the
+  component, where 465 tags get it for free.
+- **Part 2 — the silences** (`57a0052`): the Phase 8 failure shape, generalised. A query that
+  returns nobody is the only failure with no symptom, and `[]` is also what a correct answer looks
+  like. `AudienceResolutionTest` covers all ten branches of `Audience::resolve()` by equality
+  against a *named* set rather than `assertNotEmpty`, each positive paired with the exclusion that
+  gives it meaning. `EscalationLadderTest` is the first test `EscalationService` has ever had and
+  asserts each §25 rung by name — level 2 resolving to the assignee again satisfies "somebody was
+  told" while disabling the feature. **Found:** level 3 resolved through an unqualified `name` that
+  binds to `roles.name` in the correlated subquery, asking which roles are *titled*
+  "approval.reassign". The fixture role is called "Operations Desk" on purpose.
+- **Part 3 — the cost nobody was counting** (`df3876e`): `preventLazyLoading()` sees relations. It
+  does not see a permission asked once per row, a status vocabulary re-read per record, or a
+  presenter that resolves a label from the database — all legal, all free on a three-row fixture,
+  and all of what a two-hundred-row register costs. `QueryTally` keeps every statement in order,
+  because "63 queries" is true and useless and the sentence that names the fix is which statement
+  ran 25 times. §89 budgets on the executive board, the command centers, the filtered indexes and
+  the drill-down, with growth assertions rather than ceilings alone: a ceiling is a fact about
+  today's eager-load list, and kept alone it teaches a maintainer to raise it.
+- **Part 4 — two walkthroughs, and the two silent refusals they found** (`dc6eb46`): §73 and §74 as
+  one continuous act. **Found:** `ScopeCompiler` could not resolve a scope for
+  `WorkflowStageInstance` — its subject hangs off a polymorphic pair — and fell through to
+  `1 = 0`, so **every department- and project-scoped `approval.*` grant in the system selected no
+  rows**, which is six of the shipped role templates. The suite could not see it because every
+  approver fixture granted at `organization` scope, which compiles to `1 = 1`, the one value that
+  cannot distinguish a working scope predicate from a broken one. Nor could a user report it: the
+  inbox filters by the subject's own policy, so the row was there, the record opened, and approve
+  returned 403. A dead button, not an empty inbox. Closed by denormalising the subject's unit and
+  project onto `workflow_instances` — copied rather than followed, because `whereHasMorph` is a
+  UNION per subject type on the hottest authorized query in the application — and refreshed on every
+  advance, because §74 says a record that moves takes its in-flight approvals with it.
+  **Also found:** `OrgUnitService::bumpPermissions()` bumped the cross-request permissions version
+  and never flushed `ActorProfile`, the in-process memo of which units a person sits under. Inside
+  one HTTP request that is correct — the org chart cannot move underneath you. A queue worker is
+  started from cron and runs until `--max-time` (§81, §82), so one container serves every job in
+  that window: a reorganization would have been invisible to escalation notices, the daily report
+  and digest mail until the worker happened to exit, addressing a department to the division it used
+  to sit under. That is §68 failing, not a stale screen. Every other service that changes somebody's
+  reach already flushed there; the one that reshapes the whole tree did not.
+- **Part 5 — the install nobody could finish, and the page that told everyone everything**
+  (`58fe93f`): **found** that the first administrator could not be created at all.
+  `OrganizationProvisioner` builds a complete company and no user; `is_super_admin` is deliberately
+  not fillable, so no screen, seeder or route could produce one, and the only place in the repo that
+  ever set it was a line in a test. A documented install ended at a sign-in screen nobody could get
+  past. `engops:install` is now step 8 of docs/12. **Also found:** `resources/views/errors/` did not
+  exist, so every refusal rendered Symfony's stock page and — with the `APP_DEBUG=true` that
+  `.env.example` ships — a 500 rendered a stack trace, the failing query and a fragment of the row
+  being written. Seven views now, asserted on the body: a record belonging to another company and a
+  record that never existed must produce the same bytes, because any difference is an oracle.
+- **Part 6 — the verifier that refused a healthy database, and the walk nobody had written down**
+  (`cadc87b`): **found**, in this phase's own part 5, that `engops:verify-restore` counted
+  administrators as `is_super_admin` and nothing else. Administration is `setting.manage` — the
+  `managing-director` template says so in as many words — so the verifier refused both demo
+  companies and would refuse any real company that delegated administration under §10. The count now
+  mirrors `AccessResolver`'s conditions, including the assignment window and the department pin.
+  `SeedGuardTest` pins the `--force` inversion corrected at the Phase 8 close, by running the
+  documented production command rather than the test helper. And `docs/17` is §73's other half: the
+  walkthrough a non-developer administrator actually needs, with `WalkthroughDocumentTest` resolving
+  every screen it names against the navigation the application builds.
+
+**Three decisions in this phase were to refuse the comfortable answer:**
+
+- **Two nested routes answered 302 and looked like leaks** (part 1). They were not — the FormRequest
+  rejected an empty body before the controller ran. Declaring them as exceptions would have been
+  tidy and wrong: an empty-body probe stays green with the ownership check *deleted*.
+- **Nothing is backfilled onto existing workflow instances** (part 4). An instance untouched since
+  the migration has nothing to say about where its subject lives today, and inventing an answer
+  would be worse than the one row that refreshes on its next advance.
+- **The restore drill measures the RTO rather than estimating it** (part 5), and the error layout is
+  proved to need no database by rendering all six pages with the default connection pointed at a
+  path that cannot be opened.
+
+**Exit criteria: met.** The authorization matrix is green and every case asserts a positive
+somewhere; no query budget is exceeded; both spanning walkthroughs pass end to end; the restore
+drill is documented with a measured RTO; and a production install can now be completed from `docs/12`
+alone — which before this phase it could not, at step 8.
+
+**Phase totals at close: 1216 tests, 8021 assertions, green** — the full suite, no paths named, in
+46m00s. Phase 9 added 107 tests to the 1109 standing at its start, and every defect named above was
+invisible to those 1109.
 
 ---
 
