@@ -58,7 +58,12 @@ return [
             'prefix' => '',
             'prefix_indexes' => true,
             'strict' => true,
-            'engine' => null,
+            // Shared hosts (cPanel in particular) still ship MyISAM as the server default,
+            // whose 1000-byte index limit rejects this schema's first migration outright:
+            // a utf8mb4 varchar(255) primary key needs 1020. InnoDB is required regardless
+            // of index width — the platform leans on transactions and foreign keys — so
+            // name it rather than inherit whatever the host happens to prefer.
+            'engine' => env('DB_ENGINE', 'InnoDB'),
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 (PHP_VERSION_ID >= 80500 ? Mysql::ATTR_SSL_CA : PDO::MYSQL_ATTR_SSL_CA) => env('MYSQL_ATTR_SSL_CA'),
             ]) : [],
@@ -78,7 +83,12 @@ return [
             'prefix' => '',
             'prefix_indexes' => true,
             'strict' => true,
-            'engine' => null,
+            // Shared hosts (cPanel in particular) still ship MyISAM as the server default,
+            // whose 1000-byte index limit rejects this schema's first migration outright:
+            // a utf8mb4 varchar(255) primary key needs 1020. InnoDB is required regardless
+            // of index width — the platform leans on transactions and foreign keys — so
+            // name it rather than inherit whatever the host happens to prefer.
+            'engine' => env('DB_ENGINE', 'InnoDB'),
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 (PHP_VERSION_ID >= 80500 ? Mysql::ATTR_SSL_CA : PDO::MYSQL_ATTR_SSL_CA) => env('MYSQL_ATTR_SSL_CA'),
             ]) : [],
