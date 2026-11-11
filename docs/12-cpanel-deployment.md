@@ -33,7 +33,10 @@ $app = require_once __DIR__.'/../engops/bootstrap/app.php';
 ```bash
 # 1. Create the MySQL database + user in cPanel, grant ALL PRIVILEGES.
 # 2. Clone (cPanel → Git Version Control, or SSH):
-cd ~ && git clone git@github.com:fiyeduala/eng-ops-platform.git engops && cd engops
+cd ~ && git clone https://github.com/fiyeduala/eng-ops-platform.git engops && cd engops
+#    HTTPS, not SSH: the repo is public, so a fresh host needs no deploy key. Clone to ~/engops
+#    and REPOINT the document root at ~/engops/public. Never clone into the docroot cPanel made
+#    for the domain — that serves .env and storage/app/private over HTTP.
 
 # 3. Dependencies — production only, no dev packages.  CHECK §2.1 FIRST: this step
 #    fails outright on a host with gd, zip or the XML extensions switched off.
