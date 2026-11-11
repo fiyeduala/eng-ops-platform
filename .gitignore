@@ -14,7 +14,13 @@
 /.zed
 /auth.json
 /node_modules
-/public/build
+# /public/build is deliberately TRACKED. The deploy target is cPanel shared hosting with no
+# Node runtime, so the server cannot run `npm run build` — the compiled CSS/JS has to arrive
+# with the clone or the site serves unstyled HTML. Vite empties this directory on every build
+# (outDir is inside the project root, so emptyOutDir defaults on), so the hashed filenames
+# are replaced rather than accumulated, and the raw files delta-compress between versions
+# in a way a gzipped build archive would not. Run `npm run build` before committing a change
+# to anything under resources/css or resources/js.
 /public/hot
 /public/storage
 /storage/*.key

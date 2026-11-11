@@ -81,8 +81,16 @@ first sign-in — the org chart, the statuses, the numbering, the registers, the
 theirs to do on screens, and it is written for somebody who does not have a shell and should not
 need one (§73).
 
-Assets are built in CI or locally (`npm run build`) and the `public/build` output is deployed —
-**no Node runtime is required on the server**.
+Assets are built locally (`npm run build`) and **`public/build` is committed to the repository**, so a
+clone arrives with the compiled CSS and JS already in place and **no Node runtime is required on the
+server**. This is the one build artifact the repo tracks on purpose: a shared host cannot run Vite, and
+a deploy that forgets to copy the assets across separately does not fail loudly — it serves unstyled
+HTML, which reads as a broken product rather than a missed step. Vite empties `public/build` on every
+run, so the hashed filenames are replaced rather than accumulated.
+
+Deploying an asset change is therefore `npm run build`, commit, push, `git pull` on the server. If the
+server still holds an untracked `public/build` from an earlier manual upload, remove it first with
+`rm -rf public/build` — git refuses to overwrite untracked files on pull.
 
 > **Never run a bare `php artisan db:seed --force` on a production install.** `PermissionSeeder` is
 > application structure — the resolver fails closed, so a system without the catalogue grants
