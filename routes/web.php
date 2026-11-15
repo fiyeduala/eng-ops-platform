@@ -56,6 +56,7 @@ use App\Http\Controllers\KpiDefinitionController;
 use App\Http\Controllers\LeaveRequestController;
 use App\Http\Controllers\LeaveSettingsController;
 use App\Http\Controllers\LocationController;
+use App\Http\Controllers\MapController;
 use App\Http\Controllers\MaterialRequestController;
 use App\Http\Controllers\MeetingController;
 use App\Http\Controllers\MemoController;
@@ -337,6 +338,21 @@ Route::middleware(['auth', 'password.current'])->group(function () {
         ->middleware('permission:location.edit')->name('locations.update');
     Route::delete('locations/{location}', [LocationController::class, 'destroy'])
         ->middleware('permission:location.delete')->name('locations.destroy');
+
+    // --- site map ------------------------------------------------------------------------------
+    //
+    // Two routes, one permission, no bindings. The page and its data are separate URLs because the
+    // data is the part that varies by viewer: it is authorized on its own request rather than
+    // inherited from whoever rendered the HTML, and the map can refresh without a page load.
+    //
+    // `sitemap.view` opens the screen. It does not widen anything: the locations come back through
+    // ScopeCompiler under `location.view`, and each count on a pin is gated on its own module's
+    // permission inside the controller (§6). A viewer who holds only this sees an empty map.
+
+    Route::get('map', [MapController::class, 'index'])
+        ->middleware('permission:sitemap.view')->name('map.index');
+    Route::get('map/locations', [MapController::class, 'locations'])
+        ->middleware('permission:sitemap.view')->name('map.locations');
 
     // --- projects ------------------------------------------------------------------------------
     //

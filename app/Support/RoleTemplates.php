@@ -104,6 +104,14 @@ final class RoleTemplates
         // (org_unit.edit, location.create, role.edit) are deliberately absent.
         'org_unit.view' => 'organization',
         'location.view' => 'organization',
+
+        // The map of those locations (§3). In the baseline for the same reason location.view is:
+        // it carries no fact that record does not already carry — name, code, type, city, the
+        // coordinates and the geofence — and it is the register drawn differently rather than a
+        // wider grant. The per-pin counts are NOT covered by this; each is gated on its own
+        // module's permission inside MapController and omitted entirely without it, so two people
+        // holding this see the same pins and different numbers.
+        'sitemap.view' => 'organization',
         'position.view' => 'organization',
         'role.view' => 'organization',
         'status.view' => 'organization',   // the words "In progress" and "Blocked"

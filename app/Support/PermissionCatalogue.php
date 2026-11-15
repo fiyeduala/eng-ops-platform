@@ -258,6 +258,16 @@ final class PermissionCatalogue
             // company that has more than one person — and because the arrangement decides what
             // everybody else's screen says, while a view permission decides only your own.
             'dashboard' => ['Intelligence', 'Dashboards', ['view', 'view_executive', 'view_department', 'manage']],
+
+            // The site map (§3). ONE permission, `view`, and deliberately no more: the map writes
+            // nothing and owns no records — it is a second way of looking at locations, projects,
+            // assets, people and visitors, all of which have their own permissions already.
+            //
+            // Holding this does NOT widen what anybody can see. Each number the map puts on a pin
+            // is counted behind its own module's permission and omitted entirely when the viewer
+            // lacks it, because a map that aggregates five modules is five chances to leak a count
+            // to somebody who may not open the records behind it (§6, §61).
+            'sitemap' => ['Intelligence', 'Site Map', ['view']],
         ];
     }
 

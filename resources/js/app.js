@@ -7,6 +7,7 @@ import checklistTable from './checklist-table';
 import criteriaTable from './criteria-table';
 import hazardTable from './hazard-table';
 import precautionTable from './precaution-table';
+import siteMap from './site-map';
 import collapse from '@alpinejs/collapse';
 import focus from '@alpinejs/focus';
 
@@ -96,6 +97,15 @@ Alpine.data('attendanceSheet', attendanceSheet);
  * The precaution template on a permit type (Phase 4).
  */
 Alpine.data('precautionTable', precautionTable);
+
+/*
+ * The site map (§3).
+ *
+ * The factory registered here is a few kilobytes; Leaflet and its stylesheet are imported inside
+ * the component's init(), so they are a separate chunk that only this one screen fetches. Every
+ * other page in the application pays nothing for the map being in the build.
+ */
+Alpine.data('siteMap', siteMap);
 
 window.Alpine = Alpine;
 Alpine.start();

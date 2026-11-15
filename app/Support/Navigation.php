@@ -115,6 +115,14 @@ class Navigation
                         'permission' => 'position.view', 'active' => 'positions.*'],
                     ['label' => 'Locations', 'route' => 'locations.index', 'icon' => 'pin',
                         'permission' => 'location.view', 'active' => 'locations.*'],
+
+                    // Next to Locations rather than under the boards: somebody looking for where
+                    // the company works looks here, and the map is a second view of this register
+                    // rather than a dashboard. Gated on `sitemap.view` alone — the pins and their
+                    // counts are each re-gated server-side, so this entry is an affordance and
+                    // never the authorization (§96).
+                    ['label' => 'Site map', 'route' => 'map.index', 'icon' => 'map',
+                        'permission' => 'sitemap.view', 'active' => 'map.*'],
                 ],
             ],
             [

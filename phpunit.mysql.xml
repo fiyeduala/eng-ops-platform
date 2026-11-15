@@ -14,7 +14,12 @@
         migrate` could not complete against MySQL at all — not on a developer's machine and not in
         the cPanel deployment docs/12 describes. Nine phases were green throughout.
 
-        So this configuration exists to be run before a deployment and after any migration change:
+        SQLite also accepts a GROUP BY that MySQL rejects outright: under ONLY_FULL_GROUP_BY, which
+        `strict => true` turns on, a SELECT naming a column that is neither grouped nor aggregated
+        is an error rather than an invented row.
+
+        So this configuration exists to be run before a deployment, after any migration change, and
+        after any change to a grouped or aggregated query:
 
             vendor/bin/phpunit -c phpunit.mysql.xml
 
